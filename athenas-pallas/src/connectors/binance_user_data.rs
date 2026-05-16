@@ -4,13 +4,14 @@ use crate::connectors::MarketConnector;
 use crate::engine::EngineHandle;
 use crate::error::{Error, Result};
 use crate::events::{AccountEvent, Event};
+use crate::integration::ws_connect_async;
 use crate::types::{Asset, InstrumentId, OrderId, OrderStatus, OrderType, Side, Symbol};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::Value;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 /// REST + WebSocket user stream (`executionReport`, balances).
 #[derive(Clone, Debug)]
@@ -192,7 +193,7 @@ impl MarketConnector for BinanceUserDataStream {
             self.ws_base.trim_end_matches('/'),
             key
         );
-        let (ws, _) = connect_async(&url).await?;
+        let (ws, _) = ws_connect_async(&url).await?;
         let (mut write, mut read) = ws.split();
 
         while let Some(msg) = read.next().await {

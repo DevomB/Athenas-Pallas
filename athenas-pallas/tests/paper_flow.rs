@@ -2,7 +2,7 @@ use athenas_pallas::dispatch_event;
 use athenas_pallas::events::{Event, MarketEvent, OrderIntent, OrderIntentSource};
 use athenas_pallas::execution::{PaperConfig, PaperGateway};
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
-use athenas_pallas::state::{GlobalState, InstrumentMeta};
+use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
 use athenas_pallas::types::{Asset, InstrumentId, OrderType, Side};
 use rust_decimal::Decimal;
@@ -52,7 +52,8 @@ async fn paper_market_updates_balances() {
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
     balances.insert(Asset("BTC".into()), Decimal::ZERO);
 
-    let mut state = GlobalState::new(instruments, balances);
+    let registry = InstrumentRegistry::from_instruments(instruments);
+    let mut state = GlobalState::new(registry, balances);
     let mut strat = OneShot {
         inst: inst.clone(),
         fired: false,

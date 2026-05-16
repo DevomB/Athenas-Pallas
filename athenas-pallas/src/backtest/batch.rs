@@ -150,6 +150,7 @@ mod tests {
     use crate::events::OrderIntent;
     use crate::execution::{PaperConfig, SimGateway};
     use crate::risk::PauseCheck;
+    use crate::instrument::InstrumentRegistry;
     use crate::state::InstrumentMeta;
     use crate::strategy::{Strategy, StrategyContext};
     use crate::types::Asset;
@@ -176,7 +177,7 @@ mod tests {
         let mut balances = HashMap::new();
         balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
         balances.insert(Asset("BTC".into()), Decimal::ZERO);
-        GlobalState::new(instruments, balances)
+        GlobalState::new(InstrumentRegistry::from_instruments(instruments), balances)
     }
 
     fn mk_events(inst: InstrumentId, ts: OffsetDateTime) -> Vec<Event> {

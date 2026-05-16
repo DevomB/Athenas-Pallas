@@ -1,0 +1,10 @@
+{
+  "instruments": [
+    {
+      "exchange": "binance",
+      "symbol": "BTCUSDT",
+      "base": "BTC",
+      "quote": "USDT"
+    }
+  ]
+}

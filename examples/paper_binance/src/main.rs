@@ -14,7 +14,7 @@ use athenas_pallas::engine::{EngineBuilder, EngineConfig};
 use athenas_pallas::events::{Event, MarketEvent, OrderIntent};
 use athenas_pallas::execution::{PaperConfig, PaperGateway};
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
-use athenas_pallas::state::{GlobalState, InstrumentMeta};
+use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
 use athenas_pallas::types::{Asset, InstrumentId, OrderType, Side};
 use rust_decimal::Decimal;
@@ -80,16 +80,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
     balances.insert(Asset("BTC".into()), Decimal::ZERO);
 
-    let state = GlobalState::new(instruments, balances);
+    let registry = InstrumentRegistry::from_instruments(instruments);
+    let state = GlobalState::new(registry, balances);
     let strategy = DemoStrategy {
         instrument: instrument.clone(),
         fired: false,
     };
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
+    let risk = RiskPipeline::new(vec![
+        Box::new(PauseCheck::default()),
+        Box::new(athenas_pallas::risk::TradingDisabledCheck::default()),
+    ]);
     let exec = Arc::new(PaperGateway::new(PaperConfig::default()));
 
-    let (handle, _join) = EngineBuilder::spawn(
-        EngineConfig::default(),
+    let (handle, _join, _audit) = EngineBuilder::spawn(
+        EngineConfig {
+            command_channel_capacity: Some(64),
+            ..EngineConfig::default()
+        },
         state,
         strategy,
         risk,

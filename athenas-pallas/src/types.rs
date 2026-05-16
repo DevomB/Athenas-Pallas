@@ -6,6 +6,16 @@ use std::fmt;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// Whether the strategy may submit new orders (market/account/control still run).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradingState {
+    /// Algorithmic order flow from [`crate::strategy::Strategy`] is allowed (subject to risk).
+    #[default]
+    Enabled,
+    /// Strategy hook is skipped; market and account updates still apply (barter-style “trading off”).
+    Disabled,
+}
+
 /// Exchange identifier (e.g. Binance).
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ExchangeId(pub String);
@@ -27,7 +37,7 @@ impl fmt::Display for Symbol {
 }
 
 /// Instrument = exchange + symbol.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct InstrumentId {
     /// Venue.
     pub exchange: ExchangeId,

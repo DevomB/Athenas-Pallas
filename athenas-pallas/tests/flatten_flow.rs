@@ -4,7 +4,7 @@ use athenas_pallas::dispatch_event;
 use athenas_pallas::events::{ControlEvent, Event, MarketEvent, OrderIntent};
 use athenas_pallas::execution::{PaperConfig, PaperGateway};
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
-use athenas_pallas::state::{GlobalState, InstrumentMeta};
+use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
 use athenas_pallas::types::{Asset, InstrumentId};
 use rust_decimal::Decimal;
@@ -34,8 +34,11 @@ async fn flatten_closes_position_when_paused() {
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
     balances.insert(Asset("BTC".into()), Decimal::new(1, 3));
 
-    let mut state = GlobalState::new(instruments, balances);
-    state.positions.insert(inst.clone(), Decimal::new(1, 3));
+    let registry = InstrumentRegistry::from_instruments(instruments);
+    let mut state = GlobalState::new(registry, balances);
+    if let Some(ix) = state.registry.index_of(&inst) {
+        state.positions[ix.0] = Decimal::new(1, 3);
+    }
     state.paused = true;
 
     let mut strat = Quiet;
@@ -68,13 +71,5 @@ async fn flatten_closes_position_when_paused() {
     .await
     .unwrap();
 
-    assert!(
-        state
-            .positions
-            .get(&inst)
-            .copied()
-            .unwrap_or(Decimal::ZERO)
-            .abs()
-            < Decimal::new(1, 6)
-    );
+    assert!(state.position_qty(&inst).abs() < Decimal::new(1, 6));
 }

@@ -1,4 +1,10 @@
 //! Execution backends: paper, simulation, and live stub.
+//!
+//! ## Account event parity (live vs paper / sim)
+//!
+//! All gateways emit the same [`crate::events::AccountEvent`] shapes (`Balance`, `OrderUpdate`, `Fill`)
+//! so strategies and risk see one normalized world. Live Binance maps REST and user-stream payloads
+//! into those variants; paper and simulation produce identical variants from local fill logic.
 
 mod paper;
 mod sim;

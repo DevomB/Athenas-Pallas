@@ -1,23 +1,45 @@
 //! Engine: single consumer loop — market → (passive fills) → strategy → risk → execution.
 
+use crate::audit::{self, EngineAudit, StrategySkipReason};
 use crate::error::{Error, Result};
 use crate::events::{ControlEvent, Event, OrderIntent, OrderIntentSource, TimerEvent};
 use crate::execution::ExecutionGateway;
 use crate::risk::RiskPipeline;
-use crate::state::GlobalState;
+use crate::state::{GlobalState, InstrumentIndex};
 use crate::strategy::{Strategy, StrategyContext};
-use crate::types::{OrderType, Side};
+use crate::types::{InstrumentId, OpenOrder, OrderType, Side, TradingState};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{error, warn};
+
+/// Side-channel command with reply (requires [`EngineConfig::command_channel_capacity`]).
+pub enum EngineCommand {
+    /// Return a snapshot of all working orders (same view as [`GlobalState::open_orders`]).
+    ListOpenOrders(oneshot::Sender<Vec<OpenOrder>>),
+    /// Cancel every open order for `instrument` (venue round-trips via [`ExecutionGateway::cancel`]).
+    CancelOrdersInstrument {
+        /// Target pair.
+        instrument: InstrumentId,
+        /// Number of cancel calls that returned Ok (one per order id).
+        reply: oneshot::Sender<std::result::Result<usize, String>>,
+    },
+    /// Cancel working orders for `instrument`, then submit a flattening **market** intent (same path as control flatten).
+    ClosePosition {
+        /// Target pair.
+        instrument: InstrumentId,
+        /// Ok when flat or already flat; Err when risk or execution fails.
+        reply: oneshot::Sender<std::result::Result<(), String>>,
+    },
+}
 
 /// Handle to inject events from connectors or control plane.
 #[derive(Clone)]
 pub struct EngineHandle {
     tx: mpsc::Sender<Event>,
+    cmd_tx: Option<mpsc::Sender<EngineCommand>>,
 }
 
 impl EngineHandle {
@@ -35,6 +57,24 @@ impl EngineHandle {
     pub async fn send(&self, event: Event) -> Result<()> {
         self.tx.send(event).await.map_err(|_| Error::EngineShutdown)
     }
+
+    /// Queue a command when [`EngineConfig::command_channel_capacity`] was set at spawn.
+    pub fn try_send_engine_command(&self, cmd: EngineCommand) -> Result<()> {
+        let c = self
+            .cmd_tx
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("engine commands not enabled".into()))?;
+        c.try_send(cmd).map_err(|_| Error::EngineShutdown)
+    }
+
+    /// Async queue for engine commands.
+    pub async fn send_engine_command(&self, cmd: EngineCommand) -> Result<()> {
+        let c = self
+            .cmd_tx
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("engine commands not enabled".into()))?;
+        c.send(cmd).await.map_err(|_| Error::EngineShutdown)
+    }
 }
 
 /// Wall-clock timer schedule injected by [`EngineBuilder::spawn`].
@@ -46,13 +86,17 @@ pub struct TimerSchedule {
     pub id: u32,
 }
 
-/// Engine wiring (channel capacity, optional periodic timers).
+/// Engine wiring (channel capacity, optional periodic timers, optional audit broadcast).
 #[derive(Clone, Debug)]
 pub struct EngineConfig {
     /// Channel capacity.
     pub channel_capacity: usize,
     /// Interval timers forwarding [`Event::Timer`] into the engine loop.
     pub timer_schedules: Vec<TimerSchedule>,
+    /// When `Some(cap)`, [`EngineBuilder::spawn`] returns a [`broadcast::Receiver`] of [`EngineAudit`](crate::audit::EngineAudit) with lagging subscribers dropped at capacity.
+    pub audit_broadcast_capacity: Option<usize>,
+    /// When `Some(cap)`, [`EngineHandle::send_engine_command`] is available and processed on the engine task.
+    pub command_channel_capacity: Option<usize>,
 }
 
 impl Default for EngineConfig {
@@ -60,6 +104,8 @@ impl Default for EngineConfig {
         Self {
             channel_capacity: 1024,
             timer_schedules: Vec::new(),
+            audit_broadcast_capacity: None,
+            command_channel_capacity: None,
         }
     }
 }
@@ -84,32 +130,100 @@ pub(crate) fn spawn_timer_tasks(handle: EngineHandle, schedules: Vec<TimerSchedu
 pub struct EngineBuilder;
 
 impl EngineBuilder {
-    /// Spawn background consumer. Returns control handle and join handle.
+    /// Spawn background consumer. Returns control handle, join handle, and optional audit receiver.
     pub fn spawn<S, E>(
         cfg: EngineConfig,
         mut state: GlobalState,
         mut strategy: S,
         risk: RiskPipeline,
         exec: Arc<E>,
-    ) -> (EngineHandle, tokio::task::JoinHandle<Result<()>>)
+    ) -> (
+        EngineHandle,
+        tokio::task::JoinHandle<Result<()>>,
+        Option<broadcast::Receiver<EngineAudit>>,
+    )
     where
         S: Strategy + Send + 'static,
         E: ExecutionGateway + 'static,
     {
         let (tx, mut rx) = mpsc::channel(cfg.channel_capacity);
-        let handle = EngineHandle { tx };
+        let cmd_channel = match cfg.command_channel_capacity {
+            Some(c) if c > 0 => {
+                let (t, r) = mpsc::channel(c);
+                Some((t, r))
+            }
+            _ => None,
+        };
+        let cmd_tx = cmd_channel.as_ref().map(|(t, _)| t.clone());
+        let cmd_rx_opt = cmd_channel.map(|(_, r)| r);
+        let handle = EngineHandle { tx, cmd_tx };
+        let (audit_tx, audit_rx) = match cfg.audit_broadcast_capacity {
+            Some(cap) if cap > 0 => {
+                let (t, r) = broadcast::channel(cap);
+                (Some(Arc::new(t)), Some(r))
+            }
+            _ => (None, None),
+        };
         spawn_timer_tasks(handle.clone(), cfg.timer_schedules.clone());
         let join = tokio::spawn(async move {
-            while let Some(ev) = rx.recv().await {
-                if let Err(e) =
-                    dispatch_event(&mut state, &mut strategy, &risk, exec.as_ref(), ev).await
-                {
-                    warn!(target: "athenas_pallas::engine", "engine step: {e}");
+            let audit_ref = audit_tx.as_deref();
+            if let Some(mut cmd_rx) = cmd_rx_opt {
+                loop {
+                    tokio::select! {
+                        ev = rx.recv() => {
+                            match ev {
+                                None => break,
+                                Some(ev) => {
+                                    if let Err(e) = process_event(
+                                        &mut state,
+                                        &mut strategy,
+                                        &risk,
+                                        exec.as_ref(),
+                                        ev,
+                                        audit_ref,
+                                    )
+                                    .await
+                                    {
+                                        warn!(target: "athenas_pallas::engine", "engine step: {e}");
+                                    }
+                                }
+                            }
+                        }
+                        cmd = cmd_rx.recv() => {
+                            match cmd {
+                                None => {}
+                                Some(cmd) => {
+                                    handle_engine_command(
+                                        &mut state,
+                                        exec.as_ref(),
+                                        &risk,
+                                        cmd,
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                while let Some(ev) = rx.recv().await {
+                    if let Err(e) = process_event(
+                        &mut state,
+                        &mut strategy,
+                        &risk,
+                        exec.as_ref(),
+                        ev,
+                        audit_ref,
+                    )
+                    .await
+                    {
+                        warn!(target: "athenas_pallas::engine", "engine step: {e}");
+                    }
                 }
             }
             Ok(())
         });
-        (handle, join)
+        (handle, join, audit_rx)
     }
 
     /// Offline replay helper (CSV / synthetic) without background tasks.
@@ -125,7 +239,7 @@ impl EngineBuilder {
         E: ExecutionGateway,
     {
         for ev in events {
-            process_event(&mut state, &mut strategy, risk, exec, ev).await?;
+            process_event(&mut state, &mut strategy, risk, exec, ev, None).await?;
         }
         Ok(state)
     }
@@ -143,11 +257,27 @@ where
     S: Strategy,
     E: ExecutionGateway,
 {
-    process_event(state, strategy, risk, exec, ev).await
+    process_event(state, strategy, risk, exec, ev, None).await
 }
 
 /// Legacy type alias — prefer [`EngineBuilder::spawn`].
 pub type Engine = EngineBuilder;
+
+/// Process a single event with optional audit broadcast (replicas, logging).
+pub async fn dispatch_event_audited<S, E>(
+    state: &mut GlobalState,
+    strategy: &mut S,
+    risk: &RiskPipeline,
+    exec: &E,
+    ev: Event,
+    audit: Option<&broadcast::Sender<EngineAudit>>,
+) -> Result<()>
+where
+    S: Strategy,
+    E: ExecutionGateway,
+{
+    process_event(state, strategy, risk, exec, ev, audit).await
+}
 
 /// Process a single event (market/account/control/timer) through strategy → risk → execution.
 /// Use this in backtests or tests; live engines use [`EngineBuilder::spawn`].
@@ -162,7 +292,7 @@ where
     S: Strategy,
     E: ExecutionGateway,
 {
-    process_event(state, strategy, risk, exec, ev).await
+    dispatch_event_audited(state, strategy, risk, exec, ev, None).await
 }
 
 async fn process_event<S, E>(
@@ -171,11 +301,16 @@ async fn process_event<S, E>(
     risk: &RiskPipeline,
     exec: &E,
     ev: Event,
+    audit: Option<&broadcast::Sender<EngineAudit>>,
 ) -> Result<()>
 where
     S: Strategy,
     E: ExecutionGateway,
 {
+    if let Some(tx) = audit {
+        audit::emit_event_ingested(tx, &ev);
+    }
+
     match &ev {
         Event::Market(m) => {
             state.apply_market(m);
@@ -193,6 +328,25 @@ where
     state.refresh_daily_risk_anchor(now);
 
     if state.paused {
+        if let Some(tx) = audit {
+            audit::try_emit(
+                tx,
+                EngineAudit::StrategySkipped {
+                    reason: StrategySkipReason::Paused,
+                },
+            );
+        }
+        return Ok(());
+    }
+    if state.trading_state == TradingState::Disabled {
+        if let Some(tx) = audit {
+            audit::try_emit(
+                tx,
+                EngineAudit::StrategySkipped {
+                    reason: StrategySkipReason::TradingDisabled,
+                },
+            );
+        }
         return Ok(());
     }
 
@@ -207,16 +361,45 @@ where
         let snap = state.snapshot();
         if let Err(e) = risk.validate(&snap, &intent) {
             warn!(target: "athenas_pallas::engine", "risk: {e}");
+            if let Some(tx) = audit {
+                audit::try_emit(
+                    tx,
+                    EngineAudit::RiskRejected {
+                        intent: intent.clone(),
+                        message: e.to_string(),
+                    },
+                );
+            }
             continue;
         }
         let events = dispatch_intent(exec, &snap, &intent).await;
         match events {
             Ok(evs) => {
+                if let Some(tx) = audit {
+                    if !evs.is_empty() {
+                        audit::try_emit(
+                            tx,
+                            EngineAudit::IntentsExecuted {
+                                account_events: evs.len(),
+                            },
+                        );
+                    }
+                }
                 for a in evs {
                     state.apply_account(&a);
                 }
             }
-            Err(e) => error!(target: "athenas_pallas::engine", "execution: {e}"),
+            Err(e) => {
+                error!(target: "athenas_pallas::engine", "execution: {e}");
+                if let Some(tx) = audit {
+                    audit::try_emit(
+                        tx,
+                        EngineAudit::ExecutionError {
+                            message: e.to_string(),
+                        },
+                    );
+                }
+            }
         }
     }
 
@@ -242,6 +425,8 @@ async fn apply_control<E: ExecutionGateway>(
     match c {
         ControlEvent::Pause => state.paused = true,
         ControlEvent::Resume => state.paused = false,
+        ControlEvent::DisableTrading => state.trading_state = TradingState::Disabled,
+        ControlEvent::EnableTrading => state.trading_state = TradingState::Enabled,
         ControlEvent::CancelAll => {
             let evs = exec.cancel_all(&state.snapshot()).await?;
             for a in evs {
@@ -256,48 +441,157 @@ async fn apply_control<E: ExecutionGateway>(
             let insts: Vec<_> = state
                 .positions
                 .iter()
+                .enumerate()
                 .filter(|(_, p)| !p.is_zero())
-                .map(|(k, _)| k.clone())
+                .filter_map(|(ix, _)| state.registry.id(InstrumentIndex(ix)).cloned())
                 .collect();
             for inst in insts {
-                let snap = state.snapshot();
-                let pos = snap
-                    .positions
-                    .get(&inst)
-                    .copied()
-                    .unwrap_or(Decimal::ZERO);
-                if pos.is_zero() {
-                    continue;
-                }
-                let intent = OrderIntent {
-                    instrument: inst,
-                    side: if pos > Decimal::ZERO {
-                        Side::Sell
-                    } else {
-                        Side::Buy
-                    },
-                    order_type: OrderType::Market,
-                    price: None,
-                    qty: pos.abs(),
-                    client_order_id: None,
-                    source: OrderIntentSource::Flatten,
-                };
-                if let Err(e) = risk.validate(&snap, &intent) {
-                    warn!(target: "athenas_pallas::engine", "flatten risk: {e}");
-                    continue;
-                }
-                match dispatch_intent(exec, &snap, &intent).await {
-                    Ok(evs) => {
-                        for a in evs {
-                            state.apply_account(&a);
-                        }
-                    }
-                    Err(e) => error!(target: "athenas_pallas::engine", "flatten execution: {e}"),
-                }
+                close_position_with_flatten_source(state, exec, risk, inst).await;
             }
         }
     }
     Ok(())
+}
+
+async fn close_position_with_flatten_source<E: ExecutionGateway>(
+    state: &mut GlobalState,
+    exec: &E,
+    risk: &RiskPipeline,
+    inst: InstrumentId,
+) {
+    let snap = state.snapshot();
+    let pos = snap.position_qty(&inst);
+    if pos.is_zero() {
+        return;
+    }
+    let intent = OrderIntent {
+        instrument: inst,
+        side: if pos > Decimal::ZERO {
+            Side::Sell
+        } else {
+            Side::Buy
+        },
+        order_type: OrderType::Market,
+        price: None,
+        qty: pos.abs(),
+        client_order_id: None,
+        source: OrderIntentSource::Flatten,
+    };
+    if let Err(e) = risk.validate(&snap, &intent) {
+        warn!(target: "athenas_pallas::engine", "flatten risk: {e}");
+        return;
+    }
+    match dispatch_intent(exec, &snap, &intent).await {
+        Ok(evs) => {
+            for a in evs {
+                state.apply_account(&a);
+            }
+        }
+        Err(e) => error!(target: "athenas_pallas::engine", "flatten execution: {e}"),
+    }
+}
+
+async fn cancel_open_orders_for_instrument<E: ExecutionGateway>(
+    state: &mut GlobalState,
+    exec: &E,
+    instrument: &InstrumentId,
+) -> std::result::Result<(), String> {
+    let ids: Vec<_> = state
+        .open_orders
+        .values()
+        .filter(|o| o.instrument == *instrument)
+        .map(|o| o.id.clone())
+        .collect();
+    for oid in ids {
+        let snap = state.snapshot();
+        let evs = exec
+            .cancel(&snap, oid)
+            .await
+            .map_err(|e| e.to_string())?;
+        for a in evs {
+            state.apply_account(&a);
+        }
+    }
+    Ok(())
+}
+
+async fn handle_engine_command<E: ExecutionGateway>(
+    state: &mut GlobalState,
+    exec: &E,
+    risk: &RiskPipeline,
+    cmd: EngineCommand,
+) {
+    match cmd {
+        EngineCommand::ListOpenOrders(reply) => {
+            let v: Vec<OpenOrder> = state.open_orders.values().cloned().collect();
+            let _ = reply.send(v);
+        }
+        EngineCommand::CancelOrdersInstrument { instrument, reply } => {
+            let ids: Vec<_> = state
+                .open_orders
+                .values()
+                .filter(|o| o.instrument == instrument)
+                .map(|o| o.id.clone())
+                .collect();
+            let mut canceled = 0usize;
+            for oid in ids {
+                let snap = state.snapshot();
+                match exec.cancel(&snap, oid).await {
+                    Ok(evs) => {
+                        canceled += 1;
+                        for a in evs {
+                            state.apply_account(&a);
+                        }
+                    }
+                    Err(e) => {
+                        let _ = reply.send(Err(e.to_string()));
+                        return;
+                    }
+                }
+            }
+            let _ = reply.send(Ok(canceled));
+        }
+        EngineCommand::ClosePosition { instrument, reply } => {
+            if let Err(e) = cancel_open_orders_for_instrument(state, exec, &instrument).await {
+                let _ = reply.send(Err(e));
+                return;
+            }
+            let snap = state.snapshot();
+            let pos = snap.position_qty(&instrument);
+            if pos.is_zero() {
+                let _ = reply.send(Ok(()));
+                return;
+            }
+            let intent = OrderIntent {
+                instrument: instrument.clone(),
+                side: if pos > Decimal::ZERO {
+                    Side::Sell
+                } else {
+                    Side::Buy
+                },
+                order_type: OrderType::Market,
+                price: None,
+                qty: pos.abs(),
+                client_order_id: None,
+                source: OrderIntentSource::Flatten,
+            };
+            if let Err(e) = risk.validate(&snap, &intent) {
+                let _ = reply.send(Err(e.to_string()));
+                return;
+            }
+            match dispatch_intent(exec, &snap, &intent).await {
+                Ok(evs) => {
+                    for a in evs {
+                        state.apply_account(&a);
+                    }
+                    let _ = reply.send(Ok(()));
+                }
+                Err(e) => {
+                    let _ = reply.send(Err(e.to_string()));
+                }
+            }
+        }
+    }
 }
 
 async fn dispatch_intent<E: ExecutionGateway>(
@@ -321,7 +615,10 @@ mod tests {
     #[tokio::test]
     async fn timer_schedule_emits_id() {
         let (tx, mut rx) = mpsc::channel(16);
-        let handle = EngineHandle { tx };
+        let handle = EngineHandle {
+            tx,
+            cmd_tx: None,
+        };
         spawn_timer_tasks(
             handle,
             vec![TimerSchedule {

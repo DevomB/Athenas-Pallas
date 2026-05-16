@@ -314,8 +314,8 @@ impl super::ExecutionGateway for BinanceLiveGateway {
             params.push(("newClientOrderId".into(), cid.0.clone()));
         }
         let quote_fee = state
-            .instruments
-            .get(&intent.instrument)
+            .registry
+            .meta_by_id(&intent.instrument)
             .map(|m| m.quote.clone())
             .unwrap_or_else(|| Asset("USDT".into()));
         let text = self.signed_post_form("/api/v3/order", params).await?;
@@ -341,8 +341,8 @@ impl super::ExecutionGateway for BinanceLiveGateway {
             params.push(("newClientOrderId".into(), cid.0.clone()));
         }
         let quote_fee = state
-            .instruments
-            .get(&intent.instrument)
+            .registry
+            .meta_by_id(&intent.instrument)
             .map(|m| m.quote.clone())
             .unwrap_or_else(|| Asset("USDT".into()));
         let text = self.signed_post_form("/api/v3/order", params).await?;
@@ -379,7 +379,7 @@ impl super::ExecutionGateway for BinanceLiveGateway {
         let quote_fee = state
             .open_orders
             .get(&order_id)
-            .and_then(|o| state.instruments.get(&o.instrument))
+            .and_then(|o| state.registry.meta_by_id(&o.instrument))
             .map(|m| m.quote.clone())
             .unwrap_or_else(|| Asset("USDT".into()));
         Self::parse_order_json(&text, &inst, quote_fee)
@@ -408,8 +408,8 @@ impl super::ExecutionGateway for BinanceLiveGateway {
                 symbol: Symbol(sym),
             };
             let quote_fee = state
-                .instruments
-                .get(&inst)
+                .registry
+                .meta_by_id(&inst)
                 .map(|m| m.quote.clone())
                 .unwrap_or_else(|| Asset("USDT".into()));
             let mut evs = Self::parse_order_json(&cancel_text, &inst, quote_fee)?;

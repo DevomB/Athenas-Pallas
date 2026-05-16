@@ -10,7 +10,7 @@ use athenas_pallas::events::{Event, OrderIntent};
 use athenas_pallas::execution::{PaperConfig, SimGateway};
 use athenas_pallas::metrics::summarize;
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
-use athenas_pallas::state::{GlobalState, InstrumentMeta};
+use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
 use athenas_pallas::types::{Asset, EquityPoint, ExchangeId, InstrumentId, OrderType, Side, Symbol};
 use rust_decimal::Decimal;
@@ -60,7 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
     balances.insert(Asset("BTC".into()), Decimal::ZERO);
 
-    let mut state = GlobalState::new(instruments, balances);
+    let registry = InstrumentRegistry::from_instruments(instruments);
+    let mut state = GlobalState::new(registry, balances);
     let mut strategy = BuyAndHold {
         instrument: instrument.clone(),
         done: false,

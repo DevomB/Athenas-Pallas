@@ -1,6 +1,7 @@
 //! Historical and synthetic event sources for deterministic replay.
 
 pub mod batch;
+pub mod replay;
 
 use std::fs::File;
 use std::io::Read as _;
@@ -263,3 +264,4 @@ impl FillModel for TouchCrossFillModel {
 }
 
 pub use batch::{run_scenarios_parallel, run_scenarios_serial, RunReport, Scenario};
+pub use replay::{read_events_jsonl, replay_events_serial};

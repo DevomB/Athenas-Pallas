@@ -42,8 +42,8 @@ impl PaperGateway {
         inst: &crate::types::InstrumentId,
     ) -> Result<&'a InstrumentMeta> {
         state
-            .instruments
-            .get(inst)
+            .registry
+            .meta_by_id(inst)
             .ok_or_else(|| Error::Invalid("unknown instrument".into()))
     }
 
@@ -144,25 +144,27 @@ impl ExecutionGateway for PaperGateway {
         let mut o = Self::build_open(id, intent, intent.qty, Some(price), OrderType::Limit);
 
         // Crossing check against L1
-        if let Some((_, bid, ask)) = state.l1.get(&intent.instrument) {
-            if let Some(px) = Self::crossing_limit(intent.side, price, *bid, *ask) {
-                o.remaining_qty = Decimal::ZERO;
-                o.status = OrderStatus::Filled;
-                let mut evs = vec![Self::emit_order_update(&o)];
-                let fee = Self::fee_notional(px * intent.qty, self.cfg.fee_bps);
-                evs.push(AccountEvent::Fill {
-                    order_id: o.id.clone(),
-                    instrument: o.instrument.clone(),
-                    side: o.side,
-                    price: px,
-                    qty: intent.qty,
-                    fee,
-                    fee_asset: meta.quote.clone(),
-                });
-                evs.extend(Self::balance_updates_after_fill(
-                    state, &o, meta, px, intent.qty, fee,
-                ));
-                return Ok(evs);
+        if let Some(ix) = state.registry.index_of(&intent.instrument).map(|i| i.0) {
+            if let Some(Some((_, bid, ask))) = state.l1.get(ix) {
+                if let Some(px) = Self::crossing_limit(intent.side, price, *bid, *ask) {
+                    o.remaining_qty = Decimal::ZERO;
+                    o.status = OrderStatus::Filled;
+                    let mut evs = vec![Self::emit_order_update(&o)];
+                    let fee = Self::fee_notional(px * intent.qty, self.cfg.fee_bps);
+                    evs.push(AccountEvent::Fill {
+                        order_id: o.id.clone(),
+                        instrument: o.instrument.clone(),
+                        side: o.side,
+                        price: px,
+                        qty: intent.qty,
+                        fee,
+                        fee_asset: meta.quote.clone(),
+                    });
+                    evs.extend(Self::balance_updates_after_fill(
+                        state, &o, meta, px, intent.qty, fee,
+                    ));
+                    return Ok(evs);
+                }
             }
         }
 
@@ -231,7 +233,11 @@ impl ExecutionGateway for PaperGateway {
                 Some(p) => p,
                 None => continue,
             };
-            let last = state.last_trade.get(&o.instrument).map(|(_, p)| *p);
+            let last = state
+                .registry
+                .index_of(&o.instrument)
+                .and_then(|ix| state.last_trade.get(ix.0).and_then(|cell| *cell))
+                .map(|(_, p)| p);
             let Some(last_px) = last else { continue };
             let meta = match Self::meta(state, &o.instrument) {
                 Ok(m) => m,

@@ -2,7 +2,7 @@
 
 use athenas_pallas::execution::{BinanceCredentials, BinanceLiveGateway, ExecutionGateway};
 use athenas_pallas::events::{OrderIntent, OrderIntentSource};
-use athenas_pallas::state::{GlobalState, InstrumentMeta};
+use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::types::{Asset, InstrumentId, OrderType, Side};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
@@ -44,7 +44,8 @@ async fn market_order_signed_post_parses_response() {
     );
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
-    let state = GlobalState::new(instruments, balances);
+    let registry = InstrumentRegistry::from_instruments(instruments);
+    let state = GlobalState::new(registry, balances);
     let intent = OrderIntent {
         instrument: i,
         side: Side::Buy,

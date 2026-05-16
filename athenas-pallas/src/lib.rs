@@ -17,13 +17,18 @@
 
 #![warn(missing_docs)]
 
+pub mod audit;
 pub mod backtest;
 pub mod connectors;
+pub mod data;
 pub mod engine;
 pub mod error;
 pub mod events;
 pub mod execution;
+pub mod instrument;
+pub mod integration;
 pub mod metrics;
+pub mod oms;
 pub mod risk;
 pub mod state;
 pub mod strategy;
@@ -33,8 +38,13 @@ pub mod types;
 pub mod control;
 
 pub use engine::{
-    dispatch_event, engine_step, Engine, EngineBuilder, EngineConfig, EngineHandle, TimerSchedule,
+    dispatch_event, dispatch_event_audited, engine_step, Engine, EngineBuilder, EngineCommand,
+    EngineConfig, EngineHandle, TimerSchedule,
 };
 pub use error::{Error, Result};
 pub use events::{BookL2Snapshot, Event, OrderIntentSource};
-pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, Symbol};
+pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, Symbol, TradingState};
+
+pub use instrument::{InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry};
+pub use metrics::TradingSummary;
+pub use oms::OrderStore;

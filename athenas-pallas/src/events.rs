@@ -108,6 +108,10 @@ pub enum ControlEvent {
     CancelAll,
     /// Flatten: cancel all then market-close net base (optional extension point).
     Flatten,
+    /// Turn off algorithmic trading (strategy not invoked); data and control actions still run.
+    DisableTrading,
+    /// Re-enable algorithmic trading after [`ControlEvent::DisableTrading`].
+    EnableTrading,
 }
 
 /// Timer tick for periodic strategy logic.

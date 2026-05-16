@@ -71,6 +71,47 @@ pub fn summarize(equity: Vec<EquityPoint>, periods_per_year: f64) -> Performance
     }
 }
 
+/// Human-readable performance report (period label + risk-free reference + [`PerformanceSummary`]).
+#[derive(Clone, Debug)]
+pub struct TradingSummary {
+    /// e.g. `"Daily"` or `"BacktestRun"`.
+    pub period_label: &'static str,
+    /// Annualized risk-free rate used as reporting context (e.g. `0.05` for 5%).
+    pub risk_free_annual: f64,
+    /// Numeric performance bundle.
+    pub performance: PerformanceSummary,
+}
+
+impl TradingSummary {
+    /// Build from an equity curve and scaling factor (same as [`summarize`]).
+    pub fn from_equity(
+        period_label: &'static str,
+        risk_free_annual: f64,
+        equity: Vec<EquityPoint>,
+        periods_per_year: f64,
+    ) -> Self {
+        Self {
+            period_label,
+            risk_free_annual,
+            performance: summarize(equity, periods_per_year),
+        }
+    }
+
+    /// Print a one-line summary to stdout (for examples and quick CLI checks).
+    pub fn print_summary(&self) {
+        println!(
+            "[{}] risk_free={:.4} pnl={} pnl_pct={} sharpe={:.3} sortino={:.3} max_dd={:.4}",
+            self.period_label,
+            self.risk_free_annual,
+            self.performance.pnl,
+            self.performance.pnl_pct,
+            self.performance.sharpe,
+            self.performance.sortino,
+            self.performance.max_drawdown,
+        );
+    }
+}
+
 fn max_drawdown(equity: &[EquityPoint]) -> f64 {
     let mut peak = f64::MIN;
     let mut max_dd = 0.0f64;

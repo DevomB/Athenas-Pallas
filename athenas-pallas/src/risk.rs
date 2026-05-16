@@ -3,7 +3,7 @@
 use crate::error::Result;
 use crate::events::{OrderIntent, OrderIntentSource};
 use crate::state::GlobalState;
-use crate::types::Asset;
+use crate::types::{Asset, TradingState};
 use rust_decimal::Decimal;
 
 /// Single risk rule.
@@ -26,11 +26,7 @@ impl RiskCheck for MaxPositionSize {
         if intent.instrument != self.instrument {
             return Ok(());
         }
-        let current = state
-            .positions
-            .get(&self.instrument)
-            .copied()
-            .unwrap_or(Decimal::ZERO);
+        let current = state.position_qty(&self.instrument);
         let sign = match intent.side {
             crate::types::Side::Buy => Decimal::ONE,
             crate::types::Side::Sell => -Decimal::ONE,
@@ -57,6 +53,22 @@ impl RiskCheck for PauseCheck {
         }
         if state.paused {
             return Err(crate::error::Error::RiskRejected("engine paused".into()));
+        }
+        Ok(())
+    }
+}
+
+/// Block new orders when [`crate::types::TradingState::Disabled`] (flatten still allowed).
+#[derive(Clone, Debug, Default)]
+pub struct TradingDisabledCheck;
+
+impl RiskCheck for TradingDisabledCheck {
+    fn check(&self, state: &GlobalState, intent: &OrderIntent) -> Result<()> {
+        if intent.source == OrderIntentSource::Flatten {
+            return Ok(());
+        }
+        if state.trading_state == TradingState::Disabled {
+            return Err(crate::error::Error::RiskRejected("trading disabled".into()));
         }
         Ok(())
     }
@@ -114,7 +126,7 @@ impl RiskPipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::OrderIntentSource;
+    use crate::instrument::InstrumentRegistry;
     use crate::types::{Asset, InstrumentId, OrderType, Side};
     use std::collections::HashMap;
 
@@ -131,7 +143,7 @@ mod tests {
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
-        let st = GlobalState::new(inst, bal);
+        let st = GlobalState::new(InstrumentRegistry::from_instruments(inst), bal);
         let rule = MaxPositionSize {
             instrument: i.clone(),
             max_abs: Decimal::ONE,
@@ -161,7 +173,7 @@ mod tests {
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
-        let mut st = GlobalState::new(inst, bal);
+        let mut st = GlobalState::new(InstrumentRegistry::from_instruments(inst), bal);
         st.paused = true;
         let pause = PauseCheck::default();
         let mut intent = OrderIntent {
@@ -179,6 +191,36 @@ mod tests {
     }
 
     #[test]
+    fn trading_disabled_blocks_user_not_flatten() {
+        let i = InstrumentId::new("t", "BTCUSDT");
+        let mut inst = HashMap::new();
+        inst.insert(
+            i.clone(),
+            crate::state::InstrumentMeta {
+                base: Asset("BTC".into()),
+                quote: Asset("USDT".into()),
+            },
+        );
+        let mut bal = HashMap::new();
+        bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
+        let mut st = GlobalState::new(InstrumentRegistry::from_instruments(inst), bal);
+        st.trading_state = crate::types::TradingState::Disabled;
+        let gate = TradingDisabledCheck::default();
+        let mut intent = OrderIntent {
+            instrument: i.clone(),
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            price: None,
+            qty: Decimal::ONE,
+            client_order_id: None,
+            source: OrderIntentSource::User,
+        };
+        assert!(gate.check(&st, &intent).is_err());
+        intent.source = OrderIntentSource::Flatten;
+        assert!(gate.check(&st, &intent).is_ok());
+    }
+
+    #[test]
     fn max_daily_loss_blocks_after_anchor_drop() {
         let i = InstrumentId::new("t", "BTCUSDT");
         let mut inst = HashMap::new();
@@ -191,7 +233,7 @@ mod tests {
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(8500u64));
-        let mut st = GlobalState::new(inst, bal);
+        let mut st = GlobalState::new(InstrumentRegistry::from_instruments(inst), bal);
         st.daily_risk_quote = Some(Asset("USDT".into()));
         st.risk_day_anchor = Some((time::OffsetDateTime::now_utc().date(), Decimal::from(10_000u64)));
 
