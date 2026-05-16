@@ -156,6 +156,7 @@ mod tests {
             qty: Decimal::from(5u64),
             client_order_id: None,
             source: OrderIntentSource::User,
+            strategy_id: None,
         };
         assert!(rule.check(&st, &intent).is_err());
     }
@@ -184,6 +185,7 @@ mod tests {
             qty: Decimal::ONE,
             client_order_id: None,
             source: OrderIntentSource::User,
+            strategy_id: None,
         };
         assert!(pause.check(&st, &intent).is_err());
         intent.source = OrderIntentSource::Flatten;
@@ -214,6 +216,7 @@ mod tests {
             qty: Decimal::ONE,
             client_order_id: None,
             source: OrderIntentSource::User,
+            strategy_id: None,
         };
         assert!(gate.check(&st, &intent).is_err());
         intent.source = OrderIntentSource::Flatten;
@@ -249,6 +252,7 @@ mod tests {
             qty: Decimal::ONE,
             client_order_id: None,
             source: OrderIntentSource::User,
+            strategy_id: None,
         };
         assert!(rule.check(&st, &intent).is_err());
 

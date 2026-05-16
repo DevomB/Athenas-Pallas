@@ -117,6 +117,7 @@ fn parse_execution_report(ev: &Value) -> Option<Vec<AccountEvent>> {
         remaining_qty,
         original_qty: orig_qty,
         status,
+        strategy_id: None,
     }];
 
     if status == OrderStatus::Filled && exec_qty > Decimal::ZERO {
@@ -144,6 +145,7 @@ fn parse_execution_report(ev: &Value) -> Option<Vec<AccountEvent>> {
             qty: exec_qty,
             fee,
             fee_asset,
+            strategy_id: None,
         });
     }
 

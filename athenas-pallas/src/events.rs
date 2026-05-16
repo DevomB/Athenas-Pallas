@@ -1,7 +1,7 @@
 //! Normalized events fed into the engine.
 
 use crate::types::{
-    Asset, ClientOrderId, InstrumentId, OrderId, OrderStatus, OrderType, Side,
+    Asset, ClientOrderId, InstrumentId, OrderId, OrderStatus, OrderType, Side, StrategyId,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -77,6 +77,9 @@ pub enum AccountEvent {
         original_qty: Decimal,
         /// Status.
         status: OrderStatus,
+        /// Sub-strategy attribution (if any).
+        #[serde(default)]
+        strategy_id: Option<StrategyId>,
     },
     /// Fill notice (optional detail; state can also infer from OrderUpdate).
     Fill {
@@ -94,6 +97,9 @@ pub enum AccountEvent {
         fee: Decimal,
         /// Fee asset.
         fee_asset: Asset,
+        /// Sub-strategy attribution when known (paper/sim propagate from working order).
+        #[serde(default)]
+        strategy_id: Option<StrategyId>,
     },
 }
 
@@ -183,4 +189,7 @@ pub struct OrderIntent {
     /// Source for risk rules (e.g. flatten bypasses [`crate::risk::PauseCheck`]).
     #[serde(default)]
     pub source: OrderIntentSource,
+    /// Optional sub-strategy label for attributed position tracking (see [`crate::state::GlobalState::strategy_position_qty`] and [`crate::metrics::strategy_position_report`]).
+    #[serde(default)]
+    pub strategy_id: Option<StrategyId>,
 }

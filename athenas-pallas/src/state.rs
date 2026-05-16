@@ -4,7 +4,7 @@ pub use crate::instrument::{InstrumentFilter, InstrumentIndex, InstrumentMeta, I
 
 use crate::events::{AccountEvent, BookL2Snapshot, MarketEvent};
 use crate::oms::OrderStore;
-use crate::types::{Asset, InstrumentId, OpenOrder, Side};
+use crate::types::{Asset, InstrumentId, OpenOrder, Side, StrategyId};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use time::{Date, OffsetDateTime};
@@ -22,8 +22,12 @@ pub struct GlobalState {
     pub open_orders: OrderStore,
     /// Free balances.
     pub balances: HashMap<Asset, Decimal>,
-    /// Net base position per instrument row (signed).
+    /// Net base position per instrument row (signed) — venue / account **aggregate**.
     pub positions: Vec<Decimal>,
+    /// Attributed net base per `(instrument_row, strategy_id)` when fills carry a [`StrategyId`].
+    ///
+    /// Sums over strategies may differ from [`Self::positions`] if some fills are untagged or cross-strategy hedges.
+    pub strategy_positions: HashMap<(usize, StrategyId), Decimal>,
     /// Latest shallow L2 snapshot per row (if subscribed).
     pub l2: Vec<Option<BookL2Snapshot>>,
     /// Mark-to-market equity anchor for UTC calendar daily loss (quote asset must match risk rule).
@@ -47,6 +51,7 @@ impl GlobalState {
             open_orders: OrderStore::new(),
             balances: initial_balances,
             positions: vec![Decimal::ZERO; n],
+            strategy_positions: HashMap::new(),
             l2: vec![None; n],
             risk_day_anchor: None,
             daily_risk_quote: None,
@@ -108,6 +113,23 @@ impl GlobalState {
             .unwrap_or(Decimal::ZERO)
     }
 
+    /// Attributed net base position for a sub-strategy on an instrument (barter-style `strategy_id` slice).
+    pub fn strategy_position_qty(&self, inst: &InstrumentId, strategy_id: &StrategyId) -> Decimal {
+        let Some(ix) = self.registry.index_of(inst).map(|i| i.0) else {
+            return Decimal::ZERO;
+        };
+        self.strategy_positions
+            .get(&(ix, strategy_id.clone()))
+            .copied()
+            .unwrap_or(Decimal::ZERO)
+    }
+
+    /// Alias for [`Self::strategy_position_qty`] (keyword-style naming for future bindings).
+    #[inline]
+    pub fn position_qty_for_strategy(&self, inst: &InstrumentId, strategy_id: &StrategyId) -> Decimal {
+        self.strategy_position_qty(inst, strategy_id)
+    }
+
     /// Apply a market event (read-only book/trade updates).
     pub fn apply_market(&mut self, ev: &MarketEvent) {
         match ev {
@@ -151,6 +173,7 @@ impl GlobalState {
                 remaining_qty,
                 original_qty,
                 status,
+                strategy_id,
             } => {
                 let o = OpenOrder {
                     id: id.clone(),
@@ -161,6 +184,7 @@ impl GlobalState {
                     remaining_qty: *remaining_qty,
                     original_qty: *original_qty,
                     status: *status,
+                    strategy_id: strategy_id.clone(),
                 };
                 self.open_orders.apply_order_update(o);
             }
@@ -169,6 +193,7 @@ impl GlobalState {
                 side,
                 price: _,
                 qty,
+                strategy_id,
                 ..
             } => {
                 let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) else {
@@ -180,6 +205,12 @@ impl GlobalState {
                 };
                 let delta = sign * qty;
                 self.positions[ix] += delta;
+                if let Some(ref sid) = strategy_id {
+                    *self
+                        .strategy_positions
+                        .entry((ix, sid.clone()))
+                        .or_insert(Decimal::ZERO) += delta;
+                }
             }
         }
     }
@@ -210,7 +241,9 @@ impl GlobalState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::AccountEvent;
     use crate::types::Asset;
+    use crate::types::{OrderId, Side, StrategyId};
     use rust_decimal::Decimal;
     use std::collections::HashMap;
 
@@ -230,5 +263,49 @@ mod tests {
         let reg = InstrumentRegistry::from_instruments(inst);
         let s = GlobalState::new(reg, bal);
         assert_eq!(s.mark_equity_quote(&Asset("USDT".into())), Decimal::from(1000u64));
+    }
+
+    #[test]
+    fn strategy_positions_from_tagged_fills() {
+        let i = crate::types::InstrumentId::new("x", "BTCUSDT");
+        let mut inst = HashMap::new();
+        inst.insert(
+            i.clone(),
+            InstrumentMeta {
+                base: Asset("BTC".into()),
+                quote: Asset("USDT".into()),
+            },
+        );
+        let mut bal = HashMap::new();
+        bal.insert(Asset("USDT".into()), Decimal::from(1000u64));
+        let reg = InstrumentRegistry::from_instruments(inst);
+        let mut st = GlobalState::new(reg, bal);
+        let sid_a = StrategyId::new("momentum");
+        let sid_b = StrategyId::new("mean_rev");
+        st.apply_account(&AccountEvent::Fill {
+            order_id: OrderId::new_v4(),
+            instrument: i.clone(),
+            side: Side::Buy,
+            price: Decimal::from(50u64),
+            qty: Decimal::new(1, 1),
+            fee: Decimal::ZERO,
+            fee_asset: Asset("USDT".into()),
+            strategy_id: Some(sid_a.clone()),
+        });
+        st.apply_account(&AccountEvent::Fill {
+            order_id: OrderId::new_v4(),
+            instrument: i.clone(),
+            side: Side::Sell,
+            price: Decimal::from(50u64),
+            qty: Decimal::new(5, 2),
+            fee: Decimal::ZERO,
+            fee_asset: Asset("USDT".into()),
+            strategy_id: Some(sid_b.clone()),
+        });
+        assert_eq!(st.position_qty(&i), Decimal::new(5, 2));
+        assert_eq!(st.strategy_position_qty(&i, &sid_a), Decimal::new(1, 1));
+        assert_eq!(st.strategy_position_qty(&i, &sid_b), -Decimal::new(5, 2));
+        assert_eq!(st.position_qty_for_strategy(&i, &sid_a), Decimal::new(1, 1));
+        assert_eq!(st.position_qty_for_strategy(&i, &sid_b), -Decimal::new(5, 2));
     }
 }

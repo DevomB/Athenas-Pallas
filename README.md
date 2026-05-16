@@ -79,7 +79,13 @@ Parallel batch replay API: [`backtest::batch`](athenas-pallas/src/backtest/batch
 - **Data** — [`data::SubKind`](athenas-pallas/src/data/mod.rs) and multi-venue fan-in pattern (see module docs).
 - **Integration** — [`integration`](athenas-pallas/src/integration/mod.rs) WebSocket connect re-export used by Binance connectors.
 - **Replay** — [`backtest::read_events_jsonl`](athenas-pallas/src/backtest/replay.rs) + [`replay_events_serial`](athenas-pallas/src/backtest/replay.rs) for recorded `Event` JSONL.
-- **Reporting** — [`metrics::TradingSummary`](athenas-pallas/src/metrics.rs) wraps [`summarize`](athenas-pallas/src/metrics.rs) with a period label and risk-free rate for printing.
+- **Reporting** — [`metrics::TradingSummary`](athenas-pallas/src/metrics.rs) wraps [`summarize`](athenas-pallas/src/metrics.rs) with a period label and risk-free rate for printing; use [`metrics::strategy_position_report`](athenas-pallas/src/metrics.rs) and [`TradingSummary::with_strategy_attribution`](athenas-pallas/src/metrics.rs) for attributed open-base rows. For **multi-sleeve** runs, build per-strategy equity series yourself and pass them to [`metrics::trading_summaries_per_strategy`](athenas-pallas/src/metrics.rs) (labels become `{prefix} / {strategy_id}`). There is **no in-repo Python binding**; [`StrategyId`](athenas-pallas/src/types.rs) and [`OrderIntent::strategy_id`](athenas-pallas/src/events.rs) mirror a future `strategy_id=` keyword.
+
+### Multi-strategy (single engine, Rust)
+
+- Tag each [`OrderIntent`](athenas-pallas/src/events.rs) with [`StrategyId`](athenas-pallas/src/types.rs) via `strategy_id: Some(StrategyId::new("momentum"))`. [`PaperGateway`](athenas-pallas/src/execution/paper.rs) copies it into [`OpenOrder`](athenas-pallas/src/types.rs) and fill events; [`GlobalState::strategy_positions`](athenas-pallas/src/state.rs) tracks attributed base per `(instrument_row, strategy_id)` while [`GlobalState::positions`](athenas-pallas/src/state.rs) stays the venue aggregate.
+- Query slices with [`GlobalState::strategy_position_qty`](athenas-pallas/src/state.rs) or [`GlobalState::position_qty_for_strategy`](athenas-pallas/src/state.rs) (alias).
+- Combine several [`Strategy`](athenas-pallas/src/strategy.rs) implementations with [`CompositeStrategy`](athenas-pallas/src/strategy.rs) (same pattern as concatenating intent lists in Python).
 - **Modes** — [`PaperGateway`](athenas-pallas/src/execution/paper.rs), [`SimGateway`](athenas-pallas/src/execution/sim.rs), [`LiveGateway`](athenas-pallas/src/execution/live.rs) (stub when only `live-trading`), or [`BinanceLiveGateway`](athenas-pallas/src/execution/binance_live.rs) (with feature `binance-live`).
 - **Timers** — [`EngineConfig::timer_schedules`](athenas-pallas/src/engine.rs) spawns `tokio::time::interval` tasks that emit [`TimerEvent { ts, id }`](athenas-pallas/src/events.rs).
 

@@ -54,6 +54,7 @@ async fn market_order_signed_post_parses_response() {
         qty: Decimal::new(1, 2),
         client_order_id: None,
         source: OrderIntentSource::User,
+        strategy_id: None,
     };
     let evs = gw.place_market(&state, &intent).await.unwrap();
     assert!(!evs.is_empty());

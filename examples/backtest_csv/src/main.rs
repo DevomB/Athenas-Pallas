@@ -41,6 +41,7 @@ impl Strategy for BuyAndHold {
             qty,
             client_order_id: None,
             source: athenas_pallas::events::OrderIntentSource::User,
+            strategy_id: None,
         }]
     }
 }

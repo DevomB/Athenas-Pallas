@@ -43,8 +43,10 @@ pub use engine::{
 };
 pub use error::{Error, Result};
 pub use events::{BookL2Snapshot, Event, OrderIntentSource};
-pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, Symbol, TradingState};
+pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, StrategyId, Symbol, TradingState};
 
 pub use instrument::{InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry};
-pub use metrics::TradingSummary;
+pub use metrics::{
+    strategy_position_report, trading_summaries_per_strategy, StrategyPositionRow, TradingSummary,
+};
 pub use oms::OrderStore;

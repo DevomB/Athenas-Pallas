@@ -105,6 +105,28 @@ impl OrderId {
     }
 }
 
+/// Logical sub-strategy / sleeve id for **per-strategy position attribution** (optional on each order).
+///
+/// When [`OrderIntent::strategy_id`](crate::events::OrderIntent) is `None`, fills update aggregate
+/// [`crate::state::GlobalState::positions`] only. When `Some`, fills also update
+/// [`crate::state::GlobalState::strategy_positions`] (see [`GlobalState::strategy_position_qty`](crate::state::GlobalState::strategy_position_qty) and [`GlobalState::position_qty_for_strategy`](crate::state::GlobalState::position_qty_for_strategy)).
+/// Bindings (e.g. Python) can expose this as a `strategy_id=` keyword on order requests.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct StrategyId(pub String);
+
+impl StrategyId {
+    /// New id from a string label (e.g. `"momentum"`).
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+}
+
+impl fmt::Display for StrategyId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Client-supplied correlation id.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientOrderId(pub String);
@@ -145,6 +167,9 @@ pub struct OpenOrder {
     pub original_qty: Decimal,
     /// Status.
     pub status: OrderStatus,
+    /// Sub-strategy attribution (if any); copied from the originating [`crate::events::OrderIntent`].
+    #[serde(default)]
+    pub strategy_id: Option<StrategyId>,
 }
 
 /// Point on equity curve for metrics.

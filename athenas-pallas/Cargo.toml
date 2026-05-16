@@ -6,6 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../README.md"
+documentation = "https://docs.rs/athenas-pallas"
+homepage = "https://github.com/DevomB/Athenas-Pallis"
+keywords = ["trading", "backtest", "binance", "strategy", "algo"]
+categories = ["asynchronous", "network-programming"]
 
 [features]
 default = []

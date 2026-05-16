@@ -476,6 +476,7 @@ async fn close_position_with_flatten_source<E: ExecutionGateway>(
         qty: pos.abs(),
         client_order_id: None,
         source: OrderIntentSource::Flatten,
+        strategy_id: None,
     };
     if let Err(e) = risk.validate(&snap, &intent) {
         warn!(target: "athenas_pallas::engine", "flatten risk: {e}");
@@ -574,6 +575,7 @@ async fn handle_engine_command<E: ExecutionGateway>(
                 qty: pos.abs(),
                 client_order_id: None,
                 source: OrderIntentSource::Flatten,
+                strategy_id: None,
             };
             if let Err(e) = risk.validate(&snap, &intent) {
                 let _ = reply.send(Err(e.to_string()));

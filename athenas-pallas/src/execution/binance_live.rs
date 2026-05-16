@@ -262,6 +262,7 @@ impl BinanceLiveGateway {
             remaining_qty,
             original_qty: orig_qty,
             status,
+            strategy_id: None,
         }];
 
         if status == OrderStatus::Filled && exec_qty > Decimal::ZERO {
@@ -281,6 +282,7 @@ impl BinanceLiveGateway {
                 qty: exec_qty,
                 fee: Decimal::ZERO,
                 fee_asset: quote_fee,
+                strategy_id: None,
             });
         }
 

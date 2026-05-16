@@ -67,6 +67,7 @@ impl PaperGateway {
             remaining_qty: qty,
             original_qty: qty,
             status: OrderStatus::Open,
+            strategy_id: intent.strategy_id.clone(),
         }
     }
 
@@ -80,6 +81,7 @@ impl PaperGateway {
             remaining_qty: o.remaining_qty,
             original_qty: o.original_qty,
             status: o.status,
+            strategy_id: o.strategy_id.clone(),
         }
     }
 
@@ -159,6 +161,7 @@ impl ExecutionGateway for PaperGateway {
                         qty: intent.qty,
                         fee,
                         fee_asset: meta.quote.clone(),
+                        strategy_id: o.strategy_id.clone(),
                     });
                     evs.extend(Self::balance_updates_after_fill(
                         state, &o, meta, px, intent.qty, fee,
@@ -192,6 +195,7 @@ impl ExecutionGateway for PaperGateway {
             qty: intent.qty,
             fee,
             fee_asset: meta.quote.clone(),
+            strategy_id: o_filled.strategy_id.clone(),
         });
         evs.extend(Self::balance_updates_after_fill(
             state, &o_filled, meta, px, intent.qty, fee,
@@ -263,6 +267,7 @@ impl ExecutionGateway for PaperGateway {
                     qty,
                     fee,
                     fee_asset: meta.quote.clone(),
+                    strategy_id: filled.strategy_id.clone(),
                 });
                 out.extend(Self::balance_updates_after_fill(
                     state, &filled, meta, px, qty, fee,

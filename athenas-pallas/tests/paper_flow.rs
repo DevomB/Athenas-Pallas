@@ -30,6 +30,7 @@ impl Strategy for OneShot {
                     qty: Decimal::new(1, 3),
                     client_order_id: None,
                     source: OrderIntentSource::User,
+                    strategy_id: None,
                 }];
             }
         }
