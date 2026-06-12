@@ -1,0 +1,6 @@
+[workspace]
+changelog_config = { changelog_path = "CHANGELOG.md" }
+
+[[package]]
+name = "athenas-pallas"
+release = true

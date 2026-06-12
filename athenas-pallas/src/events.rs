@@ -34,6 +34,23 @@ pub enum MarketEvent {
     },
     /// Shallow L2 snapshot (bounded depth; venue-specific limit).
     BookL2Snapshot(BookL2Snapshot),
+    /// OHLCV bar.
+    Bar {
+        /// Instrument.
+        instrument: InstrumentId,
+        /// When.
+        ts: OffsetDateTime,
+        /// Open.
+        open: Decimal,
+        /// High.
+        high: Decimal,
+        /// Low.
+        low: Decimal,
+        /// Close.
+        close: Decimal,
+        /// Volume.
+        volume: Decimal,
+    },
 }
 
 /// Top-of-book depth snapshot (price, qty) levels.
@@ -149,6 +166,7 @@ impl Event {
             Event::Market(MarketEvent::Trade { instrument, .. }) => Some(instrument),
             Event::Market(MarketEvent::BookL1 { instrument, .. }) => Some(instrument),
             Event::Market(MarketEvent::BookL2Snapshot(s)) => Some(&s.instrument),
+            Event::Market(MarketEvent::Bar { instrument, .. }) => Some(instrument),
             Event::Account(AccountEvent::OrderUpdate { instrument, .. }) => Some(instrument),
             Event::Account(AccountEvent::Fill { instrument, .. }) => Some(instrument),
             _ => None,
@@ -157,18 +175,13 @@ impl Event {
 }
 
 /// Origin of an [`OrderIntent`] (risk / pause semantics).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderIntentSource {
     /// Strategy or operator-initiated.
+    #[default]
     User,
     /// Emergency flatten path after [`ControlEvent::Flatten`] (may bypass pause).
     Flatten,
-}
-
-impl Default for OrderIntentSource {
-    fn default() -> Self {
-        Self::User
-    }
 }
 
 /// Strategy order request (before risk/execution).

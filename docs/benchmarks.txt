@@ -1,0 +1,5 @@
+backtest_hotpath (release, Windows, noop_100k_bars):
+  ~245 ms / 100k events ≈ 2.45 µs/event
+  command: cargo bench -p athenas-pallas --bench backtest_hotpath
+
+90-bar noop (debug): sub-millisecond in integration tests

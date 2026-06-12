@@ -16,50 +16,14 @@ pub enum TradingState {
     Disabled,
 }
 
-/// Exchange identifier (e.g. Binance).
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ExchangeId(pub String);
+/// Asset code for balances (e.g. USDT, BTC).
+pub use crate::instrument::Asset;
 
-impl fmt::Display for ExchangeId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
+/// Exchange / symbol newtypes (config & data crates).
+pub use crate::instrument::{ExchangeId, Symbol};
 
-/// Trading pair symbol (e.g. BTCUSDT).
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Symbol(pub String);
-
-impl fmt::Display for Symbol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-/// Instrument = exchange + symbol.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct InstrumentId {
-    /// Venue.
-    pub exchange: ExchangeId,
-    /// Pair.
-    pub symbol: Symbol,
-}
-
-impl InstrumentId {
-    /// New instrument.
-    pub fn new(exchange: impl Into<String>, symbol: impl Into<String>) -> Self {
-        Self {
-            exchange: ExchangeId(exchange.into()),
-            symbol: Symbol(symbol.into()),
-        }
-    }
-}
-
-impl fmt::Display for InstrumentId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.exchange, self.symbol)
-    }
-}
+/// Instrument = exchange + symbol (engine hot path).
+pub use crate::instrument::LegacyInstrumentId as InstrumentId;
 
 /// Order side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,10 +108,6 @@ pub enum OrderStatus {
     Rejected,
 }
 
-/// Asset code for balances (e.g. USDT, BTC).
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Asset(pub String);
-
 /// Working order snapshot.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OpenOrder {
@@ -173,7 +133,7 @@ pub struct OpenOrder {
 }
 
 /// Point on equity curve for metrics.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EquityPoint {
     /// Timestamp.
     pub ts: OffsetDateTime,

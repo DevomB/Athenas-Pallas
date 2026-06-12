@@ -29,24 +29,24 @@ struct DemoStrategy {
 }
 
 impl Strategy for DemoStrategy {
-    fn on_event(&mut self, ctx: &StrategyContext<'_>, event: &Event) -> Vec<OrderIntent> {
+    fn on_event(&mut self, ctx: &StrategyContext<'_>, event: &Event, out: &mut Vec<OrderIntent>) {
         if self.fired {
-            return vec![];
+            return;
         }
         if let Event::Market(MarketEvent::BookL1 { instrument, .. }) = event {
             if instrument != &self.instrument {
-                return vec![];
+                return;
             }
             if ctx.state.mid_or_last(&self.instrument).is_none() {
-                return vec![];
+                return;
             }
             self.fired = true;
             let qty = Decimal::from_f64(0.0001).unwrap_or(Decimal::ZERO);
             if qty.is_zero() {
-                return vec![];
+                return;
             }
             info!("submitting one small paper MARKET buy");
-            return vec![OrderIntent {
+            out.push(OrderIntent {
                 instrument: self.instrument.clone(),
                 side: Side::Buy,
                 order_type: OrderType::Market,
@@ -55,9 +55,8 @@ impl Strategy for DemoStrategy {
                 client_order_id: None,
                 source: athenas_pallas::events::OrderIntentSource::User,
                 strategy_id: None,
-            }];
+            });
         }
-        vec![]
     }
 }
 
@@ -71,10 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut instruments = HashMap::new();
     instruments.insert(
         instrument.clone(),
-        InstrumentMeta {
-            base: Asset("BTC".into()),
-            quote: Asset("USDT".into()),
-        },
+        InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
     );
 
     let mut balances = HashMap::new();

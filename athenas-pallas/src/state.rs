@@ -38,6 +38,10 @@ pub struct GlobalState {
     pub paused: bool,
     /// Algorithmic trading enabled/disabled (distinct from operator [`Self::paused`]).
     pub trading_state: crate::types::TradingState,
+    /// Last bar close per row (fallback for mid).
+    pub bar_close: Vec<Option<Decimal>>,
+    /// Fill count for reporting.
+    pub fill_count: u64,
 }
 
 impl GlobalState {
@@ -57,6 +61,8 @@ impl GlobalState {
             daily_risk_quote: None,
             paused: false,
             trading_state: crate::types::TradingState::Enabled,
+            bar_close: vec![None; n],
+            fill_count: 0,
         }
     }
 
@@ -101,7 +107,7 @@ impl GlobalState {
         } else if let Some(Some((_, p))) = self.last_trade.get(ix) {
             Some(*p)
         } else {
-            None
+            self.bar_close.get(ix).and_then(|c| *c)
         }
     }
 
@@ -153,6 +159,19 @@ impl GlobalState {
             MarketEvent::BookL2Snapshot(snap) => {
                 if let Some(ix) = self.registry.index_of(&snap.instrument).map(|i| i.0) {
                     self.l2[ix] = Some(snap.clone());
+                }
+            }
+            MarketEvent::Bar {
+                instrument,
+                ts,
+                close,
+                ..
+            } => {
+                if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
+                    self.last_trade[ix] = Some((*ts, *close));
+                    self.bar_close[ix] = Some(*close);
+                    let half = *close / Decimal::from(20_000u64);
+                    self.l1[ix] = Some((*ts, *close - half, *close + half));
                 }
             }
         }
@@ -211,6 +230,7 @@ impl GlobalState {
                         .entry((ix, sid.clone()))
                         .or_insert(Decimal::ZERO) += delta;
                 }
+                self.fill_count += 1;
             }
         }
     }
@@ -253,10 +273,7 @@ mod tests {
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
-            InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(1000u64));
@@ -271,10 +288,7 @@ mod tests {
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
-            InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(1000u64));

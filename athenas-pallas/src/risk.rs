@@ -103,20 +103,74 @@ impl RiskCheck for MaxDailyLossQuote {
     }
 }
 
+/// Block short sales for equity instruments.
+#[derive(Clone, Debug, Default)]
+pub struct RejectShort;
+
+impl RiskCheck for RejectShort {
+    fn check(&self, state: &GlobalState, intent: &OrderIntent) -> Result<()> {
+        if intent.side != crate::types::Side::Sell {
+            return Ok(());
+        }
+        let Some(meta) = state.registry.meta_by_id(&intent.instrument) else {
+            return Ok(());
+        };
+        if meta.asset_class != crate::instrument::AssetClass::Equity {
+            return Ok(());
+        }
+        let current = state.position_qty(&intent.instrument);
+        if current - intent.qty < Decimal::ZERO {
+            return Err(crate::error::Error::RiskRejected(
+                "short selling not allowed for equity".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Holistic risk manager (barter-style); builds a [`RiskPipeline`].
+pub trait RiskManager: Send + Sync {
+    /// Compose checks for the engine.
+    fn pipeline(&self) -> RiskPipeline;
+}
+
+/// Default checks: pause, trading disabled, optional daily loss.
+#[derive(Clone, Debug, Default)]
+pub struct DefaultRiskManager {
+    /// Optional max daily loss in quote units.
+    pub max_daily_loss: Option<MaxDailyLossQuote>,
+}
+
+impl RiskManager for DefaultRiskManager {
+    fn pipeline(&self) -> RiskPipeline {
+        let mut checks: Vec<Box<dyn RiskCheck + Send + Sync>> = vec![
+            Box::new(PauseCheck),
+            Box::new(TradingDisabledCheck),
+        ];
+        if let Some(rule) = &self.max_daily_loss {
+            checks.push(Box::new(rule.clone()));
+        }
+        RiskPipeline::new(checks)
+    }
+}
+
 /// Ordered pipeline of checks.
+#[derive(Clone)]
 pub struct RiskPipeline {
-    checks: Vec<Box<dyn RiskCheck + Send + Sync>>,
+    checks: std::sync::Arc<Vec<Box<dyn RiskCheck + Send + Sync>>>,
 }
 
 impl RiskPipeline {
     /// New pipeline.
     pub fn new(checks: Vec<Box<dyn RiskCheck + Send + Sync>>) -> Self {
-        Self { checks }
+        Self {
+            checks: std::sync::Arc::new(checks),
+        }
     }
 
     /// Run all checks.
     pub fn validate(&self, state: &GlobalState, intent: &OrderIntent) -> Result<()> {
-        for c in &self.checks {
+        for c in self.checks.iter() {
             c.check(state, intent)?;
         }
         Ok(())
@@ -136,10 +190,7 @@ mod tests {
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
-            crate::state::InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            crate::state::InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
@@ -167,10 +218,7 @@ mod tests {
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
-            crate::state::InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            crate::state::InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
@@ -198,10 +246,7 @@ mod tests {
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
-            crate::state::InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            crate::state::InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
@@ -229,10 +274,7 @@ mod tests {
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
-            crate::state::InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            crate::state::InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut bal = HashMap::new();
         bal.insert(Asset("USDT".into()), Decimal::from(8500u64));

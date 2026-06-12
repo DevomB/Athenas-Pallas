@@ -3,7 +3,7 @@
 use crate::audit::{self, EngineAudit, StrategySkipReason};
 use crate::error::{Error, Result};
 use crate::events::{ControlEvent, Event, OrderIntent, OrderIntentSource, TimerEvent};
-use crate::execution::ExecutionGateway;
+use crate::execution::{ExecutionGateway, SyncExecutionGateway};
 use crate::risk::RiskPipeline;
 use crate::state::{GlobalState, InstrumentIndex};
 use crate::strategy::{Strategy, StrategyContext};
@@ -43,6 +43,13 @@ pub struct EngineHandle {
 }
 
 impl EngineHandle {
+    /// Placeholder before [`crate::system::System::init_with_runtime`] wires a live channel.
+    pub fn disconnected() -> Self {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        Self { tx, cmd_tx: None }
+    }
+
     /// Clone the underlying sender (for connectors / control fan-in).
     pub fn sender(&self) -> mpsc::Sender<Event> {
         self.tx.clone()
@@ -295,6 +302,168 @@ where
     dispatch_event_audited(state, strategy, risk, exec, ev, None).await
 }
 
+/// Sync event dispatch for backtest replay (no async executor on the hot path).
+pub fn dispatch_event_sync<S, E>(
+    state: &mut GlobalState,
+    strategy: &mut S,
+    risk: &RiskPipeline,
+    exec: &E,
+    ev: Event,
+    intents: &mut Vec<OrderIntent>,
+) -> Result<()>
+where
+    S: Strategy,
+    E: SyncExecutionGateway,
+{
+    process_event_sync(state, strategy, risk, exec, ev, intents)
+}
+
+fn process_event_sync<S, E>(
+    state: &mut GlobalState,
+    strategy: &mut S,
+    risk: &RiskPipeline,
+    exec: &E,
+    ev: Event,
+    intents: &mut Vec<OrderIntent>,
+) -> Result<()>
+where
+    S: Strategy,
+    E: SyncExecutionGateway,
+{
+    match &ev {
+        Event::Market(m) => {
+            state.apply_market(m);
+            let passive = exec.poll_after_market(&state.snapshot())?;
+            for a in passive {
+                state.apply_account(&a);
+            }
+        }
+        Event::Account(a) => state.apply_account(a),
+        Event::Control(c) => apply_control_sync(state, exec, risk, c)?,
+        Event::Timer(_) => {}
+    }
+
+    let now = event_time(&ev);
+    state.refresh_daily_risk_anchor(now);
+
+    if state.paused || state.trading_state == TradingState::Disabled {
+        return Ok(());
+    }
+
+    let snap = state.snapshot();
+    let ctx = StrategyContext {
+        now,
+        state: &snap,
+    };
+    intents.clear();
+    strategy.on_event(&ctx, &ev, intents);
+
+    for intent in intents.drain(..) {
+        let snap = state.snapshot();
+        if let Err(e) = risk.validate(&snap, &intent) {
+            warn!(target: "athenas_pallas::engine", "risk: {e}");
+            continue;
+        }
+        match dispatch_intent_sync(exec, &snap, &intent) {
+            Ok(evs) => {
+                for a in evs {
+                    state.apply_account(&a);
+                }
+            }
+            Err(e) => error!(target: "athenas_pallas::engine", "execution: {e}"),
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_control_sync<E: SyncExecutionGateway>(
+    state: &mut GlobalState,
+    exec: &E,
+    risk: &RiskPipeline,
+    c: &ControlEvent,
+) -> Result<()> {
+    match c {
+        ControlEvent::Pause => state.paused = true,
+        ControlEvent::Resume => state.paused = false,
+        ControlEvent::DisableTrading => state.trading_state = TradingState::Disabled,
+        ControlEvent::EnableTrading => state.trading_state = TradingState::Enabled,
+        ControlEvent::CancelAll => {
+            let evs = exec.cancel_all(&state.snapshot())?;
+            for a in evs {
+                state.apply_account(&a);
+            }
+        }
+        ControlEvent::Flatten => {
+            let evs = exec.cancel_all(&state.snapshot())?;
+            for a in evs {
+                state.apply_account(&a);
+            }
+            let insts: Vec<_> = state
+                .positions
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| !p.is_zero())
+                .filter_map(|(ix, _)| state.registry.id(InstrumentIndex(ix)).cloned())
+                .collect();
+            for inst in insts {
+                close_position_with_flatten_source_sync(state, exec, risk, inst);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn close_position_with_flatten_source_sync<E: SyncExecutionGateway>(
+    state: &mut GlobalState,
+    exec: &E,
+    risk: &RiskPipeline,
+    inst: InstrumentId,
+) {
+    let snap = state.snapshot();
+    let pos = snap.position_qty(&inst);
+    if pos.is_zero() {
+        return;
+    }
+    let intent = OrderIntent {
+        instrument: inst,
+        side: if pos > Decimal::ZERO {
+            Side::Sell
+        } else {
+            Side::Buy
+        },
+        order_type: OrderType::Market,
+        price: None,
+        qty: pos.abs(),
+        client_order_id: None,
+        source: OrderIntentSource::Flatten,
+        strategy_id: None,
+    };
+    if let Err(e) = risk.validate(&snap, &intent) {
+        warn!(target: "athenas_pallas::engine", "flatten risk: {e}");
+        return;
+    }
+    match dispatch_intent_sync(exec, &snap, &intent) {
+        Ok(evs) => {
+            for a in evs {
+                state.apply_account(&a);
+            }
+        }
+        Err(e) => error!(target: "athenas_pallas::engine", "flatten execution: {e}"),
+    }
+}
+
+fn dispatch_intent_sync<E: SyncExecutionGateway>(
+    exec: &E,
+    state: &GlobalState,
+    intent: &OrderIntent,
+) -> Result<Vec<crate::events::AccountEvent>> {
+    match intent.order_type {
+        OrderType::Limit => exec.place_limit(state, intent),
+        OrderType::Market => exec.place_market(state, intent),
+    }
+}
+
 async fn process_event<S, E>(
     state: &mut GlobalState,
     strategy: &mut S,
@@ -355,7 +524,8 @@ where
         now,
         state: &snap,
     };
-    let intents = strategy.on_event(&ctx, &ev);
+    let mut intents = Vec::new();
+    strategy.on_event(&ctx, &ev, &mut intents);
 
     for intent in intents {
         let snap = state.snapshot();
@@ -411,6 +581,7 @@ fn event_time(ev: &Event) -> OffsetDateTime {
         Event::Market(crate::events::MarketEvent::Trade { ts, .. }) => *ts,
         Event::Market(crate::events::MarketEvent::BookL1 { ts, .. }) => *ts,
         Event::Market(crate::events::MarketEvent::BookL2Snapshot(s)) => s.ts,
+        Event::Market(crate::events::MarketEvent::Bar { ts, .. }) => *ts,
         Event::Timer(t) => t.ts,
         _ => OffsetDateTime::now_utc(),
     }

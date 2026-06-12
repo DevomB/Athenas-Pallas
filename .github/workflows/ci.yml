@@ -10,12 +10,53 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  fmt-clippy-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy -p athenas-pallas -- -D warnings
+      - name: test athenas-pallas
+        run: cargo test -p athenas-pallas
+      - name: python SMA golden
+        run: cargo test -p athenas-pallas --test external_strategy_golden
 
-      - name: Test workspace
+  test-workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test workspace (default features)
         run: cargo test --workspace
+
+  test-binance-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test athenas-pallas binance-live
+        run: cargo test -p athenas-pallas --features binance-live
+
+  test-control-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test control-server
+        run: cargo test -p athenas-pallas --features control-server
+
+  test-all-features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test athenas-pallas all features
+        run: cargo test -p athenas-pallas --features all

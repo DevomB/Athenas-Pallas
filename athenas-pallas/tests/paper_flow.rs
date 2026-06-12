@@ -15,14 +15,14 @@ struct OneShot {
 }
 
 impl Strategy for OneShot {
-    fn on_event(&mut self, ctx: &StrategyContext<'_>, event: &Event) -> Vec<OrderIntent> {
+    fn on_event(&mut self, ctx: &StrategyContext<'_>, event: &Event, out: &mut Vec<OrderIntent>) {
         if self.fired {
-            return vec![];
+            return;
         }
         if matches!(event, Event::Market(MarketEvent::BookL1 { .. })) {
             if ctx.state.mid_or_last(&self.inst).is_some() {
                 self.fired = true;
-                return vec![OrderIntent {
+                out.push(OrderIntent {
                     instrument: self.inst.clone(),
                     side: Side::Buy,
                     order_type: OrderType::Market,
@@ -31,10 +31,9 @@ impl Strategy for OneShot {
                     client_order_id: None,
                     source: OrderIntentSource::User,
                     strategy_id: None,
-                }];
+                });
             }
         }
-        vec![]
     }
 }
 
@@ -44,10 +43,7 @@ async fn paper_market_updates_balances() {
     let mut instruments = HashMap::new();
     instruments.insert(
         inst.clone(),
-        InstrumentMeta {
-            base: Asset("BTC".into()),
-            quote: Asset("USDT".into()),
-        },
+        InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
     );
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));

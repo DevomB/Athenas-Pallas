@@ -1,7 +1,11 @@
 //! Historical and synthetic event sources for deterministic replay.
 
+pub mod bar;
 pub mod batch;
+pub mod config;
 pub mod replay;
+pub mod runner;
+pub mod sources;
 
 use std::fs::File;
 use std::io::Read as _;
@@ -74,7 +78,7 @@ impl CsvBarSource {
         Ok(Self {
             rows,
             idx: 0,
-            instrument: InstrumentId { exchange, symbol },
+            instrument: InstrumentId::new(exchange.to_string(), symbol.to_string()),
         })
     }
 
@@ -83,12 +87,12 @@ impl CsvBarSource {
         Self {
             rows,
             idx: 0,
-            instrument: InstrumentId { exchange, symbol },
+            instrument: InstrumentId::new(exchange.to_string(), symbol.to_string()),
         }
     }
 }
 
-fn parse_ts(s: &str) -> Option<OffsetDateTime> {
+pub(crate) fn parse_ts(s: &str) -> Option<OffsetDateTime> {
     if let Ok(t) = OffsetDateTime::parse(s, &Rfc3339) {
         return Some(t);
     }
@@ -108,21 +112,15 @@ impl HistoricalSource for CsvBarSource {
     fn next_event(&mut self) -> Option<Event> {
         let row = self.rows.get(self.idx)?;
         self.idx += 1;
-        let ts = parse_ts(&row.ts).unwrap_or_else(|| OffsetDateTime::now_utc());
-        let spread = row.high - row.low;
-        let pad = if spread.is_zero() {
-            row.close / Decimal::from(10_000u64)
-        } else {
-            spread / Decimal::from(100u64)
-        };
-        let mid = row.close;
-        let bid = mid - pad;
-        let ask = mid + pad;
-        Some(Event::Market(MarketEvent::BookL1 {
+        let ts = parse_ts(&row.ts).unwrap_or_else(OffsetDateTime::now_utc);
+        Some(Event::Market(MarketEvent::Bar {
             instrument: self.instrument.clone(),
             ts,
-            bid,
-            ask,
+            open: row.open,
+            high: row.high,
+            low: row.low,
+            close: row.close,
+            volume: row.volume,
         }))
     }
 }
@@ -233,7 +231,7 @@ impl HistoricalSource for CsvOhlcSource {
     fn next_event(&mut self) -> Option<Event> {
         let row = self.rows.get(self.idx)?;
         self.idx += 1;
-        let ts = parse_ts(&row.ts).unwrap_or_else(|| OffsetDateTime::now_utc());
+        let ts = parse_ts(&row.ts).unwrap_or_else(OffsetDateTime::now_utc);
         let mid = row.close;
         let half_spread = mid * self.half_spread_from_mid_bps / Decimal::from(10_000u64);
         let bid = mid - half_spread;
@@ -248,9 +246,12 @@ impl HistoricalSource for CsvOhlcSource {
 }
 
 /// Optional hook for custom microstructure models.
-pub trait FillModel: Send {
+pub trait FillModel: Send + Sync {
     /// Label for logging.
     fn name(&self) -> &'static str;
+
+    /// True when a resting limit would cross the touch (paper/sim use this).
+    fn limit_would_fill(&self, side: crate::types::Side, limit: Decimal, bid: Decimal, ask: Decimal) -> bool;
 }
 
 /// Default touch-based fill assumption (fills use paper/sim gateways).
@@ -261,7 +262,77 @@ impl FillModel for TouchCrossFillModel {
     fn name(&self) -> &'static str {
         "touch_cross"
     }
+
+    fn limit_would_fill(&self, side: crate::types::Side, limit: Decimal, bid: Decimal, ask: Decimal) -> bool {
+        match side {
+            crate::types::Side::Buy => limit >= ask,
+            crate::types::Side::Sell => limit <= bid,
+        }
+    }
 }
 
-pub use batch::{run_scenarios_parallel, run_scenarios_serial, RunReport, Scenario};
+pub use bar::{default_tick_size, Bar, BarSeries, BarSeriesSource};
+pub use batch::{
+    run_scenarios_parallel, run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario,
+};
+pub use config::{parse_base_quote, parse_instrument, BacktestConfig, DataFormat};
 pub use replay::{read_events_jsonl, replay_events_serial};
+pub use runner::{BacktestReport, BacktestRunner};
+
+#[cfg(test)]
+mod csv_tests {
+    use super::*;
+    use crate::events::Event;
+    use rust_decimal::Decimal;
+    use std::path::PathBuf;
+
+    fn sample_csv() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("data")
+            .join("BTCUSDT_1d.csv")
+    }
+
+    #[test]
+    fn from_path_yields_ninety_events() {
+        let mut src = CsvBarSource::from_path(
+            &sample_csv(),
+            ExchangeId("binance".into()),
+            Symbol("BTCUSDT".into()),
+        )
+        .expect("csv");
+        let mut n = 0;
+        while src.next_event().is_some() {
+            n += 1;
+        }
+        assert_eq!(n, 90);
+    }
+
+    #[test]
+    fn from_path_last_close() {
+        let mut src = CsvBarSource::from_path(
+            &sample_csv(),
+            ExchangeId("binance".into()),
+            Symbol("BTCUSDT".into()),
+        )
+        .expect("csv");
+        let mut last = None;
+        while let Some(ev) = src.next_event() {
+            last = Some(ev);
+        }
+        let Event::Market(MarketEvent::Bar { close, .. }) = last.unwrap() else {
+            panic!("expected Bar");
+        };
+        assert!(close > Decimal::new(44_000, 0));
+    }
+
+    #[test]
+    fn empty_csv_errors() {
+        let res = CsvBarSource::from_str(
+            "ts,open,high,low,close,volume\n",
+            ExchangeId("x".into()),
+            Symbol("Y".into()),
+        );
+        assert!(matches!(res, Err(ref e) if e.contains("empty csv")));
+    }
+}

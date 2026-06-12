@@ -37,10 +37,7 @@ async fn market_order_signed_post_parses_response() {
     let mut instruments = HashMap::new();
     instruments.insert(
         i.clone(),
-        InstrumentMeta {
-            base: Asset("BTC".into()),
-            quote: Asset("USDT".into()),
-        },
+        InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
     );
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));

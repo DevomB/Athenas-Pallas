@@ -36,8 +36,12 @@ use tracing::{info, warn};
 struct Hold {}
 
 impl Strategy for Hold {
-    fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event) -> Vec<OrderIntent> {
-        vec![]
+    fn on_event(
+        &mut self,
+        _ctx: &StrategyContext<'_>,
+        _event: &Event,
+        _: &mut Vec<OrderIntent>,
+    ) {
     }
 }
 
@@ -62,10 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut instruments = HashMap::new();
     instruments.insert(
         instrument.clone(),
-        InstrumentMeta {
-            base: Asset("BTC".into()),
-            quote: Asset("USDT".into()),
-        },
+        InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
     );
 
     let mut balances = HashMap::new();

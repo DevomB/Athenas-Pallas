@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use super::{ExecutionGateway, PaperGateway, PaperConfig};
+use super::{ExecutionGateway, PaperGateway, PaperConfig, SyncExecutionGateway};
 use crate::error::Result;
 use crate::events::{AccountEvent, OrderIntent};
 use crate::state::GlobalState;
@@ -36,7 +36,7 @@ impl ExecutionGateway for SimGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.inner.place_limit(state, intent).await
+        self.inner.place_limit_sync(state, intent)
     }
 
     async fn place_market(
@@ -44,18 +44,48 @@ impl ExecutionGateway for SimGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.inner.place_market(state, intent).await
+        self.inner.place_market_sync(state, intent)
     }
 
     async fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
-        self.inner.cancel(state, order_id).await
+        self.inner.cancel_sync(state, order_id)
     }
 
     async fn cancel_all(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.inner.cancel_all(state).await
+        self.inner.cancel_all_sync(state)
     }
 
     async fn poll_after_market(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.inner.poll_after_market(state).await
+        self.inner.poll_after_market_sync(state)
+    }
+}
+
+impl SyncExecutionGateway for SimGateway {
+    fn place_limit(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        self.inner.place_limit_sync(state, intent)
+    }
+
+    fn place_market(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        self.inner.place_market_sync(state, intent)
+    }
+
+    fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
+        self.inner.cancel_sync(state, order_id)
+    }
+
+    fn cancel_all(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
+        self.inner.cancel_all_sync(state)
+    }
+
+    fn poll_after_market(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
+        self.inner.poll_after_market_sync(state)
     }
 }

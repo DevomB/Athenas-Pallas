@@ -34,12 +34,18 @@ pub enum EngineAudit {
         /// Number of account events merged into state.
         account_events: usize,
     },
+    /// Engine loop ended.
+    Shutdown(ShutdownAudit),
     /// Control plane action applied (before strategy gate).
     ControlApplied {
         /// Which control event.
         control: ControlEventSummary,
     },
 }
+
+/// Final audit marker returned from [`crate::system::System::shutdown`].
+#[derive(Clone, Debug, Default)]
+pub struct ShutdownAudit;
 
 /// Summary of [`crate::events::ControlEvent`].
 #[derive(Clone, Debug)]
@@ -110,6 +116,7 @@ fn event_ts_unix_ns(ev: &Event) -> Option<i128> {
         Event::Market(MarketEvent::Trade { ts, .. }) => Some(ts.unix_timestamp_nanos()),
         Event::Market(MarketEvent::BookL1 { ts, .. }) => Some(ts.unix_timestamp_nanos()),
         Event::Market(MarketEvent::BookL2Snapshot(s)) => Some(s.ts.unix_timestamp_nanos()),
+        Event::Market(MarketEvent::Bar { ts, .. }) => Some(ts.unix_timestamp_nanos()),
         Event::Timer(t) => Some(t.ts.unix_timestamp_nanos()),
         _ => None,
     }

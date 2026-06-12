@@ -34,6 +34,9 @@ pub enum Error {
     /// Invalid configuration or state.
     #[error("invalid: {0}")]
     Invalid(String),
+    /// External strategy protocol failure.
+    #[error("strategy protocol: {0}")]
+    StrategyProtocol(String),
 }
 
 /// Result alias.

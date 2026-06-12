@@ -14,9 +14,7 @@ use time::OffsetDateTime;
 struct Quiet;
 
 impl Strategy for Quiet {
-    fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event) -> Vec<OrderIntent> {
-        vec![]
-    }
+    fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event, _: &mut Vec<OrderIntent>) {}
 }
 
 #[tokio::test]
@@ -25,10 +23,7 @@ async fn flatten_closes_position_when_paused() {
     let mut instruments = HashMap::new();
     instruments.insert(
         inst.clone(),
-        InstrumentMeta {
-            base: Asset("BTC".into()),
-            quote: Asset("USDT".into()),
-        },
+        InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
     );
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));

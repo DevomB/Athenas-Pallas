@@ -1,0 +1,137 @@
+//! JSON line protocol for external strategies.
+#![allow(missing_docs)]
+
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use crate::events::{Event, OrderIntent};
+use crate::types::InstrumentId;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InitMsg {
+    pub msg: String,
+    pub instruments: Vec<InstrumentInfo>,
+    pub balances: HashMap<String, String>,
+    pub config: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InstrumentInfo {
+    pub exchange: String,
+    pub symbol: String,
+    pub base: String,
+    pub quote: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReadyMsg {
+    pub msg: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StrategySnapshot {
+    pub position_qty: String,
+    pub mid: Option<String>,
+    pub equity: String,
+    pub balances: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EventMsg {
+    pub msg: String,
+    pub seq: u64,
+    pub event: Event,
+    pub ctx: StrategySnapshot,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IntentJson {
+    pub instrument: InstrumentId,
+    pub side: crate::types::Side,
+    pub order_type: crate::types::OrderType,
+    pub qty: String,
+    pub price: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IntentsMsg {
+    pub msg: String,
+    pub seq: u64,
+    pub intents: Vec<IntentJson>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ShutdownMsg {
+    pub msg: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ErrorMsg {
+    pub msg: String,
+    pub detail: String,
+}
+
+pub fn snapshot_from(
+    state: &crate::state::GlobalState,
+    instrument: &InstrumentId,
+) -> StrategySnapshot {
+    let mut balances = HashMap::new();
+    for (a, v) in &state.balances {
+        balances.insert(a.0.to_string(), v.to_string());
+    }
+    StrategySnapshot {
+        position_qty: state.position_qty(instrument).to_string(),
+        mid: state.mid_or_last(instrument).map(|d| d.to_string()),
+        equity: state
+            .mark_to_market_equity(instrument)
+            .unwrap_or(Decimal::ZERO)
+            .to_string(),
+        balances,
+    }
+}
+
+pub fn intents_to_orders(intents: Vec<IntentJson>) -> crate::Result<Vec<OrderIntent>> {
+    let mut out = Vec::with_capacity(intents.len());
+    for i in intents {
+        let qty: Decimal = i
+            .qty
+            .parse()
+            .map_err(|_| crate::error::Error::Invalid(format!("bad qty {}", i.qty)))?;
+        if qty <= Decimal::ZERO {
+            return Err(crate::error::Error::Invalid("qty must be positive".into()));
+        }
+        let price = match i.price {
+            Some(ref p) => Some(
+                p.parse()
+                    .map_err(|_| crate::error::Error::Invalid(format!("bad price {p}")))?,
+            ),
+            None => None,
+        };
+        out.push(OrderIntent {
+            instrument: i.instrument,
+            side: i.side,
+            order_type: i.order_type,
+            price,
+            qty,
+            client_order_id: None,
+            source: crate::events::OrderIntentSource::User,
+            strategy_id: None,
+        });
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ready_roundtrip() {
+        let j = serde_json::to_string(&ReadyMsg {
+            msg: "ready".into(),
+        })
+        .unwrap();
+        let _: ReadyMsg = serde_json::from_str(&j).unwrap();
+    }
+}

@@ -8,6 +8,7 @@
 
 mod paper;
 mod sim;
+mod sync_paper;
 
 #[cfg(all(feature = "live-trading", not(feature = "binance-live")))]
 mod live;
@@ -23,6 +24,7 @@ pub use binance_live::{BinanceCredentials, BinanceLiveGateway};
 
 pub use paper::{PaperConfig, PaperGateway};
 pub use sim::SimGateway;
+pub use sync_paper::{SyncExecutionGateway, SyncPaperGateway};
 
 use crate::error::Result;
 use crate::events::OrderIntent;

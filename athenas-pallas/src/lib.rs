@@ -29,24 +29,38 @@ pub mod instrument;
 pub mod integration;
 pub mod metrics;
 pub mod oms;
+pub mod replica;
 pub mod risk;
 pub mod state;
 pub mod strategy;
+pub mod system;
 pub mod types;
 
 #[cfg(feature = "control-server")]
 pub mod control;
 
 pub use engine::{
-    dispatch_event, dispatch_event_audited, engine_step, Engine, EngineBuilder, EngineCommand,
-    EngineConfig, EngineHandle, TimerSchedule,
+    dispatch_event, dispatch_event_audited, dispatch_event_sync, engine_step, Engine, EngineBuilder,
+    EngineCommand, EngineConfig, EngineHandle, TimerSchedule,
 };
 pub use error::{Error, Result};
 pub use events::{BookL2Snapshot, Event, OrderIntentSource};
 pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, StrategyId, Symbol, TradingState};
 
-pub use instrument::{InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry};
+pub use instrument::{
+    IndexedInstruments, InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry,
+    SystemConfig,
+};
+pub use replica::EngineStateReplica;
+pub use risk::{DefaultRiskManager, RiskManager};
+pub use system::{
+    AuditMode, EngineFeedMode, EngineSummary, LiveClock, SummaryPeriod, System, SystemArgs,
+    SystemBuilder, SystemHandle, TradingSummaryGenerator,
+};
 pub use metrics::{
     strategy_position_report, trading_summaries_per_strategy, StrategyPositionRow, TradingSummary,
 };
 pub use oms::OrderStore;
+pub use strategy::Strategy;
+pub use state::GlobalState;
+pub use execution::{PaperConfig, PaperGateway, SimGateway};

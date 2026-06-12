@@ -62,6 +62,68 @@ pub struct PerformanceSummary {
     pub equity: Vec<EquityPoint>,
 }
 
+/// O(1) rolling drawdown and Welford return stats during replay.
+#[derive(Clone, Debug, Default)]
+pub struct RollingMetrics {
+    peak: Decimal,
+    max_drawdown: f64,
+    prev: Option<Decimal>,
+    n_returns: usize,
+    mean: f64,
+    m2: f64,
+}
+
+impl RollingMetrics {
+    /// New tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record one equity sample.
+    pub fn record(&mut self, equity: Decimal, _periods_per_year: f64) {
+        let e = equity.to_f64().unwrap_or(0.0);
+        if equity > self.peak {
+            self.peak = equity;
+        }
+        let peak_f = self.peak.to_f64().unwrap_or(e);
+        if peak_f > 0.0 {
+            let dd = (peak_f - e) / peak_f;
+            if dd > self.max_drawdown {
+                self.max_drawdown = dd;
+            }
+        }
+        if let Some(prev) = self.prev {
+            let p = prev.to_f64().unwrap_or(1.0);
+            if p.abs() > 1e-12 {
+                let r = (e - p) / p;
+                self.n_returns += 1;
+                let delta = r - self.mean;
+                self.mean += delta / self.n_returns as f64;
+                let delta2 = r - self.mean;
+                self.m2 += delta * delta2;
+            }
+        }
+        self.prev = Some(equity);
+    }
+
+    /// Peak-to-trough drawdown seen so far (0..1).
+    pub fn max_drawdown(&self) -> f64 {
+        self.max_drawdown
+    }
+
+    /// Annualized Sharpe from Welford stats.
+    pub fn sharpe(&self, periods_per_year: f64) -> f64 {
+        if self.n_returns < 2 {
+            return 0.0;
+        }
+        let var = self.m2 / (self.n_returns - 1) as f64;
+        if var <= 0.0 {
+            return 0.0;
+        }
+        self.mean / var.sqrt() * periods_per_year.sqrt()
+    }
+}
+
 /// Compute summary. `periods_per_year` scales Sharpe/Sortino (e.g. 252 for daily bars).
 pub fn summarize(equity: Vec<EquityPoint>, periods_per_year: f64) -> PerformanceSummary {
     if equity.is_empty() {
@@ -332,10 +394,7 @@ mod tests {
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
-            InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut s = GlobalState::new(InstrumentRegistry::from_instruments(inst), HashMap::new());
         s.apply_account(&AccountEvent::Fill {

@@ -1,5 +1,6 @@
 //! Parallel replay of multiple synthetic or recorded scenarios.
 
+use crate::dispatch_event_sync;
 use crate::engine::dispatch_event;
 use crate::error::Result;
 use crate::events::{Event, MarketEvent};
@@ -41,6 +42,7 @@ fn equity_ts(ev: &Event) -> OffsetDateTime {
         Event::Market(MarketEvent::Trade { ts, .. }) => *ts,
         Event::Market(MarketEvent::BookL1 { ts, .. }) => *ts,
         Event::Market(MarketEvent::BookL2Snapshot(s)) => s.ts,
+        Event::Market(MarketEvent::Bar { ts, .. }) => *ts,
         Event::Timer(t) => t.ts,
         _ => OffsetDateTime::now_utc(),
     }
@@ -144,6 +146,49 @@ where
     Ok(out)
 }
 
+/// Parallel replay using rayon (sync hot path, no tokio).
+pub fn run_scenarios_parallel_sync<S, E, B>(
+    scenarios: Vec<Scenario>,
+    build: &B,
+    risk: &RiskPipeline,
+    exec: &E,
+    equity_instrument: InstrumentId,
+    periods_per_year: f64,
+) -> Vec<RunReport>
+where
+    B: Fn(&Scenario) -> (GlobalState, S) + Sync,
+    S: Strategy + Send,
+    E: crate::execution::SyncExecutionGateway + Sync,
+{
+    use rayon::prelude::*;
+    let mut out: Vec<RunReport> = scenarios
+        .into_par_iter()
+        .map(|sc| {
+            let (mut state, mut strat) = build(&sc);
+            let mut curve: Vec<EquityPoint> = Vec::new();
+            let mut intents = Vec::new();
+            for ev in sc.events {
+                let ts = equity_ts(&ev);
+                let _ = dispatch_event_sync(&mut state, &mut strat, risk, exec, ev, &mut intents);
+                if let Some(eq) = state.mark_to_market_equity(&equity_instrument) {
+                    curve.push(EquityPoint {
+                        ts,
+                        equity_quote: eq,
+                    });
+                }
+            }
+            let summary = summarize(curve, periods_per_year);
+            RunReport {
+                name: sc.name,
+                summary,
+                seed: sc.seed,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,19 +205,14 @@ mod tests {
     struct Noop;
 
     impl Strategy for Noop {
-        fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event) -> Vec<OrderIntent> {
-            vec![]
-        }
+        fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event, _: &mut Vec<OrderIntent>) {}
     }
 
     fn mk_state(inst: &InstrumentId) -> GlobalState {
         let mut instruments = HashMap::new();
         instruments.insert(
             inst.clone(),
-            InstrumentMeta {
-                base: Asset("BTC".into()),
-                quote: Asset("USDT".into()),
-            },
+            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
         let mut balances = HashMap::new();
         balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));

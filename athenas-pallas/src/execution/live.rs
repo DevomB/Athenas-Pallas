@@ -1,4 +1,6 @@
 //! Live trading scaffold — wire signed REST / private WS in a venue adapter.
+//!
+//! Requires feature `live-trading`. Prefer [`crate::execution::BinanceLiveGateway`] with `binance-live`.
 
 use async_trait::async_trait;
 

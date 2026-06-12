@@ -169,10 +169,7 @@ impl BinanceLiveGateway {
     }
 
     fn parse_symbol_to_instrument(sym: &str) -> InstrumentId {
-        InstrumentId {
-            exchange: crate::types::ExchangeId("binance".into()),
-            symbol: Symbol(sym.to_uppercase()),
-        }
+        InstrumentId::new("binance", sym.to_uppercase())
     }
 
     fn parse_order_json(
@@ -204,7 +201,7 @@ impl BinanceLiveGateway {
         let symbol = v
             .get("symbol")
             .and_then(|s| s.as_str())
-            .unwrap_or(&instrument_hint.symbol.0);
+            .unwrap_or(instrument_hint.symbol.as_str());
         let instrument_id = Self::parse_symbol_to_instrument(symbol);
         let side = match v.get("side").and_then(|s| s.as_str()) {
             Some("BUY") => Side::Buy,
@@ -297,7 +294,7 @@ impl super::ExecutionGateway for BinanceLiveGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        let sym = intent.instrument.symbol.0.clone();
+        let sym = intent.instrument.symbol.clone();
         let price = intent
             .price
             .ok_or_else(|| Error::Invalid("limit needs price".into()))?;
@@ -329,7 +326,7 @@ impl super::ExecutionGateway for BinanceLiveGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        let sym = intent.instrument.symbol.0.clone();
+        let sym = intent.instrument.symbol.clone();
         let mut params = vec![
             ("symbol".into(), sym),
             ("side".into(), match intent.side {
@@ -355,7 +352,7 @@ impl super::ExecutionGateway for BinanceLiveGateway {
         let mut sym_for_symbol = None;
         for o in state.open_orders.values() {
             if o.id == order_id {
-                sym_for_symbol = Some(o.instrument.symbol.0.clone());
+                sym_for_symbol = Some(o.instrument.symbol.clone());
                 break;
             }
         }
@@ -395,7 +392,7 @@ impl super::ExecutionGateway for BinanceLiveGateway {
         symbols.dedup();
         if symbols.is_empty() {
             for o in state.open_orders.values() {
-                symbols.push(o.instrument.symbol.0.clone());
+                symbols.push(o.instrument.symbol.clone());
             }
             symbols.sort();
             symbols.dedup();
@@ -405,10 +402,7 @@ impl super::ExecutionGateway for BinanceLiveGateway {
             let cancel_text = self
                 .signed_delete("/api/v3/openOrders", vec![("symbol".into(), sym.clone())])
                 .await?;
-            let inst = InstrumentId {
-                exchange: crate::types::ExchangeId("binance".into()),
-                symbol: Symbol(sym),
-            };
+            let inst = InstrumentId::new("binance", sym);
             let quote_fee = state
                 .registry
                 .meta_by_id(&inst)

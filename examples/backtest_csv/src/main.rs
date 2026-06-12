@@ -4,7 +4,7 @@
 //! cargo run -p backtest_csv
 //! ```
 
-use athenas_pallas::backtest::{CsvBarSource, HistoricalSource, OhlcvRow};
+use athenas_pallas::backtest::{CsvBarSource, HistoricalSource};
 use athenas_pallas::dispatch_event;
 use athenas_pallas::events::{Event, OrderIntent};
 use athenas_pallas::execution::{PaperConfig, SimGateway};
@@ -16,6 +16,7 @@ use athenas_pallas::types::{Asset, EquityPoint, ExchangeId, InstrumentId, OrderT
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Buys a small amount on the first bar, then holds.
 struct BuyAndHold {
@@ -24,16 +25,13 @@ struct BuyAndHold {
 }
 
 impl Strategy for BuyAndHold {
-    fn on_event(&mut self, ctx: &StrategyContext, _event: &Event) -> Vec<OrderIntent> {
-        if self.done {
-            return vec![];
-        }
-        if ctx.state.mid_or_last(&self.instrument).is_none() {
-            return vec![];
+    fn on_event(&mut self, ctx: &StrategyContext, _event: &Event, out: &mut Vec<OrderIntent>) {
+        if self.done || ctx.state.mid_or_last(&self.instrument).is_none() {
+            return;
         }
         self.done = true;
         let qty = Decimal::from_f64(0.01).unwrap_or(Decimal::ZERO);
-        vec![OrderIntent {
+        out.push(OrderIntent {
             instrument: self.instrument.clone(),
             side: Side::Buy,
             order_type: OrderType::Market,
@@ -42,7 +40,7 @@ impl Strategy for BuyAndHold {
             client_order_id: None,
             source: athenas_pallas::events::OrderIntentSource::User,
             strategy_id: None,
-        }]
+        });
     }
 }
 
@@ -52,10 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut instruments = HashMap::new();
     instruments.insert(
         instrument.clone(),
-        InstrumentMeta {
-            base: Asset("BTC".into()),
-            quote: Asset("USDT".into()),
-        },
+        InstrumentMeta::spot("BTC", "USDT"),
     );
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
@@ -70,41 +65,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
     let exec = SimGateway::new(PaperConfig::default());
 
-    let rows = vec![
-        OhlcvRow {
-            ts: "2024-01-01T00:00:00Z".into(),
-            open: Decimal::new(40_000, 0),
-            high: Decimal::new(41_000, 0),
-            low: Decimal::new(39_000, 0),
-            close: Decimal::new(40_500, 0),
-            volume: Decimal::ONE,
-        },
-        OhlcvRow {
-            ts: "2024-01-02T00:00:00Z".into(),
-            open: Decimal::new(40_500, 0),
-            high: Decimal::new(42_000, 0),
-            low: Decimal::new(40_000, 0),
-            close: Decimal::new(41_800, 0),
-            volume: Decimal::ONE,
-        },
-        OhlcvRow {
-            ts: "2024-01-03T00:00:00Z".into(),
-            open: Decimal::new(41_800, 0),
-            high: Decimal::new(42_500, 0),
-            low: Decimal::new(41_000, 0),
-            close: Decimal::new(41_200, 0),
-            volume: Decimal::ONE,
-        },
-    ];
-
-    let mut src = CsvBarSource::from_ohlcv_rows(
+    let csv = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("data")
+        .join("BTCUSDT_1d.csv");
+    let mut src = CsvBarSource::from_path(
+        &csv,
         ExchangeId("binance".into()),
         Symbol("BTCUSDT".into()),
-        rows,
-    );
+    )?;
     let mut curve: Vec<EquityPoint> = Vec::new();
     while let Some(ev) = src.next_event() {
         let ts = match &ev {
+            Event::Market(athenas_pallas::events::MarketEvent::Bar { ts, .. }) => *ts,
             Event::Market(athenas_pallas::events::MarketEvent::BookL1 { ts, .. }) => *ts,
             Event::Market(athenas_pallas::events::MarketEvent::Trade { ts, .. }) => *ts,
             Event::Market(athenas_pallas::events::MarketEvent::BookL2Snapshot(s)) => s.ts,

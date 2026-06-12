@@ -60,10 +60,7 @@ async fn keepalive_listen_key(api_key: &str, rest_base: &str, key: &str) -> Resu
 }
 
 fn inst(sym: &str) -> InstrumentId {
-    InstrumentId {
-        exchange: crate::types::ExchangeId("binance".into()),
-        symbol: Symbol(sym.to_uppercase()),
-    }
+    InstrumentId::new("binance", sym.to_uppercase())
 }
 
 fn parse_generic(ev: &Value) -> Option<Vec<AccountEvent>> {
@@ -135,7 +132,8 @@ fn parse_execution_report(ev: &Value) -> Option<Vec<AccountEvent>> {
             ev.get("N")
                 .and_then(|a| a.as_str())
                 .unwrap_or("USDT")
-                .to_string(),
+                .to_string()
+                .into(),
         );
         out.push(AccountEvent::Fill {
             order_id: OrderId::from_venue_u64(oid),
@@ -156,7 +154,7 @@ fn parse_outbound(ev: &Value) -> Option<Vec<AccountEvent>> {
     let balances = ev.get("B")?.as_array()?;
     let mut out = Vec::new();
     for b in balances {
-        let asset = Asset(b.get("a")?.as_str()?.to_string());
+        let asset = Asset(b.get("a")?.as_str()?.to_string().into());
         let free: Decimal = b.get("f")?.as_str()?.parse().ok()?;
         out.push(AccountEvent::Balance { asset, free });
     }
