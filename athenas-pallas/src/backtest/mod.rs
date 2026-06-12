@@ -3,8 +3,10 @@
 pub mod bar;
 pub mod batch;
 pub mod config;
+pub mod cpp_build;
 pub mod replay;
 pub mod runner;
+pub mod session;
 pub mod sources;
 
 use std::fs::File;
@@ -271,13 +273,19 @@ impl FillModel for TouchCrossFillModel {
     }
 }
 
-pub use bar::{default_tick_size, Bar, BarSeries, BarSeriesSource};
+pub use bar::{decimal_to_ticks, default_tick_size, ticks_to_decimal, Bar, BarSeries, BarSeriesSource};
+pub use runner::BuyAndHold;
 pub use batch::{
     run_scenarios_parallel, run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario,
 };
 pub use config::{parse_base_quote, parse_instrument, BacktestConfig, DataFormat};
+pub use cpp_build::build_cpp_strategy;
 pub use replay::{read_events_jsonl, replay_events_serial};
 pub use runner::{BacktestReport, BacktestRunner};
+pub use session::{
+    downsample_equity, report_to_dto, run_backtest, run_backtest_with_cancel,
+    run_external_backtest, run_external_backtest_with_cancel, BacktestReportDto, EquityPointDto,
+};
 
 #[cfg(test)]
 mod csv_tests {
@@ -288,9 +296,7 @@ mod csv_tests {
 
     fn sample_csv() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("data")
-            .join("BTCUSDT_1d.csv")
+            .join("tests/fixtures/data/BTCUSDT_1d.csv")
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Market data subscription kinds and stream-oriented docs (barter-data style).
+//! Market data subscription kinds and historical download helpers.
 //!
 //! Connectors implement [`crate::connectors::MarketConnector`] and emit normalized
 //! [`crate::events::MarketEvent`] values into an [`crate::engine::EngineHandle`].
@@ -9,6 +9,9 @@
 //! [`crate::engine::EngineHandle`]. All tasks `send` into the same MPSC queue so the engine
 //! remains a single consumer. Normalize venue payloads to [`crate::events::MarketEvent`] inside
 //! each connector; keep the strategy and state venue-agnostic.
+
+#[cfg(feature = "data-fetch")]
+pub mod fetch;
 
 /// What public data a connector subscribes to (for documentation and future mux builders).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

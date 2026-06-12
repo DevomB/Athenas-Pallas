@@ -1,0 +1,24 @@
+[package]
+name = "pallas-app"
+version = "2.0.0"
+description = "Pallas backtest desktop app"
+edition = "2021"
+
+[lib]
+name = "pallas_app_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+athenas-pallas = { path = "../../athenas-pallas", features = ["data-fetch"] }
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+toml = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

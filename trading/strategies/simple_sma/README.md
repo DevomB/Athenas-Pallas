@@ -1,0 +1,18 @@
+# Simple SMA crossover
+
+SMA 5/20 crossover on bar close. Buys when fast crosses above slow; sells flat on death cross.
+
+## Run
+
+From `Backtesting-Engine`:
+
+```bash
+cargo run --release -p athenas-pallas --bin pallas-backtest -- \
+  --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv \
+  --instrument binance:BTCUSDT \
+  --initial-balance USDT:10000 \
+  --strategy trading/strategies/simple_sma/strategy.py \
+  --output results.json
+```
+
+Warmup: no orders until the 20-bar slow window is full.

@@ -5,10 +5,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[3]
-_SDK = _ROOT.parent / "trading" / "sdk"
+_HERE = Path(__file__).resolve()
+_SDK = _HERE.parents[2] / "sdk"
 if not (_SDK / "pallas_strategy.py").is_file():
-    _SDK = Path(__file__).resolve().parents[2] / "sdk"
+    _SDK = _HERE.parents[3].parent / "trading" / "sdk"
 sys.path.insert(0, str(_SDK))
 
 from pallas_strategy import Ctx, run

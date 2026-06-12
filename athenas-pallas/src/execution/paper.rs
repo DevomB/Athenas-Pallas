@@ -114,15 +114,16 @@ impl PaperGateway {
         let mut evs = Vec::new();
         let base_free = *state.balances.get(&meta.base).unwrap_or(&Decimal::ZERO);
         let quote_free = *state.balances.get(&meta.quote).unwrap_or(&Decimal::ZERO);
+        let notional = match meta.asset_class {
+            crate::instrument::AssetClass::Future => {
+                let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
+                price * qty * mult
+            }
+            _ => price * qty,
+        };
         let (new_base, new_quote) = match order.side {
-            Side::Buy => {
-                let cost = price * qty + fee;
-                (base_free + qty, quote_free - cost)
-            }
-            Side::Sell => {
-                let proceeds = price * qty - fee;
-                (base_free - qty, quote_free + proceeds)
-            }
+            Side::Buy => (base_free + qty, quote_free - notional - fee),
+            Side::Sell => (base_free - qty, quote_free + notional - fee),
         };
         evs.push(AccountEvent::Balance {
             asset: meta.base.clone(),

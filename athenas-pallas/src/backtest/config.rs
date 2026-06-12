@@ -16,6 +16,7 @@ pub enum DataFormat {
     Ohlcv,
     Yahoo,
     Fx,
+    Future,
 }
 
 /// User-facing backtest settings.
@@ -30,6 +31,11 @@ pub struct BacktestConfig {
     pub slippage_bps: Decimal,
     pub half_spread_bps: Decimal,
     pub periods_per_year: f64,
+    pub lot_size: Option<Decimal>,
+    pub tick_size: Option<Decimal>,
+    pub contract_multiplier: Option<Decimal>,
+    pub expiry: Option<String>,
+    pub record_equity_curve: bool,
     pub strategy_path: Option<PathBuf>,
     pub python_exe: String,
     pub output_path: Option<PathBuf>,
@@ -48,6 +54,11 @@ impl Default for BacktestConfig {
             slippage_bps: Decimal::from(5u64),
             half_spread_bps: Decimal::from(5u64),
             periods_per_year: 252.0,
+            lot_size: None,
+            tick_size: None,
+            contract_multiplier: None,
+            expiry: None,
+            record_equity_curve: true,
             strategy_path: None,
             python_exe: "python".into(),
             output_path: None,

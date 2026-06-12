@@ -1,5 +1,7 @@
 //! JSONL fixture replays through the engine batch path.
 
+mod common;
+
 use athenas_pallas::backtest::read_events_jsonl;
 use athenas_pallas::engine::EngineBuilder;
 use athenas_pallas::execution::{PaperConfig, SimGateway};
@@ -14,10 +16,7 @@ use std::fs::File;
 use std::path::PathBuf;
 
 fn jsonl_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("data")
-        .join("events_sample.jsonl")
+    common::fixture("events_sample.jsonl")
 }
 
 #[tokio::test]

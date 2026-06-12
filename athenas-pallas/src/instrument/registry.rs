@@ -29,6 +29,12 @@ pub struct InstrumentMeta {
     pub asset_class: AssetClass,
     /// Minimum order increment in base units.
     pub lot_size: Option<rust_decimal::Decimal>,
+    /// Quote currency per one point of price move (futures).
+    pub contract_multiplier: Option<rust_decimal::Decimal>,
+    /// Minimum price increment.
+    pub tick_size: Option<rust_decimal::Decimal>,
+    /// Contract month (e.g. `2025-03`).
+    pub expiry: Option<String>,
 }
 
 impl InstrumentMeta {
@@ -39,6 +45,29 @@ impl InstrumentMeta {
             quote: quote.into(),
             asset_class: AssetClass::Crypto,
             lot_size: None,
+            contract_multiplier: None,
+            tick_size: None,
+            expiry: None,
+        }
+    }
+
+    /// Listed future (qty = contracts).
+    pub fn future(
+        base: impl Into<Asset>,
+        quote: impl Into<Asset>,
+        contract_multiplier: rust_decimal::Decimal,
+        tick_size: rust_decimal::Decimal,
+        lot_size: Option<rust_decimal::Decimal>,
+        expiry: Option<String>,
+    ) -> Self {
+        Self {
+            base: base.into(),
+            quote: quote.into(),
+            asset_class: AssetClass::Future,
+            lot_size,
+            contract_multiplier: Some(contract_multiplier),
+            tick_size: Some(tick_size),
+            expiry,
         }
     }
 }

@@ -1,13 +1,16 @@
 # Changelog
 
-## 2.0.0 (unreleased)
+## 2.0.0
+
+### Unreleased
 
 - Single-crate backtest path: `pallas-backtest` CLI, sync `dispatch_event_sync`, `BarSeries`, `ExternalStrategy` (Python/C++ JSON IPC).
 - Inlined `pallas-instrument` into `athenas-pallas`; removed `pallas-data`, `pallas-execution`, `pallas-macro` from the workspace.
-- Sample data under `data/` (BTCUSDT OHLCV, Yahoo AAPL, FX EURUSD, JSONL events).
-- Python SMA proof strategy in sibling `trading/` with golden integration test.
+- Test fixtures under `athenas-pallas/tests/fixtures/`; `data/` is a gitignored fetch workspace.
+- Python SMA proof strategy in `Backtesting-Engine/trading/` with golden integration test.
+- Tauri desktop app (`pallas-app`) for fetch, configure, backtest, and chart results.
 
-## 2.0.0 (historical)
+### Historical (pre-consolidation)
 
 - Split workspace into `pallas-instrument`, `pallas-integration`, `pallas-data`, `pallas-execution`, `pallas-macro`, and `athenas-pallas` (core engine).
 - Barter-style `SystemConfig`, `IndexedInstruments`, `SystemBuilder`, audit replica, `EngineFeedMode::Iterator`, and `InstrumentFilter::None`.

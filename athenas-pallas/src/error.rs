@@ -37,6 +37,9 @@ pub enum Error {
     /// External strategy protocol failure.
     #[error("strategy protocol: {0}")]
     StrategyProtocol(String),
+    /// Backtest cancelled via cooperative flag.
+    #[error("backtest cancelled")]
+    Cancelled,
 }
 
 /// Result alias.

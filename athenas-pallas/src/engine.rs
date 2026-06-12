@@ -333,7 +333,7 @@ where
     match &ev {
         Event::Market(m) => {
             state.apply_market(m);
-            let passive = exec.poll_after_market(&state.snapshot())?;
+            let passive = exec.poll_after_market(state)?;
             for a in passive {
                 state.apply_account(&a);
             }
@@ -343,6 +343,74 @@ where
         Event::Timer(_) => {}
     }
 
+    dispatch_strategy_sync(state, strategy, risk, exec, &ev, intents)
+}
+
+/// Run strategy, risk, and execution against live state (no snapshot clones).
+pub fn dispatch_strategy_sync<S, E>(
+    state: &mut GlobalState,
+    strategy: &mut S,
+    risk: &RiskPipeline,
+    exec: &E,
+    ev: &Event,
+    intents: &mut Vec<OrderIntent>,
+) -> Result<()>
+where
+    S: Strategy,
+    E: SyncExecutionGateway,
+{
+    let now = event_time(ev);
+    state.refresh_daily_risk_anchor(now);
+
+    if state.paused || state.trading_state == TradingState::Disabled {
+        return Ok(());
+    }
+
+    let ctx = StrategyContext { now, state };
+    intents.clear();
+    strategy.on_event(&ctx, ev, intents);
+
+    for intent in intents.drain(..) {
+        if let Err(e) = risk.validate(state, &intent) {
+            warn!(target: "athenas_pallas::engine", "risk: {e}");
+            continue;
+        }
+        match dispatch_intent_sync(exec, state, &intent) {
+            Ok(evs) => {
+                for a in evs {
+                    state.apply_account(&a);
+                }
+            }
+            Err(e) => error!(target: "athenas_pallas::engine", "execution: {e}"),
+        }
+    }
+
+    Ok(())
+}
+
+/// Backtest replay: market already applied; inline risk checks.
+pub fn dispatch_replay_sync<S>(
+    state: &mut GlobalState,
+    strategy: &mut S,
+    risk: &crate::risk::BacktestChecks,
+    exec: &impl SyncExecutionGateway,
+    ev: Event,
+    intents: &mut Vec<OrderIntent>,
+) -> Result<()>
+where
+    S: Strategy,
+{
+    match &ev {
+        Event::Market(_) => {
+            let passive = exec.poll_after_market(state)?;
+            for a in passive {
+                state.apply_account(&a);
+            }
+        }
+        Event::Account(a) => state.apply_account(a),
+        Event::Control(_) | Event::Timer(_) => {}
+    }
+
     let now = event_time(&ev);
     state.refresh_daily_risk_anchor(now);
 
@@ -350,21 +418,16 @@ where
         return Ok(());
     }
 
-    let snap = state.snapshot();
-    let ctx = StrategyContext {
-        now,
-        state: &snap,
-    };
+    let ctx = StrategyContext { now, state };
     intents.clear();
     strategy.on_event(&ctx, &ev, intents);
 
     for intent in intents.drain(..) {
-        let snap = state.snapshot();
-        if let Err(e) = risk.validate(&snap, &intent) {
+        if let Err(e) = risk.validate(state, &intent) {
             warn!(target: "athenas_pallas::engine", "risk: {e}");
             continue;
         }
-        match dispatch_intent_sync(exec, &snap, &intent) {
+        match dispatch_intent_sync(exec, state, &intent) {
             Ok(evs) => {
                 for a in evs {
                     state.apply_account(&a);

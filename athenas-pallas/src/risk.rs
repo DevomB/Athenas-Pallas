@@ -154,6 +154,20 @@ impl RiskManager for DefaultRiskManager {
     }
 }
 
+/// Inline pause + reject-short for synchronous backtest replay.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BacktestChecks;
+
+impl BacktestChecks {
+    /// Run standard backtest risk rules without dynamic dispatch.
+    #[inline]
+    pub fn validate(&self, state: &GlobalState, intent: &OrderIntent) -> Result<()> {
+        PauseCheck.check(state, intent)?;
+        RejectShort.check(state, intent)?;
+        Ok(())
+    }
+}
+
 /// Ordered pipeline of checks.
 #[derive(Clone)]
 pub struct RiskPipeline {

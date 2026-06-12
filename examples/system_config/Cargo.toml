@@ -1,9 +1,0 @@
-[package]
-name = "system_config"
-version.workspace = true
-edition.workspace = true
-publish = false
-
-[dependencies]
-athenas-pallas = { workspace = true }
-serde_json = { workspace = true }

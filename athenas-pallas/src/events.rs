@@ -146,6 +146,21 @@ pub struct TimerEvent {
     pub id: u32,
 }
 
+/// One executed fill for backtest reports.
+#[derive(Clone, Debug, Serialize)]
+pub struct FillRecord {
+    /// When the fill occurred.
+    pub ts: OffsetDateTime,
+    /// Buy or sell.
+    pub side: Side,
+    /// Base quantity.
+    pub qty: String,
+    /// Fill price.
+    pub price: String,
+    /// Fee paid.
+    pub fee: String,
+}
+
 /// Unified engine input.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {

@@ -27,7 +27,27 @@ jobs:
       - name: test athenas-pallas
         run: cargo test -p athenas-pallas
       - name: python SMA golden
-        run: cargo test -p athenas-pallas --test external_strategy_golden
+        run: cargo test -p athenas-pallas --test external_strategy_golden -- --ignored
+      - name: build examples
+        run: cargo build -p athenas-pallas --examples
+
+  cpp-golden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+      - name: C++ SMA golden
+        run: cargo test -p athenas-pallas --test cpp_strategy_golden -- --ignored
+
+  bench-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Bench noop amortized
+        run: cargo bench -p athenas-pallas --bench backtest_hotpath -- --noplot noop_100k_amortized
 
   test-workspace:
     runs-on: ubuntu-latest
@@ -60,3 +80,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Test athenas-pallas all features
         run: cargo test -p athenas-pallas --features all
+
+  test-data-fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test data-fetch feature
+        run: cargo test -p athenas-pallas --features data-fetch
+
+  check-pallas-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo check pallas-app
+        run: cargo check -p pallas-app

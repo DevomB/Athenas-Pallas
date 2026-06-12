@@ -3,9 +3,6 @@
 **/*.rs.bk
 *.pdb
 
-# Root Cargo.lock: workspaces often commit it for reproducible builds — uncomment if you prefer to ignore:
-# Cargo.lock
-
 # IDE & editors
 .idea/
 *.swp
@@ -15,15 +12,12 @@
 .classpath
 .settings/
 
-# VS Code (keep `.vscode/` tracked only if the team shares launch/tasks — ignore locally otherwise)
-# .vscode/
-
 # OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Secrets & local env (never commit keys)
+# Secrets & local env
 .env
 .env.*
 !.env.example
@@ -42,3 +36,19 @@ perf.data*
 *.tmp
 *.temp
 .cache/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node / pnpm (desktop app)
+node_modules/
+package-lock.json
+pnpm-debug.log*
+pallas-app/dist/
+
+# User market data workspace (see data/README.md)
+data/*
+!data/.gitignore
+!data/.gitkeep
+!data/README.md

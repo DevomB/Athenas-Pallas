@@ -1,10 +1,8 @@
 //! Run a CSV backtest with optional external strategy script.
 
 use athenas_pallas::backtest::{
-    parse_base_quote, parse_instrument, BacktestConfig, BacktestRunner, DataFormat,
+    parse_instrument, run_backtest, run_external_backtest, BacktestConfig, DataFormat,
 };
-use athenas_pallas::instrument::{AssetClass, InstrumentMeta, InstrumentRegistry};
-use athenas_pallas::strategy::ExternalStrategy;
 use clap::Parser;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
@@ -14,7 +12,7 @@ use std::path::PathBuf;
 #[command(name = "pallas-backtest")]
 struct Args {
     #[arg(long)]
-    data: PathBuf,
+    data: Option<PathBuf>,
     #[arg(long, default_value = "binance:BTCUSDT")]
     instrument: String,
     #[arg(long = "initial-balance", value_parser = parse_balance)]
@@ -31,6 +29,8 @@ struct Args {
     fee_bps: u64,
     #[arg(long, default_value = "5")]
     slippage_bps: u64,
+    #[arg(long, default_value = "5")]
+    half_spread_bps: u64,
     #[arg(long, default_value = "252")]
     periods_per_year: f64,
     #[arg(long)]
@@ -48,30 +48,13 @@ fn parse_balance(s: &str) -> Result<(String, String), String> {
     Ok((a.to_string(), v.to_string()))
 }
 
-fn parse_asset_class(s: &str) -> AssetClass {
+fn parse_asset_class(s: &str) -> athenas_pallas::instrument::AssetClass {
     match s.to_lowercase().as_str() {
-        "equity" => AssetClass::Equity,
-        "forex" | "fx" => AssetClass::Forex,
-        "future" | "futures" => AssetClass::Future,
-        _ => AssetClass::Crypto,
+        "equity" => athenas_pallas::instrument::AssetClass::Equity,
+        "forex" | "fx" => athenas_pallas::instrument::AssetClass::Forex,
+        "future" | "futures" => athenas_pallas::instrument::AssetClass::Future,
+        _ => athenas_pallas::instrument::AssetClass::Crypto,
     }
-}
-
-fn apply_toml_config(cfg: &mut BacktestConfig, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    let text = std::fs::read_to_string(path)?;
-    let table: toml::Table = toml::from_str(&text)?;
-    if let Some(fee) = table.get("fee_bps").and_then(|v| v.as_integer()) {
-        cfg.fee_bps = Decimal::from(fee as u64);
-    }
-    if let Some(slip) = table.get("slippage_bps").and_then(|v| v.as_integer()) {
-        cfg.slippage_bps = Decimal::from(slip as u64);
-    }
-    if let Some(inst) = table.get("instrument").and_then(|v| v.as_table()) {
-        if let Some(ac) = inst.get("asset_class").and_then(|v| v.as_str()) {
-            cfg.asset_class = parse_asset_class(ac);
-        }
-    }
-    Ok(())
 }
 
 fn parse_data_format(s: &str) -> DataFormat {
@@ -79,173 +62,93 @@ fn parse_data_format(s: &str) -> DataFormat {
         "ohlcv" => DataFormat::Ohlcv,
         "yahoo" => DataFormat::Yahoo,
         "fx" => DataFormat::Fx,
+        "future" | "futures" => DataFormat::Future,
         _ => DataFormat::Auto,
     }
 }
 
+fn parse_balances(rows: &[(String, String)]) -> Result<HashMap<athenas_pallas::types::Asset, Decimal>, Box<dyn std::error::Error>> {
+    let mut balances = HashMap::new();
+    for (a, v) in rows {
+        balances.insert(athenas_pallas::types::Asset::new(a), v.parse()?);
+    }
+    Ok(balances)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let instrument = parse_instrument(&args.instrument)?;
-    let asset_class = parse_asset_class(&args.asset_class);
-    let mut balances = HashMap::new();
-    if args.initial_balance.is_empty() {
-        balances.insert(
-            athenas_pallas::types::Asset::new("USDT"),
-            Decimal::new(10_000, 0),
-        );
+    let cli_balances = parse_balances(&args.initial_balance)?;
+    let has_cli_balances = !args.initial_balance.is_empty();
+
+    let mut cfg = if let Some(path) = &args.config {
+        BacktestConfig::load_toml(path)?
     } else {
-        for (a, v) in args.initial_balance {
-            let d: Decimal = v.parse()?;
-            balances.insert(athenas_pallas::types::Asset::new(a), d);
+        let instrument = parse_instrument(&args.instrument)?;
+        BacktestConfig {
+            data_path: args.data.clone().unwrap_or_default(),
+            data_format: parse_data_format(&args.data_format),
+            instrument,
+            asset_class: parse_asset_class(&args.asset_class),
+            balances: if has_cli_balances {
+                cli_balances.clone()
+            } else {
+                let mut b = HashMap::new();
+                b.insert(
+                    athenas_pallas::types::Asset::new("USDT"),
+                    Decimal::new(10_000, 0),
+                );
+                b
+            },
+            fee_bps: Decimal::from(args.fee_bps),
+            slippage_bps: Decimal::from(args.slippage_bps),
+            half_spread_bps: Decimal::from(args.half_spread_bps),
+            periods_per_year: args.periods_per_year,
+            strategy_path: args.strategy.clone(),
+            python_exe: args.python.clone(),
+            output_path: args.output.clone(),
+            verbose: args.verbose,
+            ..BacktestConfig::default()
         }
-    }
-
-    let mut cfg = BacktestConfig {
-        data_path: args.data,
-        data_format: parse_data_format(&args.data_format),
-        instrument: instrument.clone(),
-        asset_class,
-        balances,
-        fee_bps: Decimal::from(args.fee_bps),
-        slippage_bps: Decimal::from(args.slippage_bps),
-        periods_per_year: args.periods_per_year,
-        strategy_path: args.strategy.clone(),
-        python_exe: args.python,
-        output_path: args.output.clone(),
-        verbose: args.verbose,
-        ..BacktestConfig::default()
     };
-    if let Some(path) = args.config {
-        apply_toml_config(&mut cfg, &path)?;
+
+    if let Some(data) = args.data {
+        cfg.data_path = data;
+    }
+    if has_cli_balances {
+        cfg.balances = cli_balances;
+    }
+    if let Some(s) = args.strategy {
+        cfg.strategy_path = Some(s);
+    }
+    if args.verbose {
+        cfg.verbose = true;
+    }
+    if let Some(out) = args.output {
+        cfg.output_path = Some(out);
     }
 
-    let report = if let Some(ref strategy_path) = args.strategy {
-        run_external(&cfg, strategy_path)?
+    if cfg.data_path.as_os_str().is_empty() {
+        return Err("missing --data or [backtest].data in config".into());
+    }
+
+    let strategy_path = cfg.strategy_path.clone();
+    let report = if let Some(ref strategy_path) = strategy_path {
+        run_external_backtest(&cfg, strategy_path)?
     } else {
-        BacktestRunner::run_buy_and_hold(&cfg)?
+        run_backtest(&cfg)?
     };
 
     println!("PnL: {}", report.pnl);
+    println!("PnL %: {}", report.pnl_pct);
+    println!("Sharpe: {}", report.sharpe);
+    println!("Sortino: {}", report.sortino);
+    println!("Max drawdown: {}", report.max_drawdown);
     println!("fills: {}", report.fill_count);
-    if let Some(out) = args.output {
+    if let Some(out) = cfg.output_path {
         report.write_json(&out)?;
-        if args.verbose {
+        if cfg.verbose {
             eprintln!("wrote {}", out.display());
         }
     }
     Ok(())
-}
-
-fn run_external(
-    cfg: &BacktestConfig,
-    strategy_path: &std::path::Path,
-) -> athenas_pallas::Result<athenas_pallas::backtest::BacktestReport> {
-    let (base, quote) = parse_base_quote(&cfg.instrument.symbol, cfg.asset_class);
-    let mut instruments = HashMap::new();
-    instruments.insert(
-        cfg.instrument.clone(),
-        InstrumentMeta {
-            base: athenas_pallas::types::Asset::new(base),
-            quote: athenas_pallas::types::Asset::new(quote),
-            asset_class: cfg.asset_class,
-            lot_size: None,
-        },
-    );
-    let registry = InstrumentRegistry::from_instruments(instruments);
-    let meta = registry
-        .meta_by_id(&cfg.instrument)
-        .expect("meta")
-        .clone();
-    let balances = if cfg.balances.is_empty() {
-        let mut b = HashMap::new();
-        b.insert(
-            athenas_pallas::types::Asset::new("USDT"),
-            Decimal::new(10_000, 0),
-        );
-        b
-    } else {
-        cfg.balances.clone()
-    };
-
-    let script = resolve_strategy_path(strategy_path)?;
-    let mut ext = if script.extension().and_then(|e| e.to_str()) == Some("py") {
-        ExternalStrategy::spawn_python(&script, &cfg.python_exe)?
-    } else if strategy_path.join("CMakeLists.txt").is_file() {
-        let binary = build_cpp_strategy(strategy_path)?;
-        ExternalStrategy::spawn_binary(&binary)?
-    } else {
-        ExternalStrategy::spawn_binary(&script)?
-    };
-    ext.handshake(
-        cfg.instrument.clone(),
-        &meta,
-        &balances,
-        cfg.fee_bps,
-    )?;
-    let report = BacktestRunner::run_with_strategy(cfg, &mut ext)?;
-    ext.take_error()?;
-    Ok(report)
-}
-
-fn build_cpp_strategy(dir: &std::path::Path) -> athenas_pallas::Result<PathBuf> {
-    let build_dir = dir.join("build");
-    std::fs::create_dir_all(&build_dir).map_err(athenas_pallas::Error::Io)?;
-    let status = std::process::Command::new("cmake")
-        .arg("-S")
-        .arg(dir)
-        .arg("-B")
-        .arg(&build_dir)
-        .status()
-        .map_err(athenas_pallas::Error::Io)?;
-    if !status.success() {
-        return Err(athenas_pallas::Error::Invalid("cmake configure failed".into()));
-    }
-    let status = std::process::Command::new("cmake")
-        .arg("--build")
-        .arg(&build_dir)
-        .status()
-        .map_err(athenas_pallas::Error::Io)?;
-    if !status.success() {
-        return Err(athenas_pallas::Error::Invalid("cmake build failed".into()));
-    }
-    let name = dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("strategy");
-    let bin = if cfg!(windows) {
-        build_dir.join("Release").join(format!("{name}.exe"))
-    } else {
-        build_dir.join(name)
-    };
-    if !bin.is_file() {
-        let alt = build_dir.join(name);
-        if alt.is_file() {
-            return Ok(alt);
-        }
-        return Err(athenas_pallas::Error::Invalid(format!(
-            "built binary not found at {}",
-            bin.display()
-        )));
-    }
-    Ok(bin)
-}
-
-fn resolve_strategy_path(path: &std::path::Path) -> athenas_pallas::Result<PathBuf> {
-    if path.is_file() {
-        return Ok(path.to_path_buf());
-    }
-    if path.is_dir() {
-        let py = path.join("strategy.py");
-        if py.is_file() {
-            return Ok(py);
-        }
-        let main_py = path.join("main.py");
-        if main_py.is_file() {
-            return Ok(main_py);
-        }
-    }
-    Err(athenas_pallas::Error::Invalid(format!(
-        "no strategy script at {}",
-        path.display()
-    )))
 }

@@ -20,6 +20,11 @@ pub struct StrategyContext<'a> {
 pub trait Strategy: Send {
     /// Append order intents into `out` (cleared by the engine each event).
     fn on_event(&mut self, ctx: &StrategyContext<'_>, event: &Event, out: &mut Vec<OrderIntent>);
+
+    /// When true, replay walks [`crate::backtest::BarSeries`] by index instead of allocating per-bar events.
+    fn uses_tick_replay(&self) -> bool {
+        false
+    }
 }
 
 /// No-op for benchmarks.
@@ -28,6 +33,10 @@ pub struct NoopStrategy;
 
 impl Strategy for NoopStrategy {
     fn on_event(&mut self, _: &StrategyContext<'_>, _: &Event, _: &mut Vec<OrderIntent>) {}
+
+    fn uses_tick_replay(&self) -> bool {
+        true
+    }
 }
 
 /// Multi-sleeve composite.

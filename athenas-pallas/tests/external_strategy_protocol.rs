@@ -1,5 +1,7 @@
 //! External strategy IPC failure modes.
 
+mod common;
+
 use athenas_pallas::backtest::{BacktestConfig, BacktestRunner, DataFormat};
 use athenas_pallas::instrument::{AssetClass, InstrumentMeta};
 use athenas_pallas::strategy::ExternalStrategy;
@@ -10,10 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 fn sample_csv() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("data")
-        .join("BTCUSDT_1d.csv")
+    common::fixture("BTCUSDT_1d.csv")
 }
 
 fn cfg() -> BacktestConfig {

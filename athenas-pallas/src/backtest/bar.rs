@@ -29,6 +29,32 @@ pub struct Bar {
     pub volume_lots: i64,
 }
 
+impl Bar {
+    pub fn open_decimal(&self, tick_size: Decimal) -> Decimal {
+        ticks_to_decimal(self.open_ticks, tick_size)
+    }
+
+    pub fn high_decimal(&self, tick_size: Decimal) -> Decimal {
+        ticks_to_decimal(self.high_ticks, tick_size)
+    }
+
+    pub fn low_decimal(&self, tick_size: Decimal) -> Decimal {
+        ticks_to_decimal(self.low_ticks, tick_size)
+    }
+
+    pub fn close_decimal(&self, tick_size: Decimal) -> Decimal {
+        ticks_to_decimal(self.close_ticks, tick_size)
+    }
+
+    pub fn volume_decimal(&self, tick_size: Decimal) -> Decimal {
+        ticks_to_decimal(self.volume_lots, tick_size)
+    }
+
+    pub fn timestamp(&self) -> Option<OffsetDateTime> {
+        OffsetDateTime::from_unix_timestamp_nanos(self.ts_unix_nanos as i128).ok()
+    }
+}
+
 /// Contiguous bar store — one allocation at load time.
 #[derive(Clone, Debug)]
 pub struct BarSeries {
@@ -42,7 +68,7 @@ impl BarSeries {
         let mut buf = String::new();
         File::open(path)?.read_to_string(&mut buf)?;
         let mut rdr = csv::Reader::from_reader(buf.as_bytes());
-        let mut bars = Vec::new();
+        let mut bars = Vec::with_capacity(buf.lines().count().saturating_sub(1));
         for rec in rdr.deserialize::<OhlcvRow>() {
             let row: OhlcvRow = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             let ts = parse_ts(&row.ts).unwrap_or_else(time::OffsetDateTime::now_utc);
@@ -115,7 +141,8 @@ impl BarSeries {
 pub struct BarSeriesSource {
     series: BarSeries,
     idx: usize,
-    instrument: InstrumentId,
+    exchange: ExchangeId,
+    symbol: Symbol,
 }
 
 impl BarSeriesSource {
@@ -123,26 +150,49 @@ impl BarSeriesSource {
         Self {
             series,
             idx: 0,
-            instrument: InstrumentId::new(exchange.to_string(), symbol.to_string()),
+            exchange,
+            symbol,
         }
+    }
+
+    pub fn tick_size(&self) -> Decimal {
+        self.series.tick_size()
+    }
+
+    pub fn instrument_id(&self) -> InstrumentId {
+        InstrumentId::new(self.exchange.to_string(), self.symbol.to_string())
+    }
+
+    pub fn rewind(&mut self) {
+        self.idx = 0;
+    }
+
+    /// Next bar without allocating a market event.
+    pub fn next_bar(&mut self) -> Option<(Bar, OffsetDateTime)> {
+        let bar = *self.series.get(self.idx)?;
+        self.idx += 1;
+        let ts = bar.timestamp()?;
+        Some((bar, ts))
+    }
+
+    pub fn bar_to_event(&self, bar: &Bar, ts: OffsetDateTime) -> Event {
+        let tick = self.series.tick_size;
+        Event::Market(MarketEvent::Bar {
+            instrument: self.instrument_id(),
+            ts,
+            open: bar.open_decimal(tick),
+            high: bar.high_decimal(tick),
+            low: bar.low_decimal(tick),
+            close: bar.close_decimal(tick),
+            volume: bar.volume_decimal(tick),
+        })
     }
 }
 
 impl super::HistoricalSource for BarSeriesSource {
     fn next_event(&mut self) -> Option<Event> {
-        let bar = self.series.get(self.idx)?;
-        self.idx += 1;
-        let ts = OffsetDateTime::from_unix_timestamp_nanos(bar.ts_unix_nanos as i128).ok()?;
-        let tick = self.series.tick_size;
-        Some(Event::Market(MarketEvent::Bar {
-            instrument: self.instrument.clone(),
-            ts,
-            open: ticks_to_decimal(bar.open_ticks, tick),
-            high: ticks_to_decimal(bar.high_ticks, tick),
-            low: ticks_to_decimal(bar.low_ticks, tick),
-            close: ticks_to_decimal(bar.close_ticks, tick),
-            volume: ticks_to_decimal(bar.volume_lots, tick),
-        }))
+        let (bar, ts) = self.next_bar()?;
+        Some(self.bar_to_event(&bar, ts))
     }
 }
 
@@ -150,11 +200,12 @@ pub fn decimal_to_ticks(d: Decimal, tick_size: Decimal) -> i64 {
     if tick_size.is_zero() {
         return 0;
     }
-    (d / tick_size)
+    let scaled = d / tick_size;
+    scaled
         .round()
-        .to_string()
-        .parse::<i64>()
-        .unwrap_or(0)
+        .mantissa()
+        .try_into()
+        .unwrap_or(i64::MAX)
 }
 
 pub fn ticks_to_decimal(t: i64, tick_size: Decimal) -> Decimal {
@@ -178,9 +229,7 @@ mod tests {
     #[test]
     fn csv_ninety_bars() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("data")
-            .join("BTCUSDT_1d.csv");
+            .join("tests/fixtures/data/BTCUSDT_1d.csv");
         let s = BarSeries::from_csv_path(&path, default_tick_size()).expect("csv");
         assert_eq!(s.len(), 90);
     }

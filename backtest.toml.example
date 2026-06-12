@@ -1,28 +1,21 @@
-# Example backtest configuration (instrument metadata + run settings).
-# Copy to backtest.toml and adjust paths for your environment.
+# Copy to backtest.toml and set [backtest].data to a CSV you fetched into data/
 
 [instrument]
 exchange = "binance"
 symbol = "BTCUSDT"
-base = "BTC"
-quote = "USDT"
 asset_class = "crypto"
-tick_size = "0.00000001"
-lot_size = "0.00001"
 
 [backtest]
-data = "data/BTCUSDT_1d.csv"
+data = "data/BTCUSDT_live.csv"
 data_format = "ohlcv"
 fee_bps = 10
 slippage_bps = 5
 half_spread_bps = 5
 periods_per_year = 365.0
+strategy = "trading/strategies/simple_sma/strategy.py"
+python = "python"
+output = "target/backtest_report.json"
 
 [[balances]]
 asset = "USDT"
 amount = "10000"
-
-# Optional external strategy (Python script or compiled binary).
-# strategy = "../trading/strategies/simple_sma/strategy.py"
-# python = "python"
-# output = "target/backtest_report.json"

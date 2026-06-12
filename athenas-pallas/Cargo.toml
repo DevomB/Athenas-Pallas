@@ -19,7 +19,8 @@ control-server = ["dep:axum", "dep:tower", "dep:hyper"]
 live-trading = ["dep:reqwest"]
 binance-live = ["binance", "live-trading", "dep:hmac", "dep:sha2", "dep:hex"]
 tracing-full = ["dep:tracing-subscriber"]
-all = ["binance-live", "control-server", "tracing-full"]
+data-fetch = ["dep:reqwest"]
+all = ["binance-live", "control-server", "tracing-full", "data-fetch"]
 
 [dependencies]
 async-trait = "0.1"
@@ -52,10 +53,39 @@ hex = { version = "0.4", optional = true }
 name = "pallas-backtest"
 path = "src/bin/pallas-backtest.rs"
 
+[[bin]]
+name = "pallas-fetch"
+path = "src/bin/pallas-fetch.rs"
+required-features = ["data-fetch"]
+
+[[example]]
+name = "backtest_csv"
+path = "examples/backtest_csv.rs"
+
+[[example]]
+name = "paper_trading"
+path = "examples/paper_trading.rs"
+required-features = ["control-server"]
+
+[[example]]
+name = "paper_binance"
+path = "examples/paper_binance.rs"
+required-features = ["binance", "control-server"]
+
+[[example]]
+name = "live_binance"
+path = "examples/live_binance.rs"
+required-features = ["binance-live", "control-server"]
+
+[[example]]
+name = "system_config"
+path = "examples/system_config.rs"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 wiremock = "0.6"
-reqwest = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 criterion = "0.5"
 
 [[bench]]

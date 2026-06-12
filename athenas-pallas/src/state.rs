@@ -2,7 +2,7 @@
 
 pub use crate::instrument::{InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry};
 
-use crate::events::{AccountEvent, BookL2Snapshot, MarketEvent};
+use crate::events::{AccountEvent, BookL2Snapshot, FillRecord, MarketEvent};
 use crate::oms::OrderStore;
 use crate::types::{Asset, InstrumentId, OpenOrder, Side, StrategyId};
 use rust_decimal::Decimal;
@@ -42,6 +42,12 @@ pub struct GlobalState {
     pub bar_close: Vec<Option<Decimal>>,
     /// Fill count for reporting.
     pub fill_count: u64,
+    /// Timestamp of the last market event applied.
+    pub last_event_ts: Option<OffsetDateTime>,
+    /// Fill blotter for JSON export.
+    pub fill_log: Vec<FillRecord>,
+    /// Half-spread for synthetic L1 from bar close (basis points).
+    pub synthetic_half_spread_bps: Decimal,
 }
 
 impl GlobalState {
@@ -63,7 +69,15 @@ impl GlobalState {
             trading_state: crate::types::TradingState::Enabled,
             bar_close: vec![None; n],
             fill_count: 0,
+            last_event_ts: None,
+            fill_log: Vec::new(),
+            synthetic_half_spread_bps: Decimal::from(5u64),
         }
+    }
+
+    /// Drain recorded fills (for report generation).
+    pub fn take_fill_log(&mut self) -> Vec<FillRecord> {
+        std::mem::take(&mut self.fill_log)
     }
 
     /// Refresh UTC-day equity anchor for [`crate::risk::MaxDailyLossQuote`] after rollover or first tick.
@@ -136,6 +150,25 @@ impl GlobalState {
         self.strategy_position_qty(inst, strategy_id)
     }
 
+    /// Update market state from a preloaded bar (tick-native replay).
+    pub fn apply_bar(
+        &mut self,
+        ix: usize,
+        bar: &crate::backtest::Bar,
+        tick_size: rust_decimal::Decimal,
+        half_spread_bps: rust_decimal::Decimal,
+    ) {
+        let Some(ts) = bar.timestamp() else {
+            return;
+        };
+        let close = crate::backtest::ticks_to_decimal(bar.close_ticks, tick_size);
+        self.last_trade[ix] = Some((ts, close));
+        self.bar_close[ix] = Some(close);
+        self.last_event_ts = Some(ts);
+        let half = close * half_spread_bps / Decimal::from(10_000u64);
+        self.l1[ix] = Some((ts, close - half, close + half));
+    }
+
     /// Apply a market event (read-only book/trade updates).
     pub fn apply_market(&mut self, ev: &MarketEvent) {
         match ev {
@@ -144,6 +177,7 @@ impl GlobalState {
             } => {
                 if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
                     self.last_trade[ix] = Some((*ts, *price));
+                    self.last_event_ts = Some(*ts);
                 }
             }
             MarketEvent::BookL1 {
@@ -154,6 +188,7 @@ impl GlobalState {
             } => {
                 if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
                     self.l1[ix] = Some((*ts, *bid, *ask));
+                    self.last_event_ts = Some(*ts);
                 }
             }
             MarketEvent::BookL2Snapshot(snap) => {
@@ -170,11 +205,50 @@ impl GlobalState {
                 if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
                     self.last_trade[ix] = Some((*ts, *close));
                     self.bar_close[ix] = Some(*close);
-                    let half = *close / Decimal::from(20_000u64);
+                    self.last_event_ts = Some(*ts);
+                    let half =
+                        *close * self.synthetic_half_spread_bps / Decimal::from(10_000u64);
                     self.l1[ix] = Some((*ts, *close - half, *close + half));
                 }
             }
         }
+    }
+
+    /// Mid price for a dense instrument row (no hash lookup).
+    pub fn mid_or_last_ix(&self, ix: usize) -> Option<Decimal> {
+        if let Some(Some((_, bid, ask))) = self.l1.get(ix) {
+            Some((*bid + *ask) / Decimal::from(2u64))
+        } else if let Some(Some((_, p))) = self.last_trade.get(ix) {
+            Some(*p)
+        } else {
+            self.bar_close.get(ix).and_then(|c| *c)
+        }
+    }
+
+    /// Mark-to-market equity for one instrument row.
+    pub fn mark_to_market_equity_ix(&self, ix: usize) -> Option<Decimal> {
+        let mid = self.mid_or_last_ix(ix)?;
+        let meta = self.registry.meta(InstrumentIndex(ix))?;
+        let base = self
+            .balances
+            .get(&meta.base)
+            .copied()
+            .unwrap_or(Decimal::ZERO);
+        let quote = self
+            .balances
+            .get(&meta.quote)
+            .copied()
+            .unwrap_or(Decimal::ZERO);
+        let notional = match meta.asset_class {
+            crate::instrument::AssetClass::Future => {
+                let mult = meta
+                    .contract_multiplier
+                    .unwrap_or(Decimal::ONE);
+                base * mid * mult
+            }
+            _ => base * mid,
+        };
+        Some(quote + notional)
     }
 
     /// Apply account event (balances, orders, fills).
@@ -210,8 +284,9 @@ impl GlobalState {
             AccountEvent::Fill {
                 instrument,
                 side,
-                price: _,
+                price,
                 qty,
+                fee,
                 strategy_id,
                 ..
             } => {
@@ -231,25 +306,23 @@ impl GlobalState {
                         .or_insert(Decimal::ZERO) += delta;
                 }
                 self.fill_count += 1;
+                if let Some(ts) = self.last_event_ts {
+                    self.fill_log.push(FillRecord {
+                        ts,
+                        side: *side,
+                        qty: qty.to_string(),
+                        price: price.to_string(),
+                        fee: fee.to_string(),
+                    });
+                }
             }
         }
     }
 
     /// Mark-to-market equity in quote using mid or last trade.
     pub fn mark_to_market_equity(&self, inst: &InstrumentId) -> Option<Decimal> {
-        let mid = self.mid_or_last(inst)?;
-        let meta = self.registry.meta_by_id(inst)?;
-        let base = self
-            .balances
-            .get(&meta.base)
-            .copied()
-            .unwrap_or(Decimal::ZERO);
-        let quote = self
-            .balances
-            .get(&meta.quote)
-            .copied()
-            .unwrap_or(Decimal::ZERO);
-        Some(quote + base * mid)
+        let ix = self.registry.index_of(inst)?.0;
+        self.mark_to_market_equity_ix(ix)
     }
 
     /// Snapshot for risk checks (cheap clone).
@@ -266,6 +339,30 @@ mod tests {
     use crate::types::{OrderId, Side, StrategyId};
     use rust_decimal::Decimal;
     use std::collections::HashMap;
+
+    #[test]
+    fn apply_bar_sets_l1_from_half_spread() {
+        let i = crate::types::InstrumentId::new("x", "BTCUSDT");
+        let mut inst = HashMap::new();
+        inst.insert(
+            i.clone(),
+            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
+        );
+        let reg = InstrumentRegistry::from_instruments(inst);
+        let mut state = GlobalState::new(reg, HashMap::new());
+        let bar = crate::backtest::Bar {
+            ts_unix_nanos: time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
+            open_ticks: 0,
+            high_ticks: 0,
+            low_ticks: 0,
+            close_ticks: 1_000_000_000,
+            volume_lots: 1,
+        };
+        let tick = crate::backtest::default_tick_size();
+        state.apply_bar(0, &bar, tick, Decimal::from(100u64));
+        let (_, bid, ask) = state.l1[0].unwrap();
+        assert!(ask - bid > Decimal::ZERO);
+    }
 
     #[test]
     fn mark_equity_includes_cash() {

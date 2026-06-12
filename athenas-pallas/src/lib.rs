@@ -40,9 +40,11 @@ pub mod types;
 pub mod control;
 
 pub use engine::{
-    dispatch_event, dispatch_event_audited, dispatch_event_sync, engine_step, Engine, EngineBuilder,
-    EngineCommand, EngineConfig, EngineHandle, TimerSchedule,
+    dispatch_event, dispatch_event_audited, dispatch_event_sync, dispatch_replay_sync,
+    dispatch_strategy_sync, engine_step, Engine, EngineBuilder, EngineCommand, EngineConfig,
+    EngineHandle, TimerSchedule,
 };
+pub use risk::BacktestChecks;
 pub use error::{Error, Result};
 pub use events::{BookL2Snapshot, Event, OrderIntentSource};
 pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, StrategyId, Symbol, TradingState};
