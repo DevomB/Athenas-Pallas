@@ -5,14 +5,15 @@ use athenas_pallas::backtest::{
 };
 use athenas_pallas::data::fetch::{binance, yahoo};
 use rust_decimal::Decimal;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub fn load_config(path: String) -> Result<ConfigDto, String> {
-    let cfg = BacktestConfig::load_toml(PathBuf::from(&path).as_path())
-        .map_err(|e| e.to_string())?;
+    let cfg =
+        BacktestConfig::load_toml(PathBuf::from(&path).as_path()).map_err(|e| e.to_string())?;
     Ok(ConfigDto::from_backtest_config(&cfg))
 }
 
@@ -98,7 +99,9 @@ pub async fn run_backtest(
     if !session.try_start() {
         return Err("backtest already running".into());
     }
-    session.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+    session
+        .cancel
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let cancel = session.cancel.clone();
     let session_worker = session.inner().clone();
     let app_worker = app.clone();
@@ -193,7 +196,10 @@ pub fn save_config_toml(path: String, config: ConfigDto) -> Result<(), String> {
     let mut table = toml::map::Map::new();
 
     let mut inst = toml::map::Map::new();
-    inst.insert("exchange".into(), cfg.instrument.exchange.to_string().into());
+    inst.insert(
+        "exchange".into(),
+        cfg.instrument.exchange.to_string().into(),
+    );
     inst.insert("symbol".into(), cfg.instrument.symbol.to_string().into());
     inst.insert(
         "asset_class".into(),
@@ -233,16 +239,16 @@ pub fn save_config_toml(path: String, config: ConfigDto) -> Result<(), String> {
         .into(),
     );
     bt.insert("fee_bps".into(), decimal_to_i64(cfg.fee_bps).into());
-    bt.insert("slippage_bps".into(), decimal_to_i64(cfg.slippage_bps).into());
+    bt.insert(
+        "slippage_bps".into(),
+        decimal_to_i64(cfg.slippage_bps).into(),
+    );
     bt.insert(
         "half_spread_bps".into(),
         decimal_to_i64(cfg.half_spread_bps).into(),
     );
     bt.insert("periods_per_year".into(), cfg.periods_per_year.into());
-    bt.insert(
-        "record_equity_curve".into(),
-        cfg.record_equity_curve.into(),
-    );
+    bt.insert("record_equity_curve".into(), cfg.record_equity_curve.into());
     if let Some(p) = &cfg.strategy_path {
         bt.insert("strategy".into(), p.display().to_string().into());
     }
@@ -279,7 +285,13 @@ fn decimal_to_i64(d: Decimal) -> i64 {
 }
 
 fn csv_row_count(path: &std::path::Path) -> Result<usize, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let rows = text.lines().filter(|l| !l.trim().is_empty()).count();
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let rows = BufReader::new(file)
+        .lines()
+        .try_fold(0usize, |count, line| {
+            let line = line?;
+            Ok::<usize, std::io::Error>(count + usize::from(!line.trim().is_empty()))
+        })
+        .map_err(|e| e.to_string())?;
     Ok(rows.saturating_sub(1))
 }

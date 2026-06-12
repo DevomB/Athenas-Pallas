@@ -2,7 +2,6 @@ use athenas_pallas::backtest::{BacktestConfig, DataFormat};
 use athenas_pallas::instrument::AssetClass;
 use athenas_pallas::types::Asset;
 use rust_decimal::Decimal;
-use std::path::PathBuf;
 
 #[test]
 fn loads_backtest_toml_fields() {

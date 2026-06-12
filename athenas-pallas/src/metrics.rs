@@ -284,13 +284,20 @@ fn std_dev(xs: &[f64]) -> f64 {
 }
 
 fn downside_std(xs: &[f64]) -> f64 {
-    let neg: Vec<f64> = xs.iter().copied().filter(|r| *r < 0.0).collect();
-    if neg.len() < 2 {
+    let mut count = 0usize;
+    let mut mean = 0.0;
+    let mut m2 = 0.0;
+    for x in xs.iter().copied().filter(|r| *r < 0.0) {
+        count += 1;
+        let delta = x - mean;
+        mean += delta / count as f64;
+        let delta2 = x - mean;
+        m2 += delta * delta2;
+    }
+    if count < 2 {
         return 0.0;
     }
-    let m = mean(&neg);
-    let v: f64 = neg.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (neg.len() as f64 - 1.0);
-    v.sqrt()
+    (m2 / (count as f64 - 1.0)).sqrt()
 }
 
 fn sharpe_ratio(rets: &[f64], periods_per_year: f64) -> f64 {

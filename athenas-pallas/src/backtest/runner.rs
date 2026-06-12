@@ -15,6 +15,7 @@ use super::config::{parse_base_quote, BacktestConfig, DataFormat};
 use super::sources::{FutureCsvSource, FxCsvSource, YahooCsvSource};
 use super::{CsvBarSource, HistoricalSource};
 use crate::dispatch_replay_sync;
+use crate::events::FillRecord;
 use crate::events::{Event, OrderIntent};
 use crate::execution::{PaperConfig, SyncPaperGateway};
 use crate::instrument::{AssetClass, InstrumentMeta};
@@ -22,7 +23,6 @@ use crate::metrics::{summarize, PerformanceSummary, RollingMetrics};
 use crate::risk::BacktestChecks;
 use crate::state::{GlobalState, InstrumentRegistry};
 use crate::strategy::{Strategy, StrategyContext};
-use crate::events::FillRecord;
 use crate::types::{Asset, EquityPoint, ExchangeId, InstrumentId, OrderType, Side, Symbol};
 
 /// JSON-serializable run output.
@@ -149,19 +149,21 @@ impl BacktestRunner {
             DataFormat::Auto => detect_format(&cfg.data_path)?,
             other => other,
         };
-
-        let bar_count = BarSeries::from_csv_path(&cfg.data_path, default_tick_size())
-            .map(|s| s.len())
-            .unwrap_or(0);
+        let mut ohlcv_series = if matches!(fmt, DataFormat::Ohlcv) {
+            BarSeries::from_csv_path(&cfg.data_path, default_tick_size()).ok()
+        } else {
+            None
+        };
+        let bar_count = ohlcv_series.as_ref().map_or(0, BarSeries::len);
         let mut equity = Vec::with_capacity(bar_count.max(1));
         let mut metrics = RollingMetrics::new();
         let mut intents = Vec::with_capacity(4);
         let inst_ix = 0usize;
 
         if strategy.uses_tick_replay() && matches!(fmt, DataFormat::Ohlcv) {
-            if let Ok(series) = BarSeries::from_csv_path(&cfg.data_path, default_tick_size()) {
+            if let Some(series) = ohlcv_series.take() {
                 let tick = series.tick_size();
-                let mut src = BarSeriesSource::new(series, exchange, symbol);
+                let mut src = BarSeriesSource::new(series, exchange.clone(), symbol.clone());
                 let mut bar_ix = 0u64;
                 while let Some((bar, ts)) = src.next_bar() {
                     bar_ix += 1;
@@ -195,7 +197,7 @@ impl BacktestRunner {
             }
         }
 
-        let mut src = load_source(cfg, exchange, symbol)?;
+        let mut src = load_source(cfg, exchange, symbol, fmt, ohlcv_series)?;
         let mut bar_ix = 0u64;
         while let Some(ev) = src.next_event() {
             bar_ix += 1;
@@ -210,7 +212,10 @@ impl BacktestRunner {
             if cfg.record_equity_curve {
                 if let Some(eq) = state.mark_to_market_equity_ix(inst_ix) {
                     metrics.record(eq, cfg.periods_per_year);
-                    equity.push(EquityPoint { ts, equity_quote: eq });
+                    equity.push(EquityPoint {
+                        ts,
+                        equity_quote: eq,
+                    });
                 }
             }
         }
@@ -230,9 +235,7 @@ impl BacktestRunner {
 }
 
 fn cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
-    cancel
-        .as_ref()
-        .is_some_and(|f| f.load(Ordering::Relaxed))
+    cancel.as_ref().is_some_and(|f| f.load(Ordering::Relaxed))
 }
 
 fn instrument_meta_from_config(cfg: &BacktestConfig) -> InstrumentMeta {
@@ -263,15 +266,13 @@ fn load_source(
     cfg: &BacktestConfig,
     exchange: ExchangeId,
     symbol: Symbol,
+    fmt: DataFormat,
+    ohlcv_series: Option<BarSeries>,
 ) -> crate::Result<Box<dyn HistoricalSource>> {
-    let fmt = match cfg.data_format {
-        DataFormat::Auto => detect_format(&cfg.data_path)?,
-        other => other,
-    };
     let path = &cfg.data_path;
     Ok(match fmt {
         DataFormat::Ohlcv => {
-            if let Ok(series) = BarSeries::from_csv_path(path, default_tick_size()) {
+            if let Some(series) = ohlcv_series {
                 Box::new(BarSeriesSource::new(series, exchange, symbol))
             } else {
                 Box::new(CsvBarSource::from_path(path, exchange, symbol)?)
@@ -288,9 +289,12 @@ fn detect_format(path: &Path) -> crate::Result<DataFormat> {
     let mut rdr = csv::Reader::from_path(path).map_err(|e| {
         crate::error::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     })?;
-    let headers = rdr.headers().map_err(|e| {
-        crate::error::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    })?.clone();
+    let headers = rdr
+        .headers()
+        .map_err(|e| {
+            crate::error::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })?
+        .clone();
     if headers.iter().any(|h| h == "Date") {
         return Ok(DataFormat::Yahoo);
     }

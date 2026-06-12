@@ -37,6 +37,9 @@ perf.data*
 *.temp
 .cache/
 
+# Local style notes (not versioned)
+STYLE.md
+
 # Python
 __pycache__/
 *.pyc
