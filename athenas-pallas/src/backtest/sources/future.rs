@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::backtest::{parse_ts, HistoricalSource, OhlcvRow};
+use crate::backtest::{parse_ts, parse_ts_required_err, HistoricalSource, OhlcvRow};
 use crate::events::{Event, MarketEvent};
 use crate::types::{ExchangeId, InstrumentId, Symbol};
 
@@ -48,16 +48,18 @@ impl FutureCsvSource {
         let yahoo = headers.iter().any(|h| h == "Date");
         let mut rows = Vec::new();
         if yahoo {
-            for rec in rdr.deserialize::<YahooRow>() {
-                rows.push(FutureRow::Yahoo(
-                    rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-                ));
+            for (i, rec) in rdr.deserialize::<YahooRow>().enumerate() {
+                let row = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                parse_ts_required_err(&row.date, &format!("row {}", i + 2))
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                rows.push(FutureRow::Yahoo(row));
             }
         } else {
-            for rec in rdr.deserialize::<OhlcvRow>() {
-                rows.push(FutureRow::Ohlcv(
-                    rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-                ));
+            for (i, rec) in rdr.deserialize::<OhlcvRow>().enumerate() {
+                let row = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                parse_ts_required_err(&row.ts, &format!("row {}", i + 2))
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                rows.push(FutureRow::Ohlcv(row));
             }
         }
         if rows.is_empty() {
@@ -80,7 +82,7 @@ impl HistoricalSource for FutureCsvSource {
         self.idx += 1;
         match row {
             FutureRow::Yahoo(r) => {
-                let ts = parse_ts(&r.date).unwrap_or_else(time::OffsetDateTime::now_utc);
+                let ts = parse_ts(&r.date).expect("timestamp validated at csv load");
                 Some(Event::Market(MarketEvent::Bar {
                     instrument: self.instrument.clone(),
                     ts,
@@ -92,7 +94,7 @@ impl HistoricalSource for FutureCsvSource {
                 }))
             }
             FutureRow::Ohlcv(r) => {
-                let ts = parse_ts(&r.ts).unwrap_or_else(time::OffsetDateTime::now_utc);
+                let ts = parse_ts(&r.ts).expect("timestamp validated at csv load");
                 Some(Event::Market(MarketEvent::Bar {
                     instrument: self.instrument.clone(),
                     ts,

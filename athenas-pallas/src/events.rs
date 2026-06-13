@@ -76,6 +76,13 @@ pub enum AccountEvent {
         /// Free balance.
         free: Decimal,
     },
+    /// Incremental balance change (venue user stream).
+    BalanceDelta {
+        /// Asset.
+        asset: Asset,
+        /// Signed delta applied to free balance.
+        delta: Decimal,
+    },
     /// Order update.
     OrderUpdate {
         /// Id.

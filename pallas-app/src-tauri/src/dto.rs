@@ -37,7 +37,7 @@ pub struct ConfigDto {
 impl Default for ConfigDto {
     fn default() -> Self {
         Self {
-            data_path: "athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv".into(),
+            data_path: "data/BTCUSDT_live.csv".into(),
             data_format: "ohlcv".into(),
             exchange: "binance".into(),
             symbol: "BTCUSDT".into(),
@@ -121,6 +121,7 @@ impl ConfigDto {
             python_exe: self.python_exe.clone(),
             output_path: self.output_path.as_deref().map(PathBuf::from),
             verbose: false,
+            on_progress: None,
         })
     }
 }
@@ -148,6 +149,8 @@ pub struct RunResultDto {
     pub report: athenas_pallas::backtest::BacktestReportDto,
     pub fills: Vec<FillDto>,
     pub full_report_json: String,
+    pub equity_curve_skipped: bool,
+    pub equity_curve_downsampled: bool,
 }
 
 fn parse_asset_class(s: &str) -> AssetClass {

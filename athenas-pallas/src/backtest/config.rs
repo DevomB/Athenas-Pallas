@@ -4,6 +4,7 @@
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::instrument::AssetClass;
 use crate::types::{Asset, InstrumentId};
@@ -19,8 +20,11 @@ pub enum DataFormat {
     Future,
 }
 
+/// Optional progress callback for GUI/CLI (`bar N` messages).
+pub type ProgressHook = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// User-facing backtest settings.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BacktestConfig {
     pub data_path: PathBuf,
     pub data_format: DataFormat,
@@ -40,6 +44,17 @@ pub struct BacktestConfig {
     pub python_exe: String,
     pub output_path: Option<PathBuf>,
     pub verbose: bool,
+    pub on_progress: Option<ProgressHook>,
+}
+
+impl std::fmt::Debug for BacktestConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BacktestConfig")
+            .field("data_path", &self.data_path)
+            .field("instrument", &self.instrument)
+            .field("on_progress", &self.on_progress.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for BacktestConfig {
@@ -53,7 +68,7 @@ impl Default for BacktestConfig {
             fee_bps: Decimal::from(10u64),
             slippage_bps: Decimal::from(5u64),
             half_spread_bps: Decimal::from(5u64),
-            periods_per_year: 252.0,
+            periods_per_year: 365.0,
             lot_size: None,
             tick_size: None,
             contract_multiplier: None,
@@ -63,6 +78,7 @@ impl Default for BacktestConfig {
             python_exe: "python".into(),
             output_path: None,
             verbose: false,
+            on_progress: None,
         }
     }
 }

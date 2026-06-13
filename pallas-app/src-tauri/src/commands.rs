@@ -108,19 +108,31 @@ pub async fn run_backtest(
 
     let handle = std::thread::spawn(move || {
         let result = (|| -> Result<RunResultDto, String> {
+            let _ = app_worker.emit("run-progress", "preparing config...");
             let mut cfg = config.to_backtest_config()?;
+            let progress_app = app_worker.clone();
+            cfg.on_progress = Some(Arc::new(move |msg: &str| {
+                let _ = progress_app.emit("run-progress", msg);
+            }));
             if cfg.data_path.as_os_str().is_empty() {
                 return Err("data path is required".into());
             }
+            let _ = app_worker.emit("run-progress", "loading data...");
             if csv_row_count(&cfg.data_path)? > 50_000 {
                 cfg.record_equity_curve = false;
             }
+            let equity_curve_skipped = !cfg.record_equity_curve;
+            let max_chart_points = 2000usize;
+            let _ = app_worker.emit("run-progress", "running backtest...");
             let report = if let Some(ref strategy) = cfg.strategy_path {
                 run_external_backtest_with_cancel(&cfg, strategy, Some(cancel.clone()))
                     .map_err(|e| e.to_string())?
             } else {
                 run_backtest_with_cancel(&cfg, Some(cancel.clone())).map_err(|e| e.to_string())?
             };
+            let equity_curve_downsampled =
+                !equity_curve_skipped && report.equity_curve.len() > max_chart_points;
+            let _ = app_worker.emit("run-progress", "building report...");
             let full_report_json =
                 serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
             let fills: Vec<FillDto> = report
@@ -135,9 +147,11 @@ pub async fn run_backtest(
                 })
                 .collect();
             Ok(RunResultDto {
-                report: report_to_dto(&report, 2000),
+                report: report_to_dto(&report, max_chart_points),
                 fills,
                 full_report_json,
+                equity_curve_skipped,
+                equity_curve_downsampled,
             })
         })();
 

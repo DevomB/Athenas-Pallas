@@ -25,6 +25,9 @@ pub enum Error {
     /// Engine channel closed.
     #[error("engine shutdown")]
     EngineShutdown,
+    /// Non-blocking send failed because the channel is full.
+    #[error("event dropped: engine channel full")]
+    EventDropped,
     /// Risk rejected order.
     #[error("risk rejected: {0}")]
     RiskRejected(String),

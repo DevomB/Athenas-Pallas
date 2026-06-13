@@ -28,6 +28,8 @@ jobs:
         run: cargo test -p athenas-pallas
       - name: python SMA golden
         run: cargo test -p athenas-pallas --test external_strategy_golden -- --ignored
+      - name: python SDK tests
+        run: python trading/sdk/test_pallas_strategy.py
       - name: build examples
         run: cargo build -p athenas-pallas --examples
 
@@ -96,3 +98,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo check pallas-app
         run: cargo check -p pallas-app
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: pallas-app/pnpm-lock.yaml
+      - name: Build pallas-app frontend
+        working-directory: pallas-app
+        run: pnpm install && pnpm run build

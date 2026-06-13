@@ -1,15 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { ConfigForm } from "./components/ConfigForm";
-import { EquityChart } from "./components/EquityChart";
 import { FetchPanel } from "./components/FetchPanel";
 import { FillsTable } from "./components/FillsTable";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { RunPanel } from "./components/RunPanel";
-import { defaultConfig, type ConfigDto, type RunResultDto } from "./types";
+import { StatusBanner } from "./components/ui/StatusBanner";
+import { useBacktestSession, type Tab } from "./hooks/useBacktestSession";
+import { defaultConfig, type ConfigDto } from "./types";
 
-type Tab = "fetch" | "config" | "run" | "results";
+const EquityChart = lazy(() =>
+  import("./components/EquityChart").then((m) => ({ default: m.EquityChart })),
+);
 
 const tabs: Array<{ id: Tab; label: string; description: string }> = [
   { id: "fetch", label: "Data", description: "Download CSV bars" },
@@ -19,34 +21,33 @@ const tabs: Array<{ id: Tab; label: string; description: string }> = [
 ];
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("config");
+  const {
+    tab,
+    setTab,
+    running,
+    setRunning,
+    stopping,
+    setStopping,
+    status,
+    setStatus,
+    error,
+    clearError,
+    result,
+  } = useBacktestSession();
+
   const [config, setConfig] = useState<ConfigDto>(defaultConfig());
-  const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState("");
-  const [result, setResult] = useState<RunResultDto | null>(null);
+  const [exportStatus, setExportStatus] = useState("");
 
-  useEffect(() => {
-    const finished = listen<RunResultDto>("run-finished", (e) => {
-      setResult(e.payload);
-      setRunning(false);
-      setStatus("finished");
-      setTab("results");
-    });
-    const failed = listen<string>("run-failed", (e) => {
-      setRunning(false);
-      setStatus(`failed: ${e.payload}`);
-    });
-    return () => {
-      finished.then((f) => f());
-      failed.then((f) => f());
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      invoke("session_shutdown").catch(() => {});
-    };
-  }, []);
+  async function onExport() {
+    if (!result) return;
+    setExportStatus("");
+    try {
+      await invoke("export_report", { json: result.full_report_json });
+      setExportStatus("Report exported.");
+    } catch (e) {
+      setExportStatus(`error: ${e}`);
+    }
+  }
 
   return (
     <div className="app">
@@ -58,10 +59,15 @@ export default function App() {
             <p>Backtesting workbench</p>
           </div>
         </div>
-        <nav className="tabs" aria-label="Workflow">
+        <nav className="tabs" role="tablist" aria-label="Workflow">
           {tabs.map((item) => (
             <button
               key={item.id}
+              type="button"
+              role="tab"
+              id={`tab-${item.id}`}
+              aria-selected={tab === item.id}
+              aria-controls={`panel-${item.id}`}
               className={`tab ${tab === item.id ? "active" : ""}`}
               onClick={() => setTab(item.id)}
             >
@@ -70,11 +76,16 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="run-state">
-          <span className={`status-dot ${running ? "live" : ""}`} />
+        <div className="run-state" aria-live="polite">
+          <span
+            className={`status-dot ${running ? "live" : ""}`}
+            aria-hidden="true"
+          />
           <div>
-            <strong>{running ? "Running" : "Idle"}</strong>
-            <small>{config.exchange}:{config.symbol}</small>
+            <strong>{running ? (stopping ? "Stopping" : "Running") : "Idle"}</strong>
+            <small>
+              {config.exchange}:{config.symbol}
+            </small>
           </div>
         </div>
       </aside>
@@ -85,16 +96,27 @@ export default function App() {
             <h2>{tabs.find((item) => item.id === tab)?.label}</h2>
           </div>
           <div className="header-summary">
+            {running && (
+              <span className="header-run-badge" aria-live="polite">
+                {stopping ? "Stopping" : "Running"}
+              </span>
+            )}
             <span>{config.asset_class}</span>
             <span>{config.data_format}</span>
             <span>{config.periods_per_year} periods/year</span>
           </div>
         </header>
-        <section className="panel">
+        <section
+          className="panel"
+          role="tabpanel"
+          id={`panel-${tab}`}
+          aria-labelledby={`tab-${tab}`}
+        >
           {tab === "fetch" && (
             <FetchPanel
               config={config}
-              onDataPath={(path) => setConfig({ ...config, data_path: path })}
+              onConfigChange={setConfig}
+              onNavigate={setTab}
             />
           )}
           {tab === "config" && (
@@ -104,29 +126,46 @@ export default function App() {
             <RunPanel
               config={config}
               running={running}
+              stopping={stopping}
               status={status}
+              error={error}
               onRunningChange={setRunning}
+              onStoppingChange={setStopping}
               onStatus={setStatus}
+              onClearError={clearError}
+              equityCurveSkipped={result?.equity_curve_skipped}
+              equityCurveDownsampled={result?.equity_curve_downsampled}
             />
           )}
           {tab === "results" && (
             <div className="results-stack">
-              <MetricsPanel report={result?.report ?? null} />
-              <EquityChart curve={result?.report.equity_curve ?? []} />
+              <MetricsPanel
+                report={result?.report ?? null}
+                equityCurveSkipped={result?.equity_curve_skipped}
+                equityCurveDownsampled={result?.equity_curve_downsampled}
+              />
+              <Suspense
+                fallback={<p className="status">Loading chart...</p>}
+              >
+                <EquityChart
+                  curve={result?.report.equity_curve ?? []}
+                  equityCurveSkipped={result?.equity_curve_skipped}
+                  equityCurveDownsampled={result?.equity_curve_downsampled}
+                />
+              </Suspense>
               <FillsTable fills={result?.fills ?? []} />
               <div className="row actions-row">
-                <button
-                  disabled={!result}
-                  onClick={() =>
-                    result &&
-                    invoke("export_report", {
-                      json: result.full_report_json,
-                    })
-                  }
-                >
+                <button type="button" disabled={!result} onClick={onExport}>
                   Export JSON
                 </button>
               </div>
+              {exportStatus && (
+                <StatusBanner
+                  message={exportStatus}
+                  variant={exportStatus.startsWith("error:") ? "error" : "success"}
+                  onDismiss={() => setExportStatus("")}
+                />
+              )}
             </div>
           )}
         </section>

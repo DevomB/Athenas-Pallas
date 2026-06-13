@@ -117,7 +117,8 @@ fn parse_execution_report(ev: &Value) -> Option<Vec<AccountEvent>> {
         strategy_id: None,
     }];
 
-    if status == OrderStatus::Filled && exec_qty > Decimal::ZERO {
+    let last_qty = fill_qty_from_report(ev);
+    if last_qty > Decimal::ZERO {
         let px: Decimal = ev
             .get("L")
             .and_then(|p| p.as_str())
@@ -140,7 +141,7 @@ fn parse_execution_report(ev: &Value) -> Option<Vec<AccountEvent>> {
             instrument: inst(symbol),
             side,
             price: px,
-            qty: exec_qty,
+            qty: last_qty,
             fee,
             fee_asset,
             strategy_id: None,
@@ -148,6 +149,19 @@ fn parse_execution_report(ev: &Value) -> Option<Vec<AccountEvent>> {
     }
 
     Some(out)
+}
+
+fn fill_qty_from_report(ev: &Value) -> Decimal {
+    ev.get("l")
+        .and_then(|p| p.as_str())
+        .and_then(|s| s.parse().ok())
+        .filter(|q| *q > Decimal::ZERO)
+        .unwrap_or_else(|| {
+            ev.get("z")
+                .and_then(|p| p.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(Decimal::ZERO)
+        })
 }
 
 fn parse_outbound(ev: &Value) -> Option<Vec<AccountEvent>> {
@@ -166,9 +180,9 @@ fn parse_outbound(ev: &Value) -> Option<Vec<AccountEvent>> {
 }
 
 fn parse_balance_update(ev: &Value) -> Option<Vec<AccountEvent>> {
-    let _asset = ev.get("a")?.as_str()?;
-    let _delta: Decimal = ev.get("d")?.as_str()?.parse().ok()?;
-    None
+    let asset = Asset(ev.get("a")?.as_str()?.to_string().into());
+    let delta: Decimal = ev.get("d")?.as_str()?.parse().ok()?;
+    Some(vec![AccountEvent::BalanceDelta { asset, delta }])
 }
 
 #[async_trait]
@@ -216,5 +230,57 @@ impl MarketConnector for BinanceUserDataStream {
             }
         }
         Err(Error::Invalid("user websocket closed".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn partial_fill_emits_incremental_qty() {
+        let ev = json!({
+            "e": "executionReport",
+            "s": "BTCUSDT",
+            "S": "BUY",
+            "o": "LIMIT",
+            "X": "PARTIALLY_FILLED",
+            "i": 42,
+            "q": "1.0",
+            "z": "0.4",
+            "l": "0.4",
+            "L": "50000",
+            "n": "0.01",
+            "N": "USDT",
+            "p": "50000"
+        });
+        let evs = parse_execution_report(&ev).expect("parse");
+        assert_eq!(evs.len(), 2);
+        match &evs[1] {
+            AccountEvent::Fill { qty, price, .. } => {
+                assert_eq!(*qty, Decimal::new(4, 1));
+                assert_eq!(*price, Decimal::new(50_000, 0));
+            }
+            other => panic!("expected fill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn balance_update_emits_delta() {
+        let ev = json!({
+            "e": "balanceUpdate",
+            "a": "USDT",
+            "d": "100.5"
+        });
+        let evs = parse_balance_update(&ev).expect("parse");
+        assert_eq!(evs.len(), 1);
+        match &evs[0] {
+            AccountEvent::BalanceDelta { asset, delta } => {
+                assert_eq!(asset.0, "USDT");
+                assert_eq!(*delta, Decimal::new(1005, 1));
+            }
+            other => panic!("expected delta, got {other:?}"),
+        }
     }
 }

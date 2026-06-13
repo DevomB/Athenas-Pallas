@@ -33,6 +33,9 @@ struct Ctx {
 }
 
 fn authorize(headers: &HeaderMap, secret: &str) -> bool {
+    if secret.is_empty() {
+        return false;
+    }
     headers
         .get(HEADER_SECRET)
         .and_then(|v| v.to_str().ok())

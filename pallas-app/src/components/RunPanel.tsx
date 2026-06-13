@@ -1,23 +1,43 @@
 import { invoke } from "@tauri-apps/api/core";
+import { validateConfig } from "../lib/configValidation";
 import type { ConfigDto } from "../types";
+import { StatusBanner } from "./ui/StatusBanner";
 
 interface Props {
   config: ConfigDto;
   running: boolean;
+  stopping: boolean;
   status: string;
+  error: string;
   onRunningChange: (v: boolean) => void;
+  onStoppingChange: (v: boolean) => void;
   onStatus: (s: string) => void;
+  onClearError: () => void;
+  equityCurveSkipped?: boolean;
+  equityCurveDownsampled?: boolean;
 }
 
 export function RunPanel({
   config,
   running,
+  stopping,
   status,
+  error,
   onRunningChange,
+  onStoppingChange,
   onStatus,
+  onClearError,
+  equityCurveSkipped,
+  equityCurveDownsampled,
 }: Props) {
+  const validationError = validateConfig(config);
+  const statusIsError = status.startsWith("error:") || status.startsWith("failed:");
+
   async function start() {
+    if (validationError) return;
+    onClearError();
     onRunningChange(true);
+    onStoppingChange(false);
     onStatus("starting...");
     try {
       await invoke("run_backtest", { config });
@@ -29,32 +49,63 @@ export function RunPanel({
   }
 
   async function stop() {
-    await invoke("stop_run");
-    onStatus("stop requested");
+    onStoppingChange(true);
+    onStatus("stopping...");
+    try {
+      await invoke("stop_run");
+      onStatus("stop requested");
+    } catch (e) {
+      onStoppingChange(false);
+      onStatus(`error: ${e}`);
+    }
   }
+
+  const workerLabel = stopping
+    ? "Stopping backtest worker..."
+    : running
+      ? "Backtest worker is active."
+      : "Worker is idle.";
 
   return (
     <div className="run-screen">
+      {error && (
+        <StatusBanner
+          message={error}
+          variant="error"
+          onDismiss={onClearError}
+        />
+      )}
+
+      {validationError && !running && (
+        <StatusBanner message={validationError} variant="error" />
+      )}
+
       <section className="run-hero">
         <div>
           <p className="eyebrow">Ready to run</p>
-          <h3>{config.exchange}:{config.symbol}</h3>
+          <h3>
+            {config.exchange}:{config.symbol}
+          </h3>
           <p>
             {config.asset_class} using {config.data_format} data with{" "}
             {config.fee_bps} bps fees and {config.slippage_bps} bps slippage.
           </p>
         </div>
         <div className="run-buttons">
-          <button type="button" disabled={running} onClick={start}>
+          <button
+            type="button"
+            disabled={running || stopping || !!validationError}
+            onClick={start}
+          >
             Start
           </button>
           <button
             type="button"
-            className="secondary danger"
-            disabled={!running}
+            className="danger"
+            disabled={!running || stopping}
             onClick={stop}
           >
-            Stop
+            {stopping ? "Stopping..." : "Stop"}
           </button>
         </div>
       </section>
@@ -81,16 +132,31 @@ export function RunPanel({
         </div>
       </div>
 
+      {(equityCurveSkipped || equityCurveDownsampled) && (
+        <p className="status" aria-live="polite">
+          {equityCurveSkipped && "Equity curve was not recorded for this run. "}
+          {equityCurveDownsampled &&
+            "Equity curve was downsampled for chart display."}
+        </p>
+      )}
+
       <section className="form-section wide">
         <div className="section-heading">
           <h3>Worker log</h3>
-          <p>{running ? "Backtest worker is active." : "Worker is idle."}</p>
+          <p>{workerLabel}</p>
         </div>
         <textarea
           className="log"
           readOnly
+          aria-live="polite"
+          aria-label="Backtest worker log"
           value={status || "No run has started in this session."}
         />
+        {statusIsError && !error && (
+          <p className="status-error" aria-live="assertive">
+            {status}
+          </p>
+        )}
       </section>
     </div>
   );

@@ -48,7 +48,7 @@ impl AppSession {
         self.cancel.store(false, Ordering::SeqCst);
     }
 
-    pub fn join_with_timeout(&self, timeout: Duration) {
+    pub fn join_with_timeout(&self, timeout: Duration) -> bool {
         let handle = self.join.lock().unwrap().take();
         if let Some(h) = handle {
             let done = Arc::new(AtomicBool::new(false));
@@ -63,9 +63,12 @@ impl AppSession {
             }
             if !done.load(Ordering::SeqCst) {
                 drop(waiter);
+                self.cancel.store(true, Ordering::SeqCst);
+                return false;
             }
         }
         self.running.store(false, Ordering::SeqCst);
+        true
     }
 }
 

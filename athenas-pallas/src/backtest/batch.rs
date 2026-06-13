@@ -82,7 +82,9 @@ where
             let mut curve: Vec<EquityPoint> = Vec::new();
             for ev in sc.events {
                 let ts = equity_ts(&ev);
-                let _ = dispatch_event(&mut state, &mut strat, &risk, exec.as_ref(), ev).await;
+                if let Err(e) = dispatch_event(&mut state, &mut strat, &risk, exec.as_ref(), ev).await {
+                    tracing::warn!(target: "athenas_pallas::batch", "scenario {}: {e}", sc.name);
+                }
                 if let Some(eq) = state.mark_to_market_equity(&eq_inst) {
                     curve.push(EquityPoint {
                         ts,

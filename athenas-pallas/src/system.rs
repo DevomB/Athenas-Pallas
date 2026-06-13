@@ -15,7 +15,7 @@ use crate::types::{EquityPoint, TradingState};
 use crate::instrument::{IndexedInstruments, InstrumentFilter, SystemConfig};
 use rust_decimal::Decimal;
 use std::sync::Arc;
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 /// Engine feed mode.
@@ -185,7 +185,7 @@ impl SystemBuilder {
             handle: EngineHandle::disconnected(),
             join: None,
             audit_rx: None,
-            state,
+            state: Arc::new(Mutex::new(state)),
             strategy: Some(args.strategy),
             risk,
             exec: args.execution,
@@ -203,7 +203,7 @@ pub struct System<S, E> {
     handle: EngineHandle,
     join: Option<JoinHandle<Result<()>>>,
     audit_rx: Option<broadcast::Receiver<EngineAudit>>,
-    state: GlobalState,
+    state: Arc<Mutex<GlobalState>>,
     strategy: Option<S>,
     risk: RiskPipeline,
     exec: Arc<E>,
@@ -322,9 +322,9 @@ where
     }
 
     /// Set trading state at runtime.
-    pub fn set_trading_state(&mut self, state: TradingState) {
+    pub async fn set_trading_state(&mut self, state: TradingState) {
         self.trading_state = state;
-        self.state.trading_state = state;
+        self.state.lock().await.trading_state = state;
     }
 
     /// Take audit receiver.
@@ -339,7 +339,7 @@ where
             let _ = j.await;
         }
         let summary = EngineSummary {
-            state: self.state,
+            state: self.state.lock().await.clone(),
             strategy: self.strategy,
             equity_curve: self.equity_curve,
             config: self.config,
@@ -357,21 +357,24 @@ where
         })?;
         for ev in events {
             let ts = event_timestamp(&ev);
-            dispatch_event_audited(
-                &mut self.state,
-                strategy,
-                &self.risk,
-                self.exec.as_ref(),
-                ev,
-                None,
-            )
-            .await?;
-            if let Some(ref inst) = self.equity_instrument {
-                if let Some(eq) = self.state.mark_to_market_equity(inst) {
-                    self.equity_curve.push(EquityPoint {
-                        ts,
-                        equity_quote: eq,
-                    });
+            {
+                let mut guard = self.state.lock().await;
+                dispatch_event_audited(
+                    &mut guard,
+                    strategy,
+                    &self.risk,
+                    self.exec.as_ref(),
+                    ev,
+                    None,
+                )
+                .await?;
+                if let Some(ref inst) = self.equity_instrument {
+                    if let Some(eq) = guard.mark_to_market_equity(inst) {
+                        self.equity_curve.push(EquityPoint {
+                            ts,
+                            equity_quote: eq,
+                        });
+                    }
                 }
             }
         }
@@ -462,6 +465,63 @@ mod tests {
             _: &mut Vec<crate::events::OrderIntent>,
         ) {
         }
+    }
+
+    #[tokio::test]
+    async fn async_engine_updates_shared_state() {
+        use crate::events::ControlEvent;
+
+        let inst = InstrumentId::new("binance", "BTCUSDT");
+        let mut map = HashMap::new();
+        map.insert(
+            inst.clone(),
+            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
+        );
+        let mut balances = HashMap::new();
+        balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
+        let state = GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
+        let config = SystemConfig {
+            risk_free_return: Decimal::ZERO,
+            instruments: vec![],
+            executions: vec![],
+        };
+        let instruments = IndexedInstruments::new(vec![]);
+        let risk: Arc<dyn RiskManager> = Arc::new(DefaultRiskManager::default());
+        let exec = Arc::new(SimGateway::new(PaperConfig::default()));
+        let args = SystemArgs::new(
+            &instruments,
+            config,
+            Arc::new(LiveClock),
+            Noop,
+            risk,
+            exec,
+            state,
+        );
+        let mut system = SystemBuilder::new()
+            .engine_feed_mode(EngineFeedMode::Async)
+            .build(args)
+            .expect("build");
+        system = system
+            .init_with_runtime(tokio::runtime::Handle::current())
+            .await
+            .expect("init");
+        {
+            let handle = system.handle();
+            handle
+                .send(Event::Control(ControlEvent::Pause))
+                .await
+                .expect("pause");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            assert!(system.state.lock().await.paused);
+            handle
+                .send(Event::Control(ControlEvent::Resume))
+                .await
+                .expect("resume");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            assert!(!system.state.lock().await.paused);
+        }
+        let (summary, _) = system.shutdown().await.expect("shutdown");
+        assert!(!summary.state.paused);
     }
 
     #[tokio::test]

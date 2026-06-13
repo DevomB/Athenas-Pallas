@@ -6,6 +6,13 @@
   color: #eef1f3;
   font-synthesis: none;
   text-rendering: geometricPrecision;
+
+  --chart-bg: #1c212b;
+  --chart-text: #bdc1c6;
+  --chart-grid: #2a2f3a;
+  --chart-line: #8ab4f8;
+  --status-error: #ff8a8a;
+  --status-success: #8fd4a8;
 }
 
 * {
@@ -59,7 +66,12 @@ button.secondary:hover:not(:disabled) {
 
 button.danger {
   border-color: #7a3939;
+  background: #4a2222;
   color: #ffd7d7;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #5c2a2a;
 }
 
 code {
@@ -544,6 +556,89 @@ tr:last-child td {
   font-size: 13px;
 }
 
+.status-error {
+  margin: 0;
+  color: var(--status-error);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #303840;
+  border-radius: 8px;
+  background: #1b2026;
+}
+
+.status-banner-error {
+  border-color: #7a3939;
+  background: #2a1818;
+}
+
+.status-banner-success {
+  border-color: #2f5a3d;
+  background: #18241c;
+}
+
+.cta-banner {
+  display: grid;
+  gap: 10px;
+}
+
+.header-run-badge {
+  border-color: #2f5a3d !important;
+  background: #1f3326 !important;
+  color: #8fd4a8 !important;
+}
+
+.chart-figure {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.chart-summary {
+  margin: 0;
+  color: #9aa5af;
+  font-size: 13px;
+}
+
+.chart-footnote {
+  margin: 8px 0 0;
+  color: #9aa5af;
+  font-size: 12px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid #303840;
+  border-radius: 8px;
+  background: #191e24;
+}
+
+.table-scroll table {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+table caption {
+  padding: 12px 12px 0;
+  text-align: left;
+  color: #9aa5af;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.table-pagination {
+  padding: 10px 12px;
+  border-top: 1px solid #303840;
+}
+
 @media (max-width: 980px) {
   .app {
     grid-template-columns: 1fr;
@@ -565,6 +660,10 @@ tr:last-child td {
 
   .run-state {
     display: none;
+  }
+
+  .header-run-badge {
+    display: inline-flex !important;
   }
 
   .settings-layout,

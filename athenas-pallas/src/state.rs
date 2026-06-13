@@ -257,6 +257,13 @@ impl GlobalState {
             AccountEvent::Balance { asset, free } => {
                 self.balances.insert(asset.clone(), *free);
             }
+            AccountEvent::BalanceDelta { asset, delta } => {
+                let entry = self
+                    .balances
+                    .entry(asset.clone())
+                    .or_insert(Decimal::ZERO);
+                *entry += *delta;
+            }
             AccountEvent::OrderUpdate {
                 id,
                 instrument,

@@ -167,8 +167,13 @@ impl BacktestRunner {
                 let mut bar_ix = 0u64;
                 while let Some((bar, ts)) = src.next_bar() {
                     bar_ix += 1;
-                    if bar_ix % 64 == 0 && cancelled(&cancel) {
-                        return Err(crate::Error::Cancelled);
+                    if bar_ix % 64 == 0 {
+                        if let Some(ref hook) = cfg.on_progress {
+                            hook(&format!("processed {bar_ix} bars"));
+                        }
+                        if cancelled(&cancel) {
+                            return Err(crate::Error::Cancelled);
+                        }
                     }
                     state.apply_bar(inst_ix, &bar, tick, cfg.half_spread_bps);
                     let ev = src.bar_to_event(&bar, ts);
@@ -201,8 +206,13 @@ impl BacktestRunner {
         let mut bar_ix = 0u64;
         while let Some(ev) = src.next_event() {
             bar_ix += 1;
-            if bar_ix % 64 == 0 && cancelled(&cancel) {
-                return Err(crate::Error::Cancelled);
+            if bar_ix % 64 == 0 {
+                if let Some(ref hook) = cfg.on_progress {
+                    hook(&format!("processed {bar_ix} bars"));
+                }
+                if cancelled(&cancel) {
+                    return Err(crate::Error::Cancelled);
+                }
             }
             let ts = event_ts(&ev);
             if let Event::Market(ref m) = ev {

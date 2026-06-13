@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, List, Optional
 
 
@@ -15,6 +15,7 @@ class Ctx:
     mid: Optional[str]
     equity: str
     balances: dict
+    instrument: Optional[dict] = field(default=None)
 
 
 def _read_line() -> dict:
@@ -35,6 +36,8 @@ def run(on_event: Callable[[Ctx, dict], List[dict]], on_init: Optional[Callable[
     msg = _read_line()
     if msg.get("msg") != "init":
         raise RuntimeError(f"expected init, got {msg}")
+    instruments = msg.get("instruments") or []
+    session_instrument: Optional[dict] = instruments[0] if instruments else None
     if on_init:
         on_init(msg)
     sys.stdout.write(json.dumps({"msg": "ready"}) + "\n")
@@ -49,7 +52,7 @@ def run(on_event: Callable[[Ctx, dict], List[dict]], on_init: Optional[Callable[
             break
         if msg.get("msg") != "event":
             continue
-        ctx = Ctx(**msg["ctx"])
+        ctx = Ctx(**msg["ctx"], instrument=session_instrument)
         intents = on_event(ctx, msg["event"])
         _write_intents(msg["seq"], intents)
 

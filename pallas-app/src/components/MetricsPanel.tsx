@@ -2,11 +2,21 @@ import type { BacktestReportDto } from "../types";
 
 interface Props {
   report: BacktestReportDto | null;
+  equityCurveSkipped?: boolean;
+  equityCurveDownsampled?: boolean;
 }
 
-export function MetricsPanel({ report }: Props) {
+export function MetricsPanel({
+  report,
+  equityCurveSkipped,
+  equityCurveDownsampled,
+}: Props) {
   if (!report) {
-    return <p className="status">Run a backtest to see metrics.</p>;
+    return (
+      <p className="status" aria-live="polite">
+        Run a backtest to see metrics.
+      </p>
+    );
   }
   const items = [
     ["PnL", report.pnl.toFixed(2)],
@@ -18,13 +28,22 @@ export function MetricsPanel({ report }: Props) {
     ["Wall ms", String(report.wall_time_ms)],
   ];
   return (
-    <div className="metrics">
-      {items.map(([label, value]) => (
-        <div className="metric" key={label}>
-          <div className="label">{label}</div>
-          <div className="value">{value}</div>
-        </div>
-      ))}
+    <div>
+      <div className="metrics" role="region" aria-label="Backtest metrics">
+        {items.map(([label, value]) => (
+          <div className="metric" key={label}>
+            <div className="label">{label}</div>
+            <div className="value">{value}</div>
+          </div>
+        ))}
+      </div>
+      {(equityCurveSkipped || equityCurveDownsampled) && (
+        <p className="chart-footnote" aria-live="polite">
+          {equityCurveSkipped && "Equity curve was not recorded for this run. "}
+          {equityCurveDownsampled &&
+            "Chart shows a downsampled equity curve (max 2,000 points)."}
+        </p>
+      )}
     </div>
   );
 }

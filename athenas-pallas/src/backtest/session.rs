@@ -57,7 +57,8 @@ impl BacktestConfig {
         let text = std::fs::read_to_string(path).map_err(crate::Error::Io)?;
         let table: toml::Table =
             toml::from_str(&text).map_err(|e| crate::Error::Invalid(e.to_string()))?;
-        apply_table(self, &table)
+        let base_dir = path.parent();
+        apply_table(self, &table, base_dir)
     }
 }
 
@@ -66,7 +67,7 @@ pub fn run_backtest(cfg: &BacktestConfig) -> crate::Result<BacktestReport> {
     run_backtest_with_cancel(cfg, None)
 }
 
-/// Run buy-and-hold with optional cooperative cancel (checked every 1024 bars).
+/// Run buy-and-hold with optional cooperative cancel (checked every 64 bars).
 pub fn run_backtest_with_cancel(
     cfg: &BacktestConfig,
     cancel: Option<Arc<AtomicBool>>,
@@ -213,7 +214,21 @@ fn parse_decimal_opt(s: &str) -> Option<Decimal> {
     s.parse().ok()
 }
 
-fn apply_table(cfg: &mut BacktestConfig, table: &toml::Table) -> crate::Result<()> {
+fn resolve_config_path(base_dir: Option<&Path>, p: &str) -> PathBuf {
+    let path = PathBuf::from(p);
+    if path.is_absolute() {
+        return path;
+    }
+    base_dir
+        .map(|b| b.join(&path))
+        .unwrap_or(path)
+}
+
+fn apply_table(
+    cfg: &mut BacktestConfig,
+    table: &toml::Table,
+    base_dir: Option<&Path>,
+) -> crate::Result<()> {
     if let Some(inst) = table.get("instrument").and_then(|v| v.as_table()) {
         if let (Some(ex), Some(sym)) = (
             inst.get("exchange").and_then(|v| v.as_str()),
@@ -240,7 +255,7 @@ fn apply_table(cfg: &mut BacktestConfig, table: &toml::Table) -> crate::Result<(
 
     if let Some(bt) = table.get("backtest").and_then(|v| v.as_table()) {
         if let Some(p) = bt.get("data").and_then(|v| v.as_str()) {
-            cfg.data_path = PathBuf::from(p);
+            cfg.data_path = resolve_config_path(base_dir, p);
         }
         if let Some(f) = bt.get("data_format").and_then(|v| v.as_str()) {
             cfg.data_format = parse_data_format(f);
@@ -258,10 +273,10 @@ fn apply_table(cfg: &mut BacktestConfig, table: &toml::Table) -> crate::Result<(
             cfg.periods_per_year = py;
         }
         if let Some(p) = bt.get("output").and_then(|v| v.as_str()) {
-            cfg.output_path = Some(PathBuf::from(p));
+            cfg.output_path = Some(resolve_config_path(base_dir, p));
         }
         if let Some(p) = bt.get("strategy").and_then(|v| v.as_str()) {
-            cfg.strategy_path = Some(PathBuf::from(p));
+            cfg.strategy_path = Some(resolve_config_path(base_dir, p));
         }
         if let Some(p) = bt.get("python").and_then(|v| v.as_str()) {
             cfg.python_exe = p.to_string();

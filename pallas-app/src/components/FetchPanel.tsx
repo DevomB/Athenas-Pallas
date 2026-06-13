@@ -2,23 +2,43 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import type { ConfigDto } from "../types";
+import { StatusBanner } from "./ui/StatusBanner";
 
 interface Props {
   config: ConfigDto;
-  onDataPath: (path: string) => void;
+  onConfigChange: (config: ConfigDto) => void;
+  onNavigate?: (tab: "config" | "run") => void;
 }
 
-export function FetchPanel({ config, onDataPath }: Props) {
-  const [provider, setProvider] = useState("yahoo");
-  const [symbol, setSymbol] = useState("AAPL");
+function providerFromExchange(exchange: string): "yahoo" | "binance" {
+  return exchange === "binance" ? "binance" : "yahoo";
+}
+
+export function FetchPanel({ config, onConfigChange, onNavigate }: Props) {
+  const [provider, setProvider] = useState<"yahoo" | "binance">(
+    providerFromExchange(config.exchange),
+  );
+  const [symbol, setSymbol] = useState(config.symbol);
   const [interval, setInterval] = useState("1d");
   const [days, setDays] = useState(30);
-  const [outputPath, setOutputPath] = useState(`data/${symbol}_live.csv`);
+  const [outputPath, setOutputPath] = useState(
+    config.data_path || `data/${config.symbol}_live.csv`,
+  );
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fetchSuccess, setFetchSuccess] = useState(false);
+
+  useEffect(() => {
+    setSymbol(config.symbol);
+    setProvider(providerFromExchange(config.exchange));
+    if (config.data_path) {
+      setOutputPath(config.data_path);
+    }
+  }, [config.symbol, config.exchange, config.data_path]);
 
   useEffect(() => {
     setOutputPath(`data/${symbol}_live.csv`);
+    setFetchSuccess(false);
   }, [symbol]);
 
   const intervalOptions = useMemo(
@@ -46,6 +66,7 @@ export function FetchPanel({ config, onDataPath }: Props) {
 
   async function onFetch() {
     setBusy(true);
+    setFetchSuccess(false);
     setStatus("fetching...");
     try {
       const path = await invoke<string>("fetch_bars", {
@@ -57,14 +78,30 @@ export function FetchPanel({ config, onDataPath }: Props) {
           output_path: outputPath,
         },
       });
-      onDataPath(path);
+      const exchange = provider === "binance" ? "binance" : "yahoo";
+      const assetClass =
+        provider === "binance"
+          ? "crypto"
+          : config.asset_class === "crypto"
+            ? "equity"
+            : config.asset_class;
+      onConfigChange({
+        ...config,
+        data_path: path,
+        symbol,
+        exchange,
+        asset_class: assetClass,
+      });
       setStatus(`saved ${path}`);
+      setFetchSuccess(true);
     } catch (e) {
       setStatus(`error: ${e}`);
     } finally {
       setBusy(false);
     }
   }
+
+  const statusIsError = status.startsWith("error:");
 
   return (
     <div className="fetch-screen">
@@ -77,14 +114,14 @@ export function FetchPanel({ config, onDataPath }: Props) {
           <fieldset className="control-group wide-field">
             <legend>Provider</legend>
             <div className="segmented">
-              {["yahoo", "binance"].map((value) => (
+              {(["yahoo", "binance"] as const).map((value) => (
                 <label key={value}>
                   <input
                     type="radio"
                     name="provider"
                     value={value}
                     checked={provider === value}
-                    onChange={(e) => setProvider(e.target.value)}
+                    onChange={() => setProvider(value)}
                   />
                   <span>{value === "yahoo" ? "Yahoo" : "Binance"}</span>
                 </label>
@@ -139,6 +176,23 @@ export function FetchPanel({ config, onDataPath }: Props) {
         </div>
       </section>
 
+      {fetchSuccess && (
+        <div className="cta-banner">
+          <StatusBanner
+            message={`Data saved to ${config.data_path}. Config updated with ${config.exchange}:${config.symbol}.`}
+            variant="success"
+          />
+          <div className="row actions-row">
+            <button type="button" onClick={() => onNavigate?.("config")}>
+              Review config
+            </button>
+            <button type="button" className="secondary" onClick={() => onNavigate?.("run")}>
+              Go to Run
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="status-panel">
         <div>
           <span>Config data path</span>
@@ -146,7 +200,12 @@ export function FetchPanel({ config, onDataPath }: Props) {
         </div>
         <div>
           <span>Status</span>
-          <strong>{status || "Ready"}</strong>
+          <strong
+            className={statusIsError ? "status-error" : undefined}
+            aria-live="polite"
+          >
+            {status || "Ready"}
+          </strong>
         </div>
       </div>
     </div>

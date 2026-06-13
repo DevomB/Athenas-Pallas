@@ -52,6 +52,8 @@ export interface RunResultDto {
   report: BacktestReportDto;
   fills: FillDto[];
   full_report_json: string;
+  equity_curve_skipped: boolean;
+  equity_curve_downsampled: boolean;
 }
 
 export interface FetchRequest {
@@ -63,7 +65,7 @@ export interface FetchRequest {
 }
 
 export const defaultConfig = (): ConfigDto => ({
-  data_path: "athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv",
+  data_path: "data/BTCUSDT_live.csv",
   data_format: "ohlcv",
   exchange: "binance",
   symbol: "BTCUSDT",

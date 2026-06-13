@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useState } from "react";
 import type { ConfigDto } from "../types";
+import { StatusBanner } from "./ui/StatusBanner";
 
 interface Props {
   config: ConfigDto;
@@ -27,7 +29,16 @@ const periodPresets = [
   { value: 52, label: "Weekly" },
 ];
 
+function parseFeeBps(raw: string, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 export function ConfigForm({ config, onChange }: Props) {
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("");
+
   function set<K extends keyof ConfigDto>(key: K, value: ConfigDto[K]) {
     onChange({ ...config, [key]: value });
   }
@@ -42,38 +53,84 @@ export function ConfigForm({ config, onChange }: Props) {
   }
 
   async function loadToml() {
-    const path = await invoke<string | null>("pick_toml");
-    if (!path) return;
-    const loaded = await invoke<ConfigDto>("load_config", { path });
-    onChange(loaded);
+    setLoading(true);
+    setStatus("");
+    try {
+      const path = await invoke<string | null>("pick_toml");
+      if (!path) return;
+      const loaded = await invoke<ConfigDto>("load_config", { path });
+      onChange(loaded);
+      setStatus(`Loaded ${path}`);
+    } catch (e) {
+      setStatus(`error: ${e}`);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function saveToml() {
-    const path = await invoke<string | null>("pick_save_toml");
-    if (!path) return;
-    await invoke("save_config_toml", { path, config });
+    setSaving(true);
+    setStatus("");
+    try {
+      const path = await invoke<string | null>("pick_save_toml");
+      if (!path) return;
+      await invoke("save_config_toml", { path, config });
+      setStatus(`Saved ${path}`);
+    } catch (e) {
+      setStatus(`error: ${e}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function pickCsv() {
-    const path = await invoke<string | null>("pick_csv");
-    if (path) set("data_path", path);
+    try {
+      const path = await invoke<string | null>("pick_csv");
+      if (path) set("data_path", path);
+    } catch (e) {
+      setStatus(`error: ${e}`);
+    }
   }
 
   async function pickStrategy() {
-    const path = await invoke<string | null>("pick_strategy");
-    if (path) set("strategy_path", path);
+    try {
+      const path = await invoke<string | null>("pick_strategy");
+      if (path) set("strategy_path", path);
+    } catch (e) {
+      setStatus(`error: ${e}`);
+    }
   }
+
+  const statusIsError = status.startsWith("error:");
 
   return (
     <div className="config-screen">
       <div className="toolbar">
-        <button className="secondary" type="button" onClick={loadToml}>
-          Load TOML
+        <button
+          className="secondary"
+          type="button"
+          disabled={loading}
+          onClick={loadToml}
+        >
+          {loading ? "Loading..." : "Load TOML"}
         </button>
-        <button className="secondary" type="button" onClick={saveToml}>
-          Save TOML
+        <button
+          className="secondary"
+          type="button"
+          disabled={saving}
+          onClick={saveToml}
+        >
+          {saving ? "Saving..." : "Save TOML"}
         </button>
       </div>
+
+      {status && (
+        <StatusBanner
+          message={status}
+          variant={statusIsError ? "error" : "success"}
+          onDismiss={() => setStatus("")}
+        />
+      )}
 
       <div className="settings-layout">
         <section className="form-section wide">
@@ -208,7 +265,9 @@ export function ConfigForm({ config, onChange }: Props) {
                 type="number"
                 min="0"
                 value={config.fee_bps}
-                onChange={(e) => set("fee_bps", Number(e.target.value))}
+                onChange={(e) =>
+                  set("fee_bps", parseFeeBps(e.target.value, config.fee_bps))
+                }
               />
             </label>
             <label>
@@ -217,7 +276,12 @@ export function ConfigForm({ config, onChange }: Props) {
                 type="number"
                 min="0"
                 value={config.slippage_bps}
-                onChange={(e) => set("slippage_bps", Number(e.target.value))}
+                onChange={(e) =>
+                  set(
+                    "slippage_bps",
+                    parseFeeBps(e.target.value, config.slippage_bps),
+                  )
+                }
               />
             </label>
             <label>
@@ -226,7 +290,12 @@ export function ConfigForm({ config, onChange }: Props) {
                 type="number"
                 min="0"
                 value={config.half_spread_bps}
-                onChange={(e) => set("half_spread_bps", Number(e.target.value))}
+                onChange={(e) =>
+                  set(
+                    "half_spread_bps",
+                    parseFeeBps(e.target.value, config.half_spread_bps),
+                  )
+                }
               />
             </label>
             <label>

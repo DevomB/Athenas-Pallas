@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             paper,
             state,
         ))?;
-    system.set_trading_state(TradingState::Enabled);
+    system.set_trading_state(TradingState::Enabled).await;
     system.run_iterator(vec![]).await?;
     let (summary, _) = system.shutdown().await?;
     summary

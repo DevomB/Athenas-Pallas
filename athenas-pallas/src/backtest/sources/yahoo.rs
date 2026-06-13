@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::backtest::{parse_ts, HistoricalSource};
+use crate::backtest::{parse_ts, parse_ts_required_err, HistoricalSource};
 use crate::events::{Event, MarketEvent};
 use crate::types::{ExchangeId, InstrumentId, Symbol};
 
@@ -40,8 +40,11 @@ impl YahooCsvSource {
         File::open(path)?.read_to_string(&mut buf)?;
         let mut rdr = csv::Reader::from_reader(buf.as_bytes());
         let mut rows = Vec::new();
-        for rec in rdr.deserialize() {
-            rows.push(rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?);
+        for (i, rec) in rdr.deserialize().enumerate() {
+            let row: YahooRow = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            parse_ts_required_err(&row.date, &format!("row {}", i + 2))
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            rows.push(row);
         }
         if rows.is_empty() {
             return Err(std::io::Error::new(
@@ -61,7 +64,7 @@ impl HistoricalSource for YahooCsvSource {
     fn next_event(&mut self) -> Option<Event> {
         let row = self.rows.get(self.idx)?;
         self.idx += 1;
-        let ts = parse_ts(&row.date).unwrap_or_else(time::OffsetDateTime::now_utc);
+        let ts = parse_ts(&row.date).expect("timestamp validated at csv load");
         Some(Event::Market(MarketEvent::Bar {
             instrument: self.instrument.clone(),
             ts,

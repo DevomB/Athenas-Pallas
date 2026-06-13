@@ -44,7 +44,7 @@ def on_event(ctx: Ctx, event: dict) -> list[dict]:
     intents: list[dict] = []
 
     if sign != 0 and sign != prev_sign:
-        inst = {"exchange": "binance", "symbol": "BTCUSDT"}
+        inst = ctx.instrument or {"exchange": "binance", "symbol": "BTCUSDT"}
         if sign > 0:
             intents.append(
                 {

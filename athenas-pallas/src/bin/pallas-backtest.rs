@@ -31,7 +31,7 @@ struct Args {
     slippage_bps: u64,
     #[arg(long, default_value = "5")]
     half_spread_bps: u64,
-    #[arg(long, default_value = "252")]
+    #[arg(long, default_value = "365")]
     periods_per_year: f64,
     #[arg(long)]
     output: Option<PathBuf>,

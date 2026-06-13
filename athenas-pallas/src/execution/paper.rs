@@ -68,6 +68,38 @@ impl PaperGateway {
         notional * bps / Decimal::from(10_000u64)
     }
 
+    fn notional(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
+        match meta.asset_class {
+            crate::instrument::AssetClass::Future => {
+                let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
+                price * qty * mult
+            }
+            _ => price * qty,
+        }
+    }
+
+    fn check_balance_for_fill(
+        state: &GlobalState,
+        meta: &InstrumentMeta,
+        side: Side,
+        price: Decimal,
+        qty: Decimal,
+        fee: Decimal,
+    ) -> Result<()> {
+        let base_free = *state.balances.get(&meta.base).unwrap_or(&Decimal::ZERO);
+        let quote_free = *state.balances.get(&meta.quote).unwrap_or(&Decimal::ZERO);
+        let notional = Self::notional(meta, price, qty);
+        match side {
+            Side::Buy if quote_free < notional + fee => {
+                Err(Error::ExecutionRejected("insufficient quote balance".into()))
+            }
+            Side::Sell if base_free < qty => {
+                Err(Error::ExecutionRejected("insufficient base balance".into()))
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn build_open(
         id: OrderId,
         intent: &OrderIntent,
@@ -180,8 +212,9 @@ impl PaperGateway {
                 ) {
                     o.remaining_qty = Decimal::ZERO;
                     o.status = OrderStatus::Filled;
-                    let mut evs = vec![Self::emit_order_update(&o)];
                     let fee = Self::fee_notional(px * intent.qty, self.cfg.fee_bps);
+                    Self::check_balance_for_fill(state, meta, intent.side, px, intent.qty, fee)?;
+                    let mut evs = vec![Self::emit_order_update(&o)];
                     evs.push(AccountEvent::Fill {
                         order_id: o.id.clone(),
                         instrument: o.instrument.clone(),
@@ -220,6 +253,7 @@ impl PaperGateway {
         o_filled.remaining_qty = Decimal::ZERO;
         o_filled.status = OrderStatus::Filled;
         let fee = Self::fee_notional(px * intent.qty, self.cfg.fee_bps);
+        Self::check_balance_for_fill(state, meta, intent.side, px, intent.qty, fee)?;
         let mut evs = vec![Self::emit_order_update(&o_filled)];
         evs.push(AccountEvent::Fill {
             order_id: o_filled.id.clone(),
@@ -299,6 +333,9 @@ impl PaperGateway {
             if let Some(px) = fill {
                 let qty = o.remaining_qty;
                 let fee = Self::fee_notional(px * qty, self.cfg.fee_bps);
+                if Self::check_balance_for_fill(state, meta, o.side, px, qty, fee).is_err() {
+                    continue;
+                }
                 let mut filled = o.clone();
                 filled.remaining_qty = Decimal::ZERO;
                 filled.status = OrderStatus::Filled;
@@ -364,7 +401,9 @@ mod tests {
             inst.clone(),
             InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
         );
-        let mut state = GlobalState::new(InstrumentRegistry::from_instruments(instruments), HashMap::new());
+        let mut balances = HashMap::new();
+        balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
+        let mut state = GlobalState::new(InstrumentRegistry::from_instruments(instruments), balances);
         state.apply_market(&MarketEvent::BookL1 {
             instrument: inst.clone(),
             ts: OffsetDateTime::now_utc(),
@@ -492,5 +531,38 @@ mod tests {
         };
         let evs = gw.place_limit_sync(&state, &intent).unwrap();
         assert!(!evs.iter().any(|e| matches!(e, AccountEvent::Fill { .. })));
+    }
+
+    #[test]
+    fn market_buy_rejects_insufficient_quote() {
+        let inst = InstrumentId::new("binance", "BTCUSDT");
+        let mut instruments = HashMap::new();
+        instruments.insert(
+            inst.clone(),
+            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
+        );
+        let mut balances = HashMap::new();
+        balances.insert(Asset("USDT".into()), Decimal::ONE);
+        let mut state =
+            GlobalState::new(InstrumentRegistry::from_instruments(instruments), balances);
+        state.apply_market(&MarketEvent::BookL1 {
+            instrument: inst.clone(),
+            ts: OffsetDateTime::now_utc(),
+            bid: Decimal::new(40_000, 0),
+            ask: Decimal::new(40_010, 0),
+        });
+        let gw = PaperGateway::new(PaperConfig::default());
+        let intent = OrderIntent {
+            instrument: inst,
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            price: None,
+            qty: Decimal::ONE,
+            client_order_id: None,
+            source: crate::events::OrderIntentSource::User,
+            strategy_id: None,
+        };
+        let err = gw.place_market_sync(&state, &intent).unwrap_err();
+        assert!(matches!(err, Error::ExecutionRejected(_)));
     }
 }

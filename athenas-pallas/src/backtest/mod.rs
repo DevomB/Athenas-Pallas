@@ -70,8 +70,9 @@ impl CsvBarSource {
     pub fn from_str(data: &str, exchange: ExchangeId, symbol: Symbol) -> Result<Self, String> {
         let mut rdr = csv::Reader::from_reader(data.as_bytes());
         let mut rows = Vec::new();
-        for rec in rdr.deserialize() {
+        for (i, rec) in rdr.deserialize().enumerate() {
             let row: OhlcvRow = rec.map_err(|e| e.to_string())?;
+            parse_ts_required_err(&row.ts, &format!("row {}", i + 2))?;
             rows.push(row);
         }
         if rows.is_empty() {
@@ -95,6 +96,7 @@ impl CsvBarSource {
 }
 
 pub(crate) fn parse_ts(s: &str) -> Option<OffsetDateTime> {
+    let s = s.trim();
     if let Ok(t) = OffsetDateTime::parse(s, &Rfc3339) {
         return Some(t);
     }
@@ -104,17 +106,32 @@ pub(crate) fn parse_ts(s: &str) -> Option<OffsetDateTime> {
     if let Ok(p) = PrimitiveDateTime::parse(s, &fmt) {
         return Some(p.assume_utc());
     }
+    use time::Date;
     let fmt2 = format_description!("[year]-[month]-[day]");
-    PrimitiveDateTime::parse(s, &fmt2)
-        .ok()
-        .map(|p| p.assume_utc())
+    if let Ok(d) = Date::parse(s, &fmt2) {
+        return d.with_hms(0, 0, 0).ok().map(|dt| dt.assume_utc());
+    }
+    None
+}
+
+pub(crate) fn parse_ts_required(s: &str, context: &str) -> std::io::Result<OffsetDateTime> {
+    parse_ts(s).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("invalid timestamp {context}: {s}"),
+        )
+    })
+}
+
+pub(crate) fn parse_ts_required_err(s: &str, context: &str) -> Result<OffsetDateTime, String> {
+    parse_ts(s).ok_or_else(|| format!("invalid timestamp {context}: {s}"))
 }
 
 impl HistoricalSource for CsvBarSource {
     fn next_event(&mut self) -> Option<Event> {
         let row = self.rows.get(self.idx)?;
         self.idx += 1;
-        let ts = parse_ts(&row.ts).unwrap_or_else(OffsetDateTime::now_utc);
+        let ts = parse_ts(&row.ts).expect("timestamp validated at csv load");
         Some(Event::Market(MarketEvent::Bar {
             instrument: self.instrument.clone(),
             ts,
@@ -233,7 +250,7 @@ impl HistoricalSource for CsvOhlcSource {
     fn next_event(&mut self) -> Option<Event> {
         let row = self.rows.get(self.idx)?;
         self.idx += 1;
-        let ts = parse_ts(&row.ts).unwrap_or_else(OffsetDateTime::now_utc);
+        let ts = parse_ts(&row.ts).expect("timestamp validated at csv load");
         let mid = row.close;
         let half_spread = mid * self.half_spread_from_mid_bps / Decimal::from(10_000u64);
         let bid = mid - half_spread;

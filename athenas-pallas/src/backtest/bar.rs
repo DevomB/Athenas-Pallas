@@ -8,7 +8,7 @@ use std::path::Path;
 
 use time::OffsetDateTime;
 
-use super::{parse_ts, OhlcvRow};
+use super::{parse_ts_required, OhlcvRow};
 use crate::events::{Event, MarketEvent};
 use crate::types::{ExchangeId, InstrumentId, Symbol};
 
@@ -69,9 +69,9 @@ impl BarSeries {
         File::open(path)?.read_to_string(&mut buf)?;
         let mut rdr = csv::Reader::from_reader(buf.as_bytes());
         let mut bars = Vec::with_capacity(buf.lines().count().saturating_sub(1));
-        for rec in rdr.deserialize::<OhlcvRow>() {
+        for (i, rec) in rdr.deserialize::<OhlcvRow>().enumerate() {
             let row: OhlcvRow = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            let ts = parse_ts(&row.ts).unwrap_or_else(time::OffsetDateTime::now_utc);
+            let ts = parse_ts_required(&row.ts, &format!("row {}", i + 2))?;
             bars.push(Bar {
                 ts_unix_nanos: ts.unix_timestamp_nanos() as i64,
                 open_ticks: decimal_to_ticks(row.open, tick_size),

@@ -94,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             command_channel_capacity: Some(64),
             ..EngineConfig::default()
         },
-        state,
+        Arc::new(tokio::sync::Mutex::new(state)),
         strategy,
         risk,
         exec,

@@ -12,7 +12,7 @@ use rust_decimal::Decimal;
 use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tracing::{error, warn};
 
 /// Side-channel command with reply (requires [`EngineConfig::command_channel_capacity`]).
@@ -57,7 +57,10 @@ impl EngineHandle {
 
     /// Send one event into the engine (non-blocking).
     pub fn try_send(&self, event: Event) -> Result<()> {
-        self.tx.try_send(event).map_err(|_| Error::EngineShutdown)
+        self.tx.try_send(event).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(_) => Error::EventDropped,
+            mpsc::error::TrySendError::Closed(_) => Error::EngineShutdown,
+        })
     }
 
     /// Async send.
@@ -71,7 +74,10 @@ impl EngineHandle {
             .cmd_tx
             .as_ref()
             .ok_or_else(|| Error::Invalid("engine commands not enabled".into()))?;
-        c.try_send(cmd).map_err(|_| Error::EngineShutdown)
+        c.try_send(cmd).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(_) => Error::EventDropped,
+            mpsc::error::TrySendError::Closed(_) => Error::EngineShutdown,
+        })
     }
 
     /// Async queue for engine commands.
@@ -140,7 +146,7 @@ impl EngineBuilder {
     /// Spawn background consumer. Returns control handle, join handle, and optional audit receiver.
     pub fn spawn<S, E>(
         cfg: EngineConfig,
-        mut state: GlobalState,
+        state: Arc<Mutex<GlobalState>>,
         mut strategy: S,
         risk: RiskPipeline,
         exec: Arc<E>,
@@ -181,8 +187,9 @@ impl EngineBuilder {
                             match ev {
                                 None => break,
                                 Some(ev) => {
+                                    let mut guard = state.lock().await;
                                     if let Err(e) = process_event(
-                                        &mut state,
+                                        &mut guard,
                                         &mut strategy,
                                         &risk,
                                         exec.as_ref(),
@@ -200,8 +207,9 @@ impl EngineBuilder {
                             match cmd {
                                 None => {}
                                 Some(cmd) => {
+                                    let mut guard = state.lock().await;
                                     handle_engine_command(
-                                        &mut state,
+                                        &mut guard,
                                         exec.as_ref(),
                                         &risk,
                                         cmd,
@@ -214,8 +222,9 @@ impl EngineBuilder {
                 }
             } else {
                 while let Some(ev) = rx.recv().await {
+                    let mut guard = state.lock().await;
                     if let Err(e) = process_event(
-                        &mut state,
+                        &mut guard,
                         &mut strategy,
                         &risk,
                         exec.as_ref(),
@@ -552,7 +561,17 @@ where
             }
         }
         Event::Account(a) => state.apply_account(a),
-        Event::Control(c) => apply_control(state, exec, risk, c).await?,
+        Event::Control(c) => {
+            apply_control(state, exec, risk, c).await?;
+            if let Some(tx) = audit {
+                audit::try_emit(
+                    tx,
+                    EngineAudit::ControlApplied {
+                        control: c.into(),
+                    },
+                );
+            }
+        }
         Event::Timer(_) => {}
     }
 

@@ -1,6 +1,6 @@
 //! Engine state replica from audit stream (barter parity).
 
-use crate::audit::{EngineAudit, StrategySkipReason};
+use crate::audit::EngineAudit;
 use crate::state::GlobalState;
 use crate::types::TradingState;
 use tokio::sync::broadcast;
@@ -35,14 +35,8 @@ impl EngineStateReplica {
                     self.market_events += 1;
                 }
             }
-            EngineAudit::StrategySkipped { reason } => {
+            EngineAudit::StrategySkipped { .. } => {
                 self.strategy_skips += 1;
-                match reason {
-                    StrategySkipReason::Paused => self.paused = true,
-                    StrategySkipReason::TradingDisabled => {
-                        self.trading_state = TradingState::Disabled
-                    }
-                }
             }
             EngineAudit::RiskRejected { .. } => self.risk_rejects += 1,
             EngineAudit::ControlApplied { control } => {
@@ -84,4 +78,33 @@ impl EngineStateReplica {
 /// Compare replica flags to authoritative state (integration tests).
 pub fn replica_matches_state(replica: &EngineStateReplica, state: &GlobalState) -> bool {
     replica.paused == state.paused && replica.trading_state == state.trading_state
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audit::{ControlEventSummary, StrategySkipReason};
+
+    #[test]
+    fn control_applied_pause_resume_updates_replica() {
+        let mut replica = EngineStateReplica::new();
+        replica.apply(&EngineAudit::ControlApplied {
+            control: ControlEventSummary::Pause,
+        });
+        assert!(replica.paused);
+        replica.apply(&EngineAudit::ControlApplied {
+            control: ControlEventSummary::Resume,
+        });
+        assert!(!replica.paused);
+    }
+
+    #[test]
+    fn strategy_skipped_does_not_change_trading_state() {
+        let mut replica = EngineStateReplica::new();
+        replica.apply(&EngineAudit::StrategySkipped {
+            reason: StrategySkipReason::TradingDisabled,
+        });
+        assert_eq!(replica.trading_state, TradingState::Enabled);
+        assert_eq!(replica.strategy_skips, 1);
+    }
 }
