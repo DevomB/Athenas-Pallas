@@ -17,8 +17,8 @@ use athenas_pallas::risk::{PauseCheck, RiskPipeline};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
 use athenas_pallas::types::{Asset, InstrumentId, OrderType, Side};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -51,6 +51,7 @@ impl Strategy for DemoStrategy {
                 side: Side::Buy,
                 order_type: OrderType::Market,
                 price: None,
+                stop_price: None,
                 qty,
                 client_order_id: None,
                 source: athenas_pallas::events::OrderIntentSource::User,
@@ -120,8 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         "control: POST http://127.0.0.1:9847/{{pause,resume,cancel-all}} header {}: {}",
-        HEADER_SECRET,
-        token
+        HEADER_SECRET, token
     );
 
     let connector = BinanceCombinedStream {

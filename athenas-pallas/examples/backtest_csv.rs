@@ -12,8 +12,8 @@ use athenas_pallas::metrics::summarize;
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::types::{Asset, EquityPoint, ExchangeId, InstrumentId, Symbol};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -21,10 +21,7 @@ use std::path::PathBuf;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instrument = InstrumentId::new("binance", "BTCUSDT");
     let mut instruments = HashMap::new();
-    instruments.insert(
-        instrument.clone(),
-        InstrumentMeta::spot("BTC", "USDT"),
-    );
+    instruments.insert(instrument.clone(), InstrumentMeta::spot("BTC", "USDT"));
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
     balances.insert(Asset("BTC".into()), Decimal::ZERO);
@@ -36,13 +33,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
     let exec = SimGateway::new(PaperConfig::default());
 
-    let csv = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/data/BTCUSDT_1d.csv");
-    let mut src = CsvBarSource::from_path(
-        &csv,
-        ExchangeId("binance".into()),
-        Symbol("BTCUSDT".into()),
-    )?;
+    let csv = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data/BTCUSDT_1d.csv");
+    let mut src =
+        CsvBarSource::from_path(&csv, ExchangeId("binance".into()), Symbol("BTCUSDT".into()))?;
     let mut curve: Vec<EquityPoint> = Vec::new();
     while let Some(ev) = src.next_event() {
         let ts = match &ev {

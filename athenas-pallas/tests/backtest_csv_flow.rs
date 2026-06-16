@@ -10,8 +10,8 @@ use athenas_pallas::metrics::summarize;
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::types::{Asset, EquityPoint, ExchangeId, InstrumentId, Symbol};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

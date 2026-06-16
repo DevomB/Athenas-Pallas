@@ -14,5 +14,11 @@ fn replica_applies_control_and_skip_audits() {
     replica.apply(&EngineAudit::StrategySkipped {
         reason: StrategySkipReason::TradingDisabled,
     });
+    // Skip events are counted; trading state changes only via control events.
+    assert_eq!(replica.trading_state, TradingState::Enabled);
+    assert_eq!(replica.strategy_skips, 1);
+    replica.apply(&EngineAudit::ControlApplied {
+        control: ControlEventSummary::DisableTrading,
+    });
     assert_eq!(replica.trading_state, TradingState::Disabled);
 }

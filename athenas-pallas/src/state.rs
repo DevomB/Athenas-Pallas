@@ -1,6 +1,8 @@
 //! Authoritative in-memory book, balances, orders, and positions.
 
-pub use crate::instrument::{InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry};
+pub use crate::instrument::{
+    InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry,
+};
 
 use crate::events::{AccountEvent, BookL2Snapshot, FillRecord, MarketEvent};
 use crate::oms::OrderStore;
@@ -40,6 +42,10 @@ pub struct GlobalState {
     pub trading_state: crate::types::TradingState,
     /// Last bar close per row (fallback for mid).
     pub bar_close: Vec<Option<Decimal>>,
+    /// Last bar high per row (intrabar fill checks).
+    pub bar_high: Vec<Option<Decimal>>,
+    /// Last bar low per row (intrabar fill checks).
+    pub bar_low: Vec<Option<Decimal>>,
     /// Fill count for reporting.
     pub fill_count: u64,
     /// Timestamp of the last market event applied.
@@ -68,6 +74,8 @@ impl GlobalState {
             paused: false,
             trading_state: crate::types::TradingState::Enabled,
             bar_close: vec![None; n],
+            bar_high: vec![None; n],
+            bar_low: vec![None; n],
             fill_count: 0,
             last_event_ts: None,
             fill_log: Vec::new(),
@@ -99,18 +107,69 @@ impl GlobalState {
 
     /// Mark-to-market equity in `quote` using mids (open positions valued at [`Self::mid_or_last`]).
     pub fn mark_equity_quote(&self, quote: &crate::types::Asset) -> Decimal {
-        let mut eq = *self.balances.get(quote).unwrap_or(&Decimal::ZERO);
-        for (ix, pos) in self.positions.iter().enumerate() {
-            if pos.is_zero() {
-                continue;
-            }
-            let Some(inst) = self.registry.id(InstrumentIndex(ix)) else {
+        self.portfolio_equity_for_quote(quote)
+    }
+
+    /// Increment a free balance (coupons, funding, etc.).
+    pub fn apply_balance_delta(&mut self, asset: &Asset, delta: Decimal) {
+        let entry = self.balances.entry(asset.clone()).or_insert(Decimal::ZERO);
+        *entry += delta;
+    }
+
+    /// Portfolio mark-to-market in one quote currency (avoids double-counting shared cash).
+    pub fn portfolio_equity_for_quote(&self, quote: &Asset) -> Decimal {
+        use std::collections::HashSet;
+        let mut quotes_seen = HashSet::new();
+        let mut total = Decimal::ZERO;
+        for ix in 0..self.registry.len() {
+            let Some(meta) = self.registry.meta(InstrumentIndex(ix)) else {
                 continue;
             };
-            let px = self.mid_or_last(inst).unwrap_or(Decimal::ZERO);
-            eq += *pos * px;
+            if meta.quote != *quote {
+                continue;
+            }
+            if quotes_seen.insert(meta.quote.clone()) {
+                total += self.balances.get(quote).copied().unwrap_or(Decimal::ZERO);
+            }
+            let mid = self.mid_or_last_ix(ix).unwrap_or(Decimal::ZERO);
+            let base = self
+                .balances
+                .get(&meta.base)
+                .copied()
+                .unwrap_or(Decimal::ZERO);
+            total += Self::position_exposure(meta, base, mid);
         }
-        eq
+        if quotes_seen.is_empty() {
+            total += self.balances.get(quote).copied().unwrap_or(Decimal::ZERO);
+        }
+        total
+    }
+
+    /// Total portfolio equity across all registered quote currencies.
+    pub fn portfolio_equity(&self) -> Decimal {
+        use std::collections::HashSet;
+        let mut quotes = HashSet::new();
+        for ix in 0..self.registry.len() {
+            if let Some(meta) = self.registry.meta(InstrumentIndex(ix)) {
+                quotes.insert(meta.quote.clone());
+            }
+        }
+        quotes
+            .iter()
+            .map(|q| self.portfolio_equity_for_quote(q))
+            .fold(Decimal::ZERO, |a, b| a + b)
+    }
+
+    fn position_exposure(meta: &InstrumentMeta, base: Decimal, mid: Decimal) -> Decimal {
+        match meta.asset_class {
+            crate::instrument::AssetClass::Future
+            | crate::instrument::AssetClass::Perpetual
+            | crate::instrument::AssetClass::Option => {
+                let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
+                base * mid * mult
+            }
+            _ => base * mid,
+        }
     }
 
     /// Mid price or last trade fallback.
@@ -146,7 +205,11 @@ impl GlobalState {
 
     /// Alias for [`Self::strategy_position_qty`] (keyword-style naming for future bindings).
     #[inline]
-    pub fn position_qty_for_strategy(&self, inst: &InstrumentId, strategy_id: &StrategyId) -> Decimal {
+    pub fn position_qty_for_strategy(
+        &self,
+        inst: &InstrumentId,
+        strategy_id: &StrategyId,
+    ) -> Decimal {
         self.strategy_position_qty(inst, strategy_id)
     }
 
@@ -156,24 +219,32 @@ impl GlobalState {
         ix: usize,
         bar: &crate::backtest::Bar,
         tick_size: rust_decimal::Decimal,
-        half_spread_bps: rust_decimal::Decimal,
+        _half_spread_bps: rust_decimal::Decimal,
     ) {
         let Some(ts) = bar.timestamp() else {
             return;
         };
+        let open = crate::backtest::ticks_to_decimal(bar.open_ticks, tick_size);
+        let high = crate::backtest::ticks_to_decimal(bar.high_ticks, tick_size);
+        let low = crate::backtest::ticks_to_decimal(bar.low_ticks, tick_size);
         let close = crate::backtest::ticks_to_decimal(bar.close_ticks, tick_size);
         self.last_trade[ix] = Some((ts, close));
         self.bar_close[ix] = Some(close);
+        self.bar_high[ix] = Some(high);
+        self.bar_low[ix] = Some(low);
         self.last_event_ts = Some(ts);
-        let half = close * half_spread_bps / Decimal::from(10_000u64);
-        self.l1[ix] = Some((ts, close - half, close + half));
+        self.l1[ix] = Some((ts, low, high));
+        let _ = open;
     }
 
     /// Apply a market event (read-only book/trade updates).
     pub fn apply_market(&mut self, ev: &MarketEvent) {
         match ev {
             MarketEvent::Trade {
-                instrument, ts, price, ..
+                instrument,
+                ts,
+                price,
+                ..
             } => {
                 if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
                     self.last_trade[ix] = Some((*ts, *price));
@@ -199,16 +270,20 @@ impl GlobalState {
             MarketEvent::Bar {
                 instrument,
                 ts,
+                open,
+                high,
+                low,
                 close,
                 ..
             } => {
                 if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
                     self.last_trade[ix] = Some((*ts, *close));
                     self.bar_close[ix] = Some(*close);
+                    self.bar_high[ix] = Some(*high);
+                    self.bar_low[ix] = Some(*low);
                     self.last_event_ts = Some(*ts);
-                    let half =
-                        *close * self.synthetic_half_spread_bps / Decimal::from(10_000u64);
-                    self.l1[ix] = Some((*ts, *close - half, *close + half));
+                    self.l1[ix] = Some((*ts, *low, *high));
+                    let _ = open;
                 }
             }
         }
@@ -239,15 +314,7 @@ impl GlobalState {
             .get(&meta.quote)
             .copied()
             .unwrap_or(Decimal::ZERO);
-        let notional = match meta.asset_class {
-            crate::instrument::AssetClass::Future => {
-                let mult = meta
-                    .contract_multiplier
-                    .unwrap_or(Decimal::ONE);
-                base * mid * mult
-            }
-            _ => base * mid,
-        };
+        let notional = Self::position_exposure(meta, base, mid);
         Some(quote + notional)
     }
 
@@ -258,10 +325,7 @@ impl GlobalState {
                 self.balances.insert(asset.clone(), *free);
             }
             AccountEvent::BalanceDelta { asset, delta } => {
-                let entry = self
-                    .balances
-                    .entry(asset.clone())
-                    .or_insert(Decimal::ZERO);
+                let entry = self.balances.entry(asset.clone()).or_insert(Decimal::ZERO);
                 *entry += *delta;
             }
             AccountEvent::OrderUpdate {
@@ -270,6 +334,7 @@ impl GlobalState {
                 side,
                 order_type,
                 price,
+                stop_price,
                 remaining_qty,
                 original_qty,
                 status,
@@ -281,6 +346,7 @@ impl GlobalState {
                     side: *side,
                     order_type: *order_type,
                     price: *price,
+                    stop_price: *stop_price,
                     remaining_qty: *remaining_qty,
                     original_qty: *original_qty,
                     status: *status,
@@ -348,7 +414,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn apply_bar_sets_l1_from_half_spread() {
+    fn apply_bar_sets_l1_from_high_low() {
         let i = crate::types::InstrumentId::new("x", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
@@ -357,18 +423,19 @@ mod tests {
         );
         let reg = InstrumentRegistry::from_instruments(inst);
         let mut state = GlobalState::new(reg, HashMap::new());
+        let tick = crate::backtest::default_tick_size();
         let bar = crate::backtest::Bar {
             ts_unix_nanos: time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
-            open_ticks: 0,
-            high_ticks: 0,
-            low_ticks: 0,
-            close_ticks: 1_000_000_000,
+            open_ticks: 9_900_000_000,
+            high_ticks: 10_200_000_000,
+            low_ticks: 9_800_000_000,
+            close_ticks: 10_000_000_000,
             volume_lots: 1,
         };
-        let tick = crate::backtest::default_tick_size();
         state.apply_bar(0, &bar, tick, Decimal::from(100u64));
         let (_, bid, ask) = state.l1[0].unwrap();
-        assert!(ask - bid > Decimal::ZERO);
+        assert_eq!(bid, Decimal::new(98, 0));
+        assert_eq!(ask, Decimal::new(102, 0));
     }
 
     #[test]
@@ -383,7 +450,10 @@ mod tests {
         bal.insert(Asset("USDT".into()), Decimal::from(1000u64));
         let reg = InstrumentRegistry::from_instruments(inst);
         let s = GlobalState::new(reg, bal);
-        assert_eq!(s.mark_equity_quote(&Asset("USDT".into())), Decimal::from(1000u64));
+        assert_eq!(
+            s.mark_equity_quote(&Asset("USDT".into())),
+            Decimal::from(1000u64)
+        );
     }
 
     #[test]
@@ -424,6 +494,9 @@ mod tests {
         assert_eq!(st.strategy_position_qty(&i, &sid_a), Decimal::new(1, 1));
         assert_eq!(st.strategy_position_qty(&i, &sid_b), -Decimal::new(5, 2));
         assert_eq!(st.position_qty_for_strategy(&i, &sid_a), Decimal::new(1, 1));
-        assert_eq!(st.position_qty_for_strategy(&i, &sid_b), -Decimal::new(5, 2));
+        assert_eq!(
+            st.position_qty_for_strategy(&i, &sid_b),
+            -Decimal::new(5, 2)
+        );
     }
 }

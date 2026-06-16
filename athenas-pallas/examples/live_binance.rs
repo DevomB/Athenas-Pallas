@@ -36,13 +36,7 @@ use tracing::{info, warn};
 struct Hold {}
 
 impl Strategy for Hold {
-    fn on_event(
-        &mut self,
-        _ctx: &StrategyContext<'_>,
-        _event: &Event,
-        _: &mut Vec<OrderIntent>,
-    ) {
-    }
+    fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event, _: &mut Vec<OrderIntent>) {}
 }
 
 #[tokio::main]
@@ -53,13 +47,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let base = std::env::var("BINANCE_BASE_URL")
         .unwrap_or_else(|_| "https://testnet.binance.vision".into());
-    let ws = std::env::var("BINANCE_WS_URL")
-        .unwrap_or_else(|_| "wss://testnet.binance.vision".into());
+    let ws =
+        std::env::var("BINANCE_WS_URL").unwrap_or_else(|_| "wss://testnet.binance.vision".into());
     let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
     let secret = std::env::var("BINANCE_SECRET").unwrap_or_default();
 
     if api_key.is_empty() || secret.is_empty() {
-        warn!("BINANCE_API_KEY / BINANCE_SECRET not set — REST signing will fail until configured.");
+        warn!(
+            "BINANCE_API_KEY / BINANCE_SECRET not set — REST signing will fail until configured."
+        );
     }
 
     let instrument = InstrumentId::new("binance", "BTCUSDT");
@@ -119,8 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         "control: POST http://127.0.0.1:9848/{{pause,resume,cancel-all,flatten}} header {}: {}",
-        HEADER_SECRET,
-        token
+        HEADER_SECRET, token
     );
 
     let pub_connector = BinanceCombinedStream {

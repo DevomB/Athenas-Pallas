@@ -44,13 +44,17 @@ impl Side {
     }
 }
 
-/// Limit vs market.
+/// Limit vs market vs stop variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrderType {
     /// Limit order.
     Limit,
     /// Market order.
     Market,
+    /// Stop market — triggers at stop price, then fills at market.
+    StopMarket,
+    /// Stop limit — triggers at stop price, then rests as limit.
+    StopLimit,
 }
 
 /// Stable order id (paper/sim).
@@ -119,8 +123,11 @@ pub struct OpenOrder {
     pub side: Side,
     /// Type.
     pub order_type: OrderType,
-    /// Limit price if limit.
+    /// Limit price (required for limit / stop-limit resting price).
     pub price: Option<Decimal>,
+    /// Stop trigger price (required for stop market / stop limit).
+    #[serde(default)]
+    pub stop_price: Option<Decimal>,
     /// Remaining base quantity.
     pub remaining_qty: Decimal,
     /// Original quantity.

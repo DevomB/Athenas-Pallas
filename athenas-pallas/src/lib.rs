@@ -19,6 +19,7 @@
 
 pub mod audit;
 pub mod backtest;
+pub mod calendar;
 pub mod connectors;
 pub mod data;
 pub mod engine;
@@ -30,6 +31,7 @@ pub mod integration;
 pub mod metrics;
 pub mod oms;
 pub mod replica;
+pub mod results;
 pub mod risk;
 pub mod state;
 pub mod strategy;
@@ -44,25 +46,26 @@ pub use engine::{
     dispatch_strategy_sync, engine_step, Engine, EngineBuilder, EngineCommand, EngineConfig,
     EngineHandle, TimerSchedule,
 };
-pub use risk::BacktestChecks;
 pub use error::{Error, Result};
 pub use events::{BookL2Snapshot, Event, OrderIntentSource};
+pub use risk::BacktestChecks;
 pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, StrategyId, Symbol, TradingState};
 
+pub use execution::{PaperConfig, PaperGateway, SimGateway};
 pub use instrument::{
     IndexedInstruments, InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry,
     SystemConfig,
-};
-pub use replica::EngineStateReplica;
-pub use risk::{DefaultRiskManager, RiskManager};
-pub use system::{
-    AuditMode, EngineFeedMode, EngineSummary, LiveClock, SummaryPeriod, System, SystemArgs,
-    SystemBuilder, SystemHandle, TradingSummaryGenerator,
 };
 pub use metrics::{
     strategy_position_report, trading_summaries_per_strategy, StrategyPositionRow, TradingSummary,
 };
 pub use oms::OrderStore;
-pub use strategy::Strategy;
+pub use replica::EngineStateReplica;
+pub use results::{append_results_jsonl, write_backtest_json, write_backtest_outputs};
+pub use risk::{DefaultRiskManager, RiskManager};
 pub use state::GlobalState;
-pub use execution::{PaperConfig, PaperGateway, SimGateway};
+pub use strategy::Strategy;
+pub use system::{
+    AuditMode, EngineFeedMode, EngineSummary, LiveClock, SummaryPeriod, System, SystemArgs,
+    SystemBuilder, SystemHandle, TradingSummaryGenerator,
+};

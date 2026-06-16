@@ -5,7 +5,7 @@ use crate::engine::EngineHandle;
 use crate::error::{Error, Result};
 use crate::events::{AccountEvent, Event};
 use crate::integration::ws_connect_async;
-use crate::types::{Asset, InstrumentId, OrderId, OrderStatus, OrderType, Side, Symbol};
+use crate::types::{Asset, InstrumentId, OrderId, OrderStatus, OrderType, Side};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
@@ -111,6 +111,7 @@ fn parse_execution_report(ev: &Value) -> Option<Vec<AccountEvent>> {
         side,
         order_type,
         price,
+        stop_price: None,
         remaining_qty,
         original_qty: orig_qty,
         status,
@@ -196,17 +197,16 @@ impl MarketConnector for BinanceUserDataStream {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30 * 60));
             loop {
                 interval.tick().await;
-                if keepalive_listen_key(&ka_api, &ka_rest, &ka_key).await.is_err() {
+                if keepalive_listen_key(&ka_api, &ka_rest, &ka_key)
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
         });
 
-        let url = format!(
-            "{}/ws/{}",
-            self.ws_base.trim_end_matches('/'),
-            key
-        );
+        let url = format!("{}/ws/{}", self.ws_base.trim_end_matches('/'), key);
         let (ws, _) = ws_connect_async(&url).await?;
         let (mut write, mut read) = ws.split();
 

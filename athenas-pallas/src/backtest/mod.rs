@@ -4,6 +4,10 @@ pub mod bar;
 pub mod batch;
 pub mod config;
 pub mod cpp_build;
+pub mod interval;
+pub mod lifecycle;
+pub mod merge;
+pub mod pbar;
 pub mod replay;
 pub mod runner;
 pub mod session;
@@ -54,16 +58,11 @@ pub struct CsvBarSource {
 
 impl CsvBarSource {
     /// Load from disk.
-    pub fn from_path(
-        path: &Path,
-        exchange: ExchangeId,
-        symbol: Symbol,
-    ) -> std::io::Result<Self> {
+    pub fn from_path(path: &Path, exchange: ExchangeId, symbol: Symbol) -> std::io::Result<Self> {
         let mut buf = String::new();
         File::open(path)?.read_to_string(&mut buf)?;
-        Self::from_str(&buf, exchange, symbol).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })
+        Self::from_str(&buf, exchange, symbol)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
     /// Parse UTF-8 CSV text.
@@ -100,9 +99,7 @@ pub(crate) fn parse_ts(s: &str) -> Option<OffsetDateTime> {
     if let Ok(t) = OffsetDateTime::parse(s, &Rfc3339) {
         return Some(t);
     }
-    let fmt = format_description!(
-        "[year]-[month]-[day] [hour]:[minute]:[second]"
-    );
+    let fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
     if let Ok(p) = PrimitiveDateTime::parse(s, &fmt) {
         return Some(p.assume_utc());
     }
@@ -125,6 +122,11 @@ pub(crate) fn parse_ts_required(s: &str, context: &str) -> std::io::Result<Offse
 
 pub(crate) fn parse_ts_required_err(s: &str, context: &str) -> Result<OffsetDateTime, String> {
     parse_ts(s).ok_or_else(|| format!("invalid timestamp {context}: {s}"))
+}
+
+/// Parse RFC3339 or common CSV timestamp formats (public wrapper for binaries).
+pub fn parse_timestamp(s: &str) -> Option<OffsetDateTime> {
+    parse_ts(s)
 }
 
 impl HistoricalSource for CsvBarSource {
@@ -232,11 +234,7 @@ pub struct CsvOhlcSource {
 
 impl CsvOhlcSource {
     /// Iterate owned rows.
-    pub fn from_rows(
-        instrument: InstrumentId,
-        rows: Vec<OhlcRow>,
-        spread_bps: Decimal,
-    ) -> Self {
+    pub fn from_rows(instrument: InstrumentId, rows: Vec<OhlcRow>, spread_bps: Decimal) -> Self {
         Self {
             instrument,
             rows,
@@ -270,7 +268,13 @@ pub trait FillModel: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// True when a resting limit would cross the touch (paper/sim use this).
-    fn limit_would_fill(&self, side: crate::types::Side, limit: Decimal, bid: Decimal, ask: Decimal) -> bool;
+    fn limit_would_fill(
+        &self,
+        side: crate::types::Side,
+        limit: Decimal,
+        bid: Decimal,
+        ask: Decimal,
+    ) -> bool;
 }
 
 /// Default touch-based fill assumption (fills use paper/sim gateways).
@@ -282,7 +286,13 @@ impl FillModel for TouchCrossFillModel {
         "touch_cross"
     }
 
-    fn limit_would_fill(&self, side: crate::types::Side, limit: Decimal, bid: Decimal, ask: Decimal) -> bool {
+    fn limit_would_fill(
+        &self,
+        side: crate::types::Side,
+        limit: Decimal,
+        bid: Decimal,
+        ask: Decimal,
+    ) -> bool {
         match side {
             crate::types::Side::Buy => limit >= ask,
             crate::types::Side::Sell => limit <= bid,
@@ -290,14 +300,23 @@ impl FillModel for TouchCrossFillModel {
     }
 }
 
-pub use bar::{decimal_to_ticks, default_tick_size, ticks_to_decimal, Bar, BarSeries, BarSeriesSource};
-pub use runner::BuyAndHold;
+pub use bar::{
+    decimal_to_ticks, default_tick_size, ticks_to_decimal, Bar, BarSeries, BarSeriesSource,
+};
 pub use batch::{
     run_scenarios_parallel, run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario,
 };
-pub use config::{parse_base_quote, parse_instrument, BacktestConfig, DataFormat};
+pub use config::{parse_base_quote, parse_instrument, BacktestConfig, DataFormat, ExtraInstrument};
 pub use cpp_build::build_cpp_strategy;
+pub use interval::{
+    default_periods_per_year, infer_periods_per_year_from_spacing,
+    infer_periods_per_year_from_timestamps, periods_per_year_from_interval,
+    periods_per_year_from_interval_for_class,
+};
+pub use merge::merge_sources;
+pub use pbar::{is_pbar_path, read_pbar, write_pbar};
 pub use replay::{read_events_jsonl, replay_events_serial};
+pub use runner::BuyAndHold;
 pub use runner::{BacktestReport, BacktestRunner};
 pub use session::{
     downsample_equity, report_to_dto, run_backtest, run_backtest_with_cancel,
@@ -312,8 +331,7 @@ mod csv_tests {
     use std::path::PathBuf;
 
     fn sample_csv() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/data/BTCUSDT_1d.csv")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data/BTCUSDT_1d.csv")
     }
 
     #[test]

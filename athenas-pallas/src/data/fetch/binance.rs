@@ -1,6 +1,6 @@
 //! Binance Spot klines (`GET /api/v3/klines`).
 
-use super::{OhlcvBar, write_ohlcv_csv};
+use super::{write_ohlcv_csv, OhlcvBar};
 use crate::error::{Error, Result};
 use rust_decimal::Decimal;
 use std::path::Path;
@@ -70,7 +70,9 @@ fn parse_kline_row(row: &serde_json::Value) -> Result<OhlcvBar> {
     let arr = row
         .as_array()
         .ok_or_else(|| Error::Invalid("kline not array".into()))?;
-    let open_ms = arr[0].as_i64().ok_or_else(|| Error::Invalid("open time".into()))?;
+    let open_ms = arr[0]
+        .as_i64()
+        .ok_or_else(|| Error::Invalid("open time".into()))?;
     let ts = OffsetDateTime::from_unix_timestamp(open_ms / 1000)
         .map_err(|_| Error::Invalid("timestamp".into()))?;
     Ok(OhlcvBar {
@@ -84,7 +86,9 @@ fn parse_kline_row(row: &serde_json::Value) -> Result<OhlcvBar> {
 }
 
 fn parse_decimal_field(v: &serde_json::Value) -> Result<Decimal> {
-    let s = v.as_str().ok_or_else(|| Error::Invalid("decimal field".into()))?;
+    let s = v
+        .as_str()
+        .ok_or_else(|| Error::Invalid("decimal field".into()))?;
     s.parse()
         .map_err(|_| Error::Invalid(format!("bad decimal: {s}")))
 }
@@ -100,48 +104,50 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v3/klines"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([[
-                1704067200000i64,
-                "42000.0",
-                "42500.0",
-                "41800.0",
-                "42200.0",
-                "100.5",
-                1704153599999i64,
-                "0",
-                10,
-                "50",
-                "0",
-                "0"
-            ],
-            [
-                1704153600000i64,
-                "42200.0",
-                "43000.0",
-                "42100.0",
-                "42800.0",
-                "120.0",
-                1704239999999i64,
-                "0",
-                12,
-                "60",
-                "0",
-                "0"
-            ],
-            [
-                1704240000000i64,
-                "42800.0",
-                "43200.0",
-                "42700.0",
-                "43100.0",
-                "90.0",
-                1704326399999i64,
-                "0",
-                8,
-                "40",
-                "0",
-                "0"
-            ]])))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                [
+                    1704067200000i64,
+                    "42000.0",
+                    "42500.0",
+                    "41800.0",
+                    "42200.0",
+                    "100.5",
+                    1704153599999i64,
+                    "0",
+                    10,
+                    "50",
+                    "0",
+                    "0"
+                ],
+                [
+                    1704153600000i64,
+                    "42200.0",
+                    "43000.0",
+                    "42100.0",
+                    "42800.0",
+                    "120.0",
+                    1704239999999i64,
+                    "0",
+                    12,
+                    "60",
+                    "0",
+                    "0"
+                ],
+                [
+                    1704240000000i64,
+                    "42800.0",
+                    "43200.0",
+                    "42700.0",
+                    "43100.0",
+                    "90.0",
+                    1704326399999i64,
+                    "0",
+                    8,
+                    "40",
+                    "0",
+                    "0"
+                ]
+            ])))
             .mount(&server)
             .await;
 

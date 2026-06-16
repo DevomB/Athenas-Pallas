@@ -73,3 +73,10 @@ class RollingSma:
         if len(self.buf) < self.window:
             return None
         return self.total / self.window
+
+
+def position_size_pct_equity(equity: float, mid: float, pct: float = 0.1) -> float:
+    """Return base qty for `pct` of mark-to-market equity at `mid` (spot-style)."""
+    if mid <= 0:
+        return 0.0
+    return max(0.0, (equity * pct) / mid)

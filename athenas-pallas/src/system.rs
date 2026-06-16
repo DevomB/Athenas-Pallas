@@ -7,12 +7,12 @@ use crate::engine::{
 use crate::error::Result;
 use crate::events::Event;
 use crate::execution::ExecutionGateway;
+use crate::instrument::{IndexedInstruments, InstrumentFilter, SystemConfig};
 use crate::metrics::TradingSummary;
 use crate::risk::{RiskManager, RiskPipeline};
 use crate::state::GlobalState;
 use crate::strategy::Strategy;
 use crate::types::{EquityPoint, TradingState};
-use crate::instrument::{IndexedInstruments, InstrumentFilter, SystemConfig};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::sync::{broadcast, oneshot, Mutex};
@@ -353,7 +353,9 @@ where
         I: IntoIterator<Item = Event>,
     {
         let strategy = self.strategy.as_mut().ok_or_else(|| {
-            crate::error::Error::Invalid("strategy moved to engine task; use Iterator feed without init".into())
+            crate::error::Error::Invalid(
+                "strategy moved to engine task; use Iterator feed without init".into(),
+            )
         })?;
         for ev in events {
             let ts = event_timestamp(&ev);
@@ -446,11 +448,11 @@ mod tests {
     use super::*;
     use crate::events::{Event, MarketEvent};
     use crate::execution::{PaperConfig, SimGateway};
+    use crate::instrument::{IndexedInstruments, SystemConfig};
     use crate::risk::DefaultRiskManager;
     use crate::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
     use crate::strategy::Strategy;
     use crate::types::{Asset, InstrumentId};
-    use crate::instrument::{IndexedInstruments, SystemConfig};
     use rust_decimal::Decimal;
     use std::collections::HashMap;
     use std::sync::Arc;

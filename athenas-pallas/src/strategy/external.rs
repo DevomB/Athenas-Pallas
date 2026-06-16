@@ -52,8 +52,14 @@ impl ExternalStrategy {
     }
 
     fn from_child(mut child: Child) -> Result<Self> {
-        let stdin = child.stdin.take().ok_or_else(|| Error::Invalid("no stdin".into()))?;
-        let stdout = child.stdout.take().ok_or_else(|| Error::Invalid("no stdout".into()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| Error::Invalid("no stdin".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| Error::Invalid("no stdout".into()))?;
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || reader_loop(stdout, tx));
         Ok(Self {
@@ -112,9 +118,8 @@ impl ExternalStrategy {
 
     fn read_ready(&mut self) -> Result<()> {
         let line = self.read_line_timeout(HANDSHAKE_TIMEOUT)?;
-        let ready: ReadyMsg = serde_json::from_str(&line).map_err(|e| {
-            Error::StrategyProtocol(format!("expected ready: {e}; line={line}"))
-        })?;
+        let ready: ReadyMsg = serde_json::from_str(&line)
+            .map_err(|e| Error::StrategyProtocol(format!("expected ready: {e}; line={line}")))?;
         if ready.msg != "ready" {
             return Err(Error::StrategyProtocol(format!(
                 "expected ready, got {}",
@@ -237,4 +242,3 @@ impl Drop for ExternalStrategy {
         let _ = self.child.wait();
     }
 }
-

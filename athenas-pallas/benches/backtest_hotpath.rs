@@ -1,5 +1,5 @@
 use athenas_pallas::backtest::{
-    default_tick_size, run_backtest, BarSeries, BarSeriesSource, BacktestConfig, BuyAndHold,
+    default_tick_size, run_backtest, BacktestConfig, BarSeries, BarSeriesSource, BuyAndHold,
     DataFormat, HistoricalSource,
 };
 use athenas_pallas::dispatch_event_sync;
@@ -24,12 +24,7 @@ fn setup_noop_replay(n_bars: usize) -> (GlobalState, BarSeriesSource, SyncPaperG
     balances.insert(Asset::new("USDT"), Decimal::new(10_000, 0));
     let state = GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
     let exec = SyncPaperGateway::new(PaperConfig::default());
-    let series = BarSeries::random_walk(
-        n_bars,
-        42,
-        Decimal::new(40_000, 0),
-        default_tick_size(),
-    );
+    let series = BarSeries::random_walk(n_bars, 42, Decimal::new(40_000, 0), default_tick_size());
     let src = BarSeriesSource::new(series, ExchangeId::new("binance"), Symbol::new("BTCUSDT"));
     (state, src, exec)
 }
@@ -59,7 +54,7 @@ fn bench_noop(c: &mut Criterion) {
 
 fn bench_noop_amortized(c: &mut Criterion) {
     let (mut state, mut src, exec) = setup_noop_replay(100_000);
-    let checks = BacktestChecks;
+    let checks = BacktestChecks::default();
     let mut strategy = NoopStrategy;
     let mut intents = Vec::with_capacity(4);
     c.bench_function("noop_100k_amortized", |b| {
@@ -100,17 +95,12 @@ fn bench_buy_and_hold(c: &mut Criterion) {
             );
             let mut balances = HashMap::new();
             balances.insert(Asset::new("USDT"), Decimal::new(10_000, 0));
-            let mut state =
-                GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
+            let mut state = GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
             let mut strategy = BuyAndHold::new(inst.clone(), Decimal::new(1, 2));
-            let checks = BacktestChecks;
+            let checks = BacktestChecks::default();
             let exec = SyncPaperGateway::new(PaperConfig::default());
-            let series = BarSeries::random_walk(
-                100_000,
-                42,
-                Decimal::new(40_000, 0),
-                default_tick_size(),
-            );
+            let series =
+                BarSeries::random_walk(100_000, 42, Decimal::new(40_000, 0), default_tick_size());
             let mut src =
                 BarSeriesSource::new(series, ExchangeId::new("binance"), Symbol::new("BTCUSDT"));
             let mut intents = Vec::with_capacity(4);
@@ -133,7 +123,7 @@ fn bench_equity_curve_toggle(c: &mut Criterion) {
             |b, &record| {
                 b.iter(|| {
                     let (mut state, mut src, exec) = setup_noop_replay(10_000);
-                    let checks = BacktestChecks;
+                    let checks = BacktestChecks::default();
                     let mut strategy = NoopStrategy;
                     let mut intents = Vec::with_capacity(4);
                     let mut samples = 0usize;

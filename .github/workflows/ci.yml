@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Test workspace (default features)
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude pallas-app
 
   test-binance-live:
     runs-on: ubuntu-latest
@@ -96,14 +96,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
       - name: cargo check pallas-app
         run: cargo check -p pallas-app
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10.12.1
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: pnpm
           cache-dependency-path: pallas-app/pnpm-lock.yaml
       - name: Build pallas-app frontend

@@ -95,6 +95,9 @@ pub enum AccountEvent {
         order_type: OrderType,
         /// Limit price.
         price: Option<Decimal>,
+        /// Stop trigger price when applicable.
+        #[serde(default)]
+        stop_price: Option<Decimal>,
         /// Remaining qty.
         remaining_qty: Decimal,
         /// Original qty.
@@ -215,8 +218,11 @@ pub struct OrderIntent {
     pub side: Side,
     /// Limit or market.
     pub order_type: OrderType,
-    /// Limit price (required for limit).
+    /// Limit price (required for limit / stop-limit).
     pub price: Option<Decimal>,
+    /// Stop trigger (required for stop market / stop limit).
+    #[serde(default)]
+    pub stop_price: Option<Decimal>,
     /// Base quantity.
     pub qty: Decimal,
     /// Optional client id.

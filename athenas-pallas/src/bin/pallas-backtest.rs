@@ -67,7 +67,9 @@ fn parse_data_format(s: &str) -> DataFormat {
     }
 }
 
-fn parse_balances(rows: &[(String, String)]) -> Result<HashMap<athenas_pallas::types::Asset, Decimal>, Box<dyn std::error::Error>> {
+fn parse_balances(
+    rows: &[(String, String)],
+) -> Result<HashMap<athenas_pallas::types::Asset, Decimal>, Box<dyn std::error::Error>> {
     let mut balances = HashMap::new();
     for (a, v) in rows {
         balances.insert(athenas_pallas::types::Asset::new(a), v.parse()?);

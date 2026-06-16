@@ -48,6 +48,28 @@ pub trait ExecutionGateway: Send + Sync {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<crate::events::AccountEvent>>;
+    /// Stop market (optional; paper/sim implement).
+    async fn place_stop_market(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<crate::events::AccountEvent>> {
+        let _ = (state, intent);
+        Err(crate::error::Error::Invalid(
+            "stop market not supported by this gateway".into(),
+        ))
+    }
+    /// Stop limit (optional; paper/sim implement).
+    async fn place_stop_limit(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<crate::events::AccountEvent>> {
+        let _ = (state, intent);
+        Err(crate::error::Error::Invalid(
+            "stop limit not supported by this gateway".into(),
+        ))
+    }
     /// Cancel one order.
     async fn cancel(
         &self,
@@ -55,8 +77,7 @@ pub trait ExecutionGateway: Send + Sync {
         order_id: OrderId,
     ) -> Result<Vec<crate::events::AccountEvent>>;
     /// Cancel all working orders.
-    async fn cancel_all(&self, state: &GlobalState)
-        -> Result<Vec<crate::events::AccountEvent>>;
+    async fn cancel_all(&self, state: &GlobalState) -> Result<Vec<crate::events::AccountEvent>>;
     /// Passive fills after a market event (paper/sim).
     async fn poll_after_market(
         &self,

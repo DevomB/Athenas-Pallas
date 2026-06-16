@@ -1,11 +1,11 @@
 //! Paper trading with mock execution (barter flagship-style, offline iterator feed).
 
 use athenas_pallas::execution::{PaperConfig, PaperGateway};
+use athenas_pallas::state::GlobalState;
 use athenas_pallas::{
     AuditMode, DefaultRiskManager, EngineFeedMode, IndexedInstruments, LiveClock, SummaryPeriod,
     SystemArgs, SystemBuilder, SystemConfig, TradingState,
 };
-use athenas_pallas::state::GlobalState;
 use rust_decimal::Decimal;
 use std::fs;
 use std::sync::Arc;

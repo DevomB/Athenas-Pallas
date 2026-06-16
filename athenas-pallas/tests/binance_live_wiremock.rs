@@ -1,7 +1,7 @@
 #![cfg(feature = "binance-live")]
 
-use athenas_pallas::execution::{BinanceCredentials, BinanceLiveGateway, ExecutionGateway};
 use athenas_pallas::events::{OrderIntent, OrderIntentSource};
+use athenas_pallas::execution::{BinanceCredentials, BinanceLiveGateway, ExecutionGateway};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::types::{Asset, InstrumentId, OrderType, Side};
 use rust_decimal::Decimal;
@@ -48,6 +48,7 @@ async fn market_order_signed_post_parses_response() {
         side: Side::Buy,
         order_type: OrderType::Market,
         price: None,
+        stop_price: None,
         qty: Decimal::new(1, 2),
         client_order_id: None,
         source: OrderIntentSource::User,

@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use super::{ExecutionGateway, PaperGateway, PaperConfig, SyncExecutionGateway};
+use super::{ExecutionGateway, PaperConfig, PaperGateway, SyncExecutionGateway};
 use crate::error::Result;
 use crate::events::{AccountEvent, OrderIntent};
 use crate::state::GlobalState;
@@ -47,6 +47,22 @@ impl ExecutionGateway for SimGateway {
         self.inner.place_market_sync(state, intent)
     }
 
+    async fn place_stop_market(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        self.inner.place_stop_market_sync(state, intent)
+    }
+
+    async fn place_stop_limit(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        self.inner.place_stop_limit_sync(state, intent)
+    }
+
     async fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
         self.inner.cancel_sync(state, order_id)
     }
@@ -61,20 +77,28 @@ impl ExecutionGateway for SimGateway {
 }
 
 impl SyncExecutionGateway for SimGateway {
-    fn place_limit(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
+    fn place_limit(&self, state: &GlobalState, intent: &OrderIntent) -> Result<Vec<AccountEvent>> {
         self.inner.place_limit_sync(state, intent)
     }
 
-    fn place_market(
+    fn place_market(&self, state: &GlobalState, intent: &OrderIntent) -> Result<Vec<AccountEvent>> {
+        self.inner.place_market_sync(state, intent)
+    }
+
+    fn place_stop_market(
         &self,
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.inner.place_market_sync(state, intent)
+        self.inner.place_stop_market_sync(state, intent)
+    }
+
+    fn place_stop_limit(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        self.inner.place_stop_limit_sync(state, intent)
     }
 
     fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {

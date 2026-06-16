@@ -32,7 +32,8 @@ impl FxCsvSource {
         let mut rdr = csv::Reader::from_reader(buf.as_bytes());
         let mut rows = Vec::new();
         for (i, rec) in rdr.deserialize().enumerate() {
-            let row: FxRow = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let row: FxRow =
+                rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             parse_ts_required_err(&row.timestamp, &format!("row {}", i + 2))
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             rows.push(row);

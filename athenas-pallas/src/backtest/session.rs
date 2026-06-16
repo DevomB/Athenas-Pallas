@@ -7,10 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use super::config::{parse_base_quote, BacktestConfig, DataFormat};
+use super::config::{instrument_meta_from_config, BacktestConfig, DataFormat, ExtraInstrument};
 use super::cpp_build::build_cpp_strategy;
 use super::runner::{BacktestReport, BacktestRunner};
-use crate::instrument::{AssetClass, InstrumentMeta};
+use crate::instrument::AssetClass;
 use crate::strategy::ExternalStrategy;
 use crate::types::{Asset, EquityPoint};
 
@@ -42,6 +42,12 @@ pub struct BacktestReportDto {
     pub wall_time_ms: u64,
     /// Downsampled equity curve for charting.
     pub equity_curve: Vec<EquityPointDto>,
+    /// Fraction of closed round-trips with positive PnL.
+    pub win_rate: f64,
+    /// Gross profit / gross loss.
+    pub profit_factor: f64,
+    /// Closed round-trip count.
+    pub closed_trades: usize,
 }
 
 impl BacktestConfig {
@@ -89,27 +95,7 @@ pub fn run_external_backtest_with_cancel(
     strategy_path: &Path,
     cancel: Option<Arc<AtomicBool>>,
 ) -> crate::Result<BacktestReport> {
-    let (base, quote) = parse_base_quote(&cfg.instrument.symbol, cfg.asset_class);
-    let meta = if cfg.asset_class == AssetClass::Future {
-        InstrumentMeta::future(
-            base,
-            quote,
-            cfg.contract_multiplier.unwrap_or(Decimal::ONE),
-            cfg.tick_size.unwrap_or(Decimal::new(25, 2)),
-            cfg.lot_size,
-            cfg.expiry.clone(),
-        )
-    } else {
-        InstrumentMeta {
-            base: Asset::new(base),
-            quote: Asset::new(quote),
-            asset_class: cfg.asset_class,
-            lot_size: cfg.lot_size,
-            contract_multiplier: None,
-            tick_size: cfg.tick_size,
-            expiry: cfg.expiry.clone(),
-        }
-    };
+    let meta = instrument_meta_from_config(cfg);
     let mut instruments = HashMap::new();
     instruments.insert(cfg.instrument.clone(), meta.clone());
     let balances = if cfg.balances.is_empty() {
@@ -138,6 +124,9 @@ pub fn report_to_dto(report: &BacktestReport, max_chart_points: usize) -> Backte
         fill_count: report.fill_count,
         wall_time_ms: report.wall_time_ms,
         equity_curve: downsample_equity(&report.equity_curve, max_chart_points),
+        win_rate: report.win_rate,
+        profit_factor: report.profit_factor,
+        closed_trades: report.closed_trades,
     }
 }
 
@@ -186,9 +175,7 @@ fn decimal_to_f64(d: Decimal) -> f64 {
 }
 
 fn decimal_str_to_f64(s: &str) -> f64 {
-    s.parse::<Decimal>()
-        .map(decimal_to_f64)
-        .unwrap_or(0.0)
+    s.parse::<Decimal>().map(decimal_to_f64).unwrap_or(0.0)
 }
 
 fn parse_asset_class(s: &str) -> AssetClass {
@@ -196,6 +183,10 @@ fn parse_asset_class(s: &str) -> AssetClass {
         "equity" => AssetClass::Equity,
         "forex" | "fx" => AssetClass::Forex,
         "future" | "futures" => AssetClass::Future,
+        "option" | "options" => AssetClass::Option,
+        "perpetual" | "perp" => AssetClass::Perpetual,
+        "bond" | "bonds" => AssetClass::Bond,
+        "hybrid" => AssetClass::Hybrid,
         _ => AssetClass::Crypto,
     }
 }
@@ -219,9 +210,7 @@ fn resolve_config_path(base_dir: Option<&Path>, p: &str) -> PathBuf {
     if path.is_absolute() {
         return path;
     }
-    base_dir
-        .map(|b| b.join(&path))
-        .unwrap_or(path)
+    base_dir.map(|b| b.join(&path)).unwrap_or(path)
 }
 
 fn apply_table(
@@ -271,6 +260,16 @@ fn apply_table(
         }
         if let Some(py) = bt.get("periods_per_year").and_then(|v| v.as_float()) {
             cfg.periods_per_year = py;
+            cfg.auto_periods_per_year = false;
+        }
+        if let Some(iv) = bt.get("bar_interval").and_then(|v| v.as_str()) {
+            cfg.bar_interval = Some(iv.to_string());
+        }
+        if let Some(sf) = bt.get("session_filter").and_then(|v| v.as_str()) {
+            cfg.session_filter = Some(sf.to_string());
+        }
+        if let Some(v) = bt.get("auto_periods_per_year").and_then(|v| v.as_bool()) {
+            cfg.auto_periods_per_year = v;
         }
         if let Some(p) = bt.get("output").and_then(|v| v.as_str()) {
             cfg.output_path = Some(resolve_config_path(base_dir, p));
@@ -283,6 +282,18 @@ fn apply_table(
         }
         if let Some(v) = bt.get("record_equity_curve").and_then(|v| v.as_bool()) {
             cfg.record_equity_curve = v;
+        }
+        if let Some(v) = bt.get("risk_free_annual").and_then(|v| v.as_float()) {
+            cfg.risk_free_annual = v;
+        }
+        if let Some(v) = bt.get("max_position_abs").and_then(|v| v.as_str()) {
+            cfg.max_position_abs = parse_decimal_opt(v);
+        }
+        if let Some(v) = bt.get("max_daily_loss_quote").and_then(|v| v.as_str()) {
+            cfg.max_daily_loss_quote = parse_decimal_opt(v);
+        }
+        if let Some(v) = bt.get("margin_initial_rate").and_then(|v| v.as_str()) {
+            cfg.margin_initial_rate = parse_decimal_opt(v);
         }
     }
 
@@ -306,8 +317,65 @@ fn apply_table(
                 .get("amount")
                 .and_then(|v| v.as_str())
                 .and_then(parse_decimal_opt)
-                .ok_or_else(|| crate::Error::Invalid(format!("invalid balance amount for {asset}")))?;
+                .ok_or_else(|| {
+                    crate::Error::Invalid(format!("invalid balance amount for {asset}"))
+                })?;
             cfg.balances.insert(Asset::new(asset), amount);
+        }
+    }
+
+    if let Some(rows) = table.get("instruments").and_then(|v| v.as_array()) {
+        cfg.extra_instruments.clear();
+        for row in rows {
+            let Some(tbl) = row.as_table() else {
+                continue;
+            };
+            let Some(ex) = tbl.get("exchange").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(sym) = tbl.get("symbol").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let ac = tbl
+                .get("asset_class")
+                .and_then(|v| v.as_str())
+                .map(parse_asset_class)
+                .unwrap_or(AssetClass::Crypto);
+            let mut extra = ExtraInstrument {
+                instrument: crate::types::InstrumentId::new(ex, sym),
+                asset_class: ac,
+                lot_size: tbl
+                    .get("lot_size")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_decimal_opt),
+                tick_size: tbl
+                    .get("tick_size")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_decimal_opt),
+                contract_multiplier: tbl
+                    .get("contract_multiplier")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_decimal_opt),
+                expiry: tbl.get("expiry").and_then(|v| v.as_str()).map(String::from),
+                margin_initial_rate: tbl
+                    .get("margin_initial_rate")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_decimal_opt),
+                data_path: tbl
+                    .get("data")
+                    .and_then(|v| v.as_str())
+                    .map(|p| resolve_config_path(base_dir, p)),
+                data_format: tbl
+                    .get("data_format")
+                    .and_then(|v| v.as_str())
+                    .map(parse_data_format),
+            };
+            if extra.data_path.is_none() {
+                if let Some(p) = tbl.get("data_path").and_then(|v| v.as_str()) {
+                    extra.data_path = Some(resolve_config_path(base_dir, p));
+                }
+            }
+            cfg.extra_instruments.push(extra);
         }
     }
 
@@ -374,6 +442,9 @@ mod tests {
             }],
             fills: vec![],
             wall_time_ms: 42,
+            win_rate: 0.0,
+            profit_factor: 0.0,
+            closed_trades: 0,
         };
         let dto = report_to_dto(&report, 2000);
         let json = serde_json::to_string(&dto).unwrap();

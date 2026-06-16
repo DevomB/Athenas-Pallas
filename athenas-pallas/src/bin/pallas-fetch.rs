@@ -1,6 +1,7 @@
 //! Download historical OHLCV from Binance or Yahoo Finance.
 
 use athenas_pallas::data::fetch::binance;
+use athenas_pallas::data::fetch::intervals::{interval_hint, normalize_interval, FetchProvider};
 use athenas_pallas::data::fetch::yahoo;
 use clap::Parser;
 use std::path::PathBuf;
@@ -25,14 +26,29 @@ struct Args {
     range: String,
     #[arg(short, long)]
     output: PathBuf,
+    /// Print documented intervals for the selected provider and exit.
+    #[arg(long)]
+    list_intervals: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let provider = FetchProvider::parse(&args.provider)
+        .ok_or_else(|| format!("unknown provider: {}", args.provider))?;
+    if args.list_intervals {
+        for iv in provider.documented_intervals() {
+            println!("{iv}");
+        }
+        return Ok(());
+    }
+    let interval = normalize_interval(&args.interval);
+    if let Some(hint) = interval_hint(provider, &interval) {
+        eprintln!("note: {hint}");
+    }
     let client = reqwest::Client::new();
-    match args.provider.as_str() {
-        "binance" => {
+    match provider {
+        FetchProvider::Binance => {
             let end = args
                 .end
                 .as_deref()
@@ -48,29 +64,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             binance::fetch_klines_csv(
                 &client,
                 &args.symbol.to_uppercase(),
-                &args.interval,
+                &interval,
                 start.unix_timestamp() * 1000,
                 end.unix_timestamp() * 1000,
                 &args.output,
             )
             .await?;
         }
-        "yahoo" => {
+        FetchProvider::Yahoo => {
             let range = if args.days.is_some() {
                 format!("{}d", args.days.unwrap())
             } else {
                 args.range.clone()
             };
-            yahoo::fetch_chart_csv(
-                &client,
-                &args.symbol,
-                &args.interval,
-                &range,
-                &args.output,
-            )
-            .await?;
+            yahoo::fetch_chart_csv(&client, &args.symbol, &interval, &range, &args.output).await?;
         }
-        other => return Err(format!("unknown provider: {other}").into()),
     }
     println!("wrote {}", args.output.display());
     Ok(())

@@ -28,7 +28,19 @@ Newline-delimited JSON on stdin/stdout between `pallas-backtest` and a strategy 
 
 **intents** (response to each event; `seq` must match)
 ```json
-{"msg":"intents","seq":1,"intents":[{"instrument":{"exchange":"binance","symbol":"BTCUSDT"},"side":"Buy","order_type":"Market","qty":"0.01"}]}
+{
+  "msg": "intents",
+  "seq": 1,
+  "intents": [{
+    "instrument": {"exchange": "binance", "symbol": "BTCUSDT"},
+    "side": "Buy",
+    "order_type": "StopMarket",
+    "qty": "0.01",
+    "stop_price": "39000",
+    "strategy_id": "sleeve_a",
+    "client_order_id": "order-1"
+  }]
+}
 ```
 
-Decimal fields are strings. `side` is `Buy` or `Sell`. `order_type` is `Market` or `Limit`.
+Decimal fields are strings. `side` is `Buy` or `Sell`. `order_type` is `Market`, `Limit`, `StopMarket`, or `StopLimit`. Limit/stop-limit orders may include `price`; stop orders include `stop_price`.

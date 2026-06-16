@@ -63,6 +63,22 @@ pub struct BarSeries {
 }
 
 impl BarSeries {
+    /// Load OHLCV CSV (`ts,open,high,low,close,volume`) or binary `.pbar` cache.
+    pub fn from_csv_path_or_pbar(path: &Path, tick_size: Decimal) -> std::io::Result<Self> {
+        if super::pbar::is_pbar_path(path) {
+            return super::pbar::read_pbar(path);
+        }
+        let series = Self::from_csv_path(path, tick_size)?;
+        let sidecar = path.with_extension("pbar");
+        let _ = super::pbar::write_pbar(&sidecar, &series);
+        Ok(series)
+    }
+
+    /// Build from pre-encoded bars (e.g. after reading `.pbar`).
+    pub fn from_bars(bars: Vec<Bar>, tick_size: Decimal) -> Self {
+        Self { bars, tick_size }
+    }
+
     /// Load OHLCV CSV (`ts,open,high,low,close,volume`).
     pub fn from_csv_path(path: &Path, tick_size: Decimal) -> std::io::Result<Self> {
         let mut buf = String::new();
@@ -70,7 +86,8 @@ impl BarSeries {
         let mut rdr = csv::Reader::from_reader(buf.as_bytes());
         let mut bars = Vec::with_capacity(buf.lines().count().saturating_sub(1));
         for (i, rec) in rdr.deserialize::<OhlcvRow>().enumerate() {
-            let row: OhlcvRow = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let row: OhlcvRow =
+                rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             let ts = parse_ts_required(&row.ts, &format!("row {}", i + 2))?;
             bars.push(Bar {
                 ts_unix_nanos: ts.unix_timestamp_nanos() as i64,
@@ -133,7 +150,8 @@ impl BarSeries {
     }
 
     pub fn close_decimal(&self, i: usize) -> Option<Decimal> {
-        self.get(i).map(|b| ticks_to_decimal(b.close_ticks, self.tick_size))
+        self.get(i)
+            .map(|b| ticks_to_decimal(b.close_ticks, self.tick_size))
     }
 }
 
@@ -201,11 +219,7 @@ pub fn decimal_to_ticks(d: Decimal, tick_size: Decimal) -> i64 {
         return 0;
     }
     let scaled = d / tick_size;
-    scaled
-        .round()
-        .mantissa()
-        .try_into()
-        .unwrap_or(i64::MAX)
+    scaled.round().mantissa().try_into().unwrap_or(i64::MAX)
 }
 
 pub fn ticks_to_decimal(t: i64, tick_size: Decimal) -> Decimal {
@@ -228,8 +242,8 @@ mod tests {
 
     #[test]
     fn csv_ninety_bars() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/data/BTCUSDT_1d.csv");
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data/BTCUSDT_1d.csv");
         let s = BarSeries::from_csv_path(&path, default_tick_size()).expect("csv");
         assert_eq!(s.len(), 90);
     }

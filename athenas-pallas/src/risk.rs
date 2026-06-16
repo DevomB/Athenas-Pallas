@@ -143,10 +143,8 @@ pub struct DefaultRiskManager {
 
 impl RiskManager for DefaultRiskManager {
     fn pipeline(&self) -> RiskPipeline {
-        let mut checks: Vec<Box<dyn RiskCheck + Send + Sync>> = vec![
-            Box::new(PauseCheck),
-            Box::new(TradingDisabledCheck),
-        ];
+        let mut checks: Vec<Box<dyn RiskCheck + Send + Sync>> =
+            vec![Box::new(PauseCheck), Box::new(TradingDisabledCheck)];
         if let Some(rule) = &self.max_daily_loss {
             checks.push(Box::new(rule.clone()));
         }
@@ -154,16 +152,37 @@ impl RiskManager for DefaultRiskManager {
     }
 }
 
-/// Inline pause + reject-short for synchronous backtest replay.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct BacktestChecks;
+/// Inline pause + reject-short (+ optional position cap) for synchronous backtest replay.
+#[derive(Clone, Debug, Default)]
+pub struct BacktestChecks {
+    max_positions: Vec<MaxPositionSize>,
+    max_daily_loss: Option<MaxDailyLossQuote>,
+}
 
 impl BacktestChecks {
+    /// Attach a max-position rule for backtest replay.
+    pub fn with_max_position(mut self, rule: MaxPositionSize) -> Self {
+        self.max_positions.push(rule);
+        self
+    }
+
+    /// Attach max daily loss in quote units.
+    pub fn with_max_daily_loss(mut self, rule: MaxDailyLossQuote) -> Self {
+        self.max_daily_loss = Some(rule);
+        self
+    }
+
     /// Run standard backtest risk rules without dynamic dispatch.
     #[inline]
     pub fn validate(&self, state: &GlobalState, intent: &OrderIntent) -> Result<()> {
         PauseCheck.check(state, intent)?;
         RejectShort.check(state, intent)?;
+        for rule in &self.max_positions {
+            rule.check(state, intent)?;
+        }
+        if let Some(rule) = &self.max_daily_loss {
+            rule.check(state, intent)?;
+        }
         Ok(())
     }
 }
@@ -218,6 +237,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: Decimal::from(5u64),
             client_order_id: None,
             source: OrderIntentSource::User,
@@ -244,6 +264,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
             source: OrderIntentSource::User,
@@ -272,6 +293,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
             source: OrderIntentSource::User,
@@ -294,7 +316,10 @@ mod tests {
         bal.insert(Asset("USDT".into()), Decimal::from(8500u64));
         let mut st = GlobalState::new(InstrumentRegistry::from_instruments(inst), bal);
         st.daily_risk_quote = Some(Asset("USDT".into()));
-        st.risk_day_anchor = Some((time::OffsetDateTime::now_utc().date(), Decimal::from(10_000u64)));
+        st.risk_day_anchor = Some((
+            time::OffsetDateTime::now_utc().date(),
+            Decimal::from(10_000u64),
+        ));
 
         let rule = MaxDailyLossQuote {
             quote: Asset("USDT".into()),
@@ -305,6 +330,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
             source: OrderIntentSource::User,

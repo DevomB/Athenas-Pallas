@@ -6,6 +6,8 @@ use super::{apply_slippage, ExecutionGateway};
 use crate::backtest::{FillModel, TouchCrossFillModel};
 use crate::error::{Error, Result};
 use crate::events::{AccountEvent, OrderIntent};
+use crate::instrument::pricing::margin_required;
+use crate::instrument::AssetClass;
 use crate::state::{GlobalState, InstrumentMeta};
 use crate::types::{OpenOrder, OrderId, OrderStatus, OrderType, Side};
 use async_trait::async_trait;
@@ -70,11 +72,92 @@ impl PaperGateway {
 
     fn notional(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
         match meta.asset_class {
-            crate::instrument::AssetClass::Future => {
+            AssetClass::Future | AssetClass::Perpetual | AssetClass::Option => {
                 let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
                 price * qty * mult
             }
             _ => price * qty,
+        }
+    }
+
+    fn round_qty_to_lot(qty: Decimal, lot: Decimal) -> Decimal {
+        if lot.is_zero() {
+            return qty;
+        }
+        (qty / lot).floor() * lot
+    }
+
+    fn round_price_to_tick(price: Decimal, tick: Decimal) -> Decimal {
+        if tick.is_zero() {
+            return price;
+        }
+        (price / tick).round() * tick
+    }
+
+    fn normalize_order(
+        meta: &InstrumentMeta,
+        qty: Decimal,
+        price: Option<Decimal>,
+        stop_price: Option<Decimal>,
+    ) -> Result<(Decimal, Option<Decimal>, Option<Decimal>)> {
+        let qty = meta
+            .lot_size
+            .map(|lot| Self::round_qty_to_lot(qty, lot))
+            .unwrap_or(qty);
+        if qty.is_zero() {
+            return Err(Error::Invalid("quantity below lot_size".into()));
+        }
+        let price = price.map(|p| {
+            meta.tick_size
+                .map(|tick| Self::round_price_to_tick(p, tick))
+                .unwrap_or(p)
+        });
+        let stop_price = stop_price.map(|p| {
+            meta.tick_size
+                .map(|tick| Self::round_price_to_tick(p, tick))
+                .unwrap_or(p)
+        });
+        Ok((qty, price, stop_price))
+    }
+
+    fn bar_high_low(
+        state: &GlobalState,
+        inst: &crate::types::InstrumentId,
+    ) -> Option<(Decimal, Decimal)> {
+        let ix = state.registry.index_of(inst)?.0;
+        let high = state.bar_high.get(ix).and_then(|c| *c)?;
+        let low = state.bar_low.get(ix).and_then(|c| *c)?;
+        Some((high, low))
+    }
+
+    fn stop_triggered(side: Side, stop: Decimal, high: Decimal, low: Decimal) -> bool {
+        match side {
+            Side::Buy => high >= stop,
+            Side::Sell => low <= stop,
+        }
+    }
+
+    fn uses_derivative_margin(meta: &InstrumentMeta) -> bool {
+        matches!(
+            meta.asset_class,
+            AssetClass::Future | AssetClass::Perpetual | AssetClass::Option
+        )
+    }
+
+    /// Cash debited/credited in quote for a fill (before fees).
+    fn quote_cash_flow(meta: &InstrumentMeta, side: Side, price: Decimal, qty: Decimal) -> Decimal {
+        if Self::uses_derivative_margin(meta) {
+            // Derivatives: equity is mark-to-market (cash + position * price * multiplier).
+            // Opening/closing adjusts contracts only; cash moves on margin when configured.
+            match meta.margin_initial_rate {
+                Some(rate) if rate < Decimal::ONE => margin_required(meta, price, qty),
+                _ => Decimal::ZERO,
+            }
+        } else {
+            match side {
+                Side::Buy => Self::notional(meta, price, qty),
+                Side::Sell => -Self::notional(meta, price, qty),
+            }
         }
     }
 
@@ -88,14 +171,17 @@ impl PaperGateway {
     ) -> Result<()> {
         let base_free = *state.balances.get(&meta.base).unwrap_or(&Decimal::ZERO);
         let quote_free = *state.balances.get(&meta.quote).unwrap_or(&Decimal::ZERO);
-        let notional = Self::notional(meta, price, qty);
+        let cash = Self::quote_cash_flow(meta, side, price, qty);
         match side {
-            Side::Buy if quote_free < notional + fee => {
-                Err(Error::ExecutionRejected("insufficient quote balance".into()))
-            }
-            Side::Sell if base_free < qty => {
+            Side::Buy if quote_free < cash + fee => Err(Error::ExecutionRejected(
+                "insufficient quote balance".into(),
+            )),
+            Side::Sell if !Self::uses_derivative_margin(meta) && base_free < qty => {
                 Err(Error::ExecutionRejected("insufficient base balance".into()))
             }
+            Side::Sell if Self::uses_derivative_margin(meta) && quote_free < cash + fee => Err(
+                Error::ExecutionRejected("insufficient quote balance".into()),
+            ),
             _ => Ok(()),
         }
     }
@@ -105,6 +191,7 @@ impl PaperGateway {
         intent: &OrderIntent,
         qty: Decimal,
         price: Option<Decimal>,
+        stop_price: Option<Decimal>,
         ot: OrderType,
     ) -> OpenOrder {
         OpenOrder {
@@ -113,6 +200,7 @@ impl PaperGateway {
             side: intent.side,
             order_type: ot,
             price,
+            stop_price,
             remaining_qty: qty,
             original_qty: qty,
             status: OrderStatus::Open,
@@ -127,6 +215,7 @@ impl PaperGateway {
             side: o.side,
             order_type: o.order_type,
             price: o.price,
+            stop_price: o.stop_price,
             remaining_qty: o.remaining_qty,
             original_qty: o.original_qty,
             status: o.status,
@@ -146,16 +235,10 @@ impl PaperGateway {
         let mut evs = Vec::new();
         let base_free = *state.balances.get(&meta.base).unwrap_or(&Decimal::ZERO);
         let quote_free = *state.balances.get(&meta.quote).unwrap_or(&Decimal::ZERO);
-        let notional = match meta.asset_class {
-            crate::instrument::AssetClass::Future => {
-                let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
-                price * qty * mult
-            }
-            _ => price * qty,
-        };
+        let cash = Self::quote_cash_flow(meta, order.side, price, qty);
         let (new_base, new_quote) = match order.side {
-            Side::Buy => (base_free + qty, quote_free - notional - fee),
-            Side::Sell => (base_free - qty, quote_free + notional - fee),
+            Side::Buy => (base_free + qty, quote_free - cash - fee),
+            Side::Sell => (base_free - qty, quote_free - cash - fee),
         };
         evs.push(AccountEvent::Balance {
             asset: meta.base.clone(),
@@ -185,6 +268,48 @@ impl PaperGateway {
         }
     }
 
+    fn emit_fill_events(
+        &self,
+        state: &GlobalState,
+        order: &OpenOrder,
+        meta: &InstrumentMeta,
+        px: Decimal,
+        qty: Decimal,
+    ) -> Result<Vec<AccountEvent>> {
+        let fee = Self::fee_notional(Self::notional(meta, px, qty), self.cfg.fee_bps);
+        Self::check_balance_for_fill(state, meta, order.side, px, qty, fee)?;
+        let mut filled = order.clone();
+        filled.remaining_qty = Decimal::ZERO;
+        filled.status = OrderStatus::Filled;
+        let mut evs = vec![Self::emit_order_update(&filled)];
+        evs.push(AccountEvent::Fill {
+            order_id: filled.id.clone(),
+            instrument: filled.instrument.clone(),
+            side: filled.side,
+            price: px,
+            qty,
+            fee,
+            fee_asset: meta.quote.clone(),
+            strategy_id: filled.strategy_id.clone(),
+        });
+        evs.extend(Self::balance_updates_after_fill(
+            state, &filled, meta, px, qty, fee,
+        ));
+        Ok(evs)
+    }
+
+    fn l1_bid_ask(
+        state: &GlobalState,
+        inst: &crate::types::InstrumentId,
+    ) -> Option<(Decimal, Decimal)> {
+        let ix = state.registry.index_of(inst)?.0;
+        state
+            .l1
+            .get(ix)
+            .and_then(|cell| *cell)
+            .map(|(_, bid, ask)| (bid, ask))
+    }
+
     /// Sync limit placement (backtest hot path).
     pub(crate) fn place_limit_sync(
         &self,
@@ -194,42 +319,18 @@ impl PaperGateway {
         if intent.order_type != OrderType::Limit {
             return Err(Error::Invalid("place_limit requires limit intent".into()));
         }
-        let price = intent
-            .price
-            .ok_or_else(|| Error::Invalid("limit needs price".into()))?;
         let meta = Self::meta(state, &intent.instrument)?;
+        let (qty, price, _) =
+            Self::normalize_order(meta, intent.qty, intent.price, intent.stop_price)?;
+        let price = price.ok_or_else(|| Error::Invalid("limit needs price".into()))?;
         let id = OrderId::new_v4();
-        let mut o = Self::build_open(id, intent, intent.qty, Some(price), OrderType::Limit);
+        let o = Self::build_open(id, intent, qty, Some(price), None, OrderType::Limit);
 
-        if let Some(ix) = state.registry.index_of(&intent.instrument).map(|i| i.0) {
-            if let Some(Some((_, bid, ask))) = state.l1.get(ix) {
-                if let Some(px) = Self::crossing_limit(
-                    self.cfg.fill_model.as_ref(),
-                    intent.side,
-                    price,
-                    *bid,
-                    *ask,
-                ) {
-                    o.remaining_qty = Decimal::ZERO;
-                    o.status = OrderStatus::Filled;
-                    let fee = Self::fee_notional(px * intent.qty, self.cfg.fee_bps);
-                    Self::check_balance_for_fill(state, meta, intent.side, px, intent.qty, fee)?;
-                    let mut evs = vec![Self::emit_order_update(&o)];
-                    evs.push(AccountEvent::Fill {
-                        order_id: o.id.clone(),
-                        instrument: o.instrument.clone(),
-                        side: o.side,
-                        price: px,
-                        qty: intent.qty,
-                        fee,
-                        fee_asset: meta.quote.clone(),
-                        strategy_id: o.strategy_id.clone(),
-                    });
-                    evs.extend(Self::balance_updates_after_fill(
-                        state, &o, meta, px, intent.qty, fee,
-                    ));
-                    return Ok(evs);
-                }
+        if let Some((bid, ask)) = Self::l1_bid_ask(state, &intent.instrument) {
+            if let Some(px) =
+                Self::crossing_limit(self.cfg.fill_model.as_ref(), intent.side, price, bid, ask)
+            {
+                return self.emit_fill_events(state, &o, meta, px, qty);
             }
         }
 
@@ -243,32 +344,14 @@ impl PaperGateway {
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
         let meta = Self::meta(state, &intent.instrument)?;
+        let (qty, _, _) = Self::normalize_order(meta, intent.qty, intent.price, intent.stop_price)?;
         let mid = state
             .mid_or_last(&intent.instrument)
             .ok_or_else(|| Error::Invalid("no mid/last for market order".into()))?;
         let px = apply_slippage(intent.side, mid, self.cfg.market_slippage_bps);
         let id = OrderId::new_v4();
-        let o = Self::build_open(id, intent, intent.qty, None, OrderType::Market);
-        let mut o_filled = o.clone();
-        o_filled.remaining_qty = Decimal::ZERO;
-        o_filled.status = OrderStatus::Filled;
-        let fee = Self::fee_notional(px * intent.qty, self.cfg.fee_bps);
-        Self::check_balance_for_fill(state, meta, intent.side, px, intent.qty, fee)?;
-        let mut evs = vec![Self::emit_order_update(&o_filled)];
-        evs.push(AccountEvent::Fill {
-            order_id: o_filled.id.clone(),
-            instrument: o_filled.instrument.clone(),
-            side: o_filled.side,
-            price: px,
-            qty: intent.qty,
-            fee,
-            fee_asset: meta.quote.clone(),
-            strategy_id: o_filled.strategy_id.clone(),
-        });
-        evs.extend(Self::balance_updates_after_fill(
-            state, &o_filled, meta, px, intent.qty, fee,
-        ));
-        Ok(evs)
+        let o = Self::build_open(id, intent, qty, None, None, OrderType::Market);
+        self.emit_fill_events(state, &o, meta, px, qty)
     }
 
     /// Sync cancel.
@@ -300,59 +383,177 @@ impl PaperGateway {
         Ok(out)
     }
 
-    /// Sync passive limit fills after market data.
-    pub(crate) fn poll_after_market_sync(
+    /// Sync stop-market placement (rests until bar high/low crosses trigger).
+    pub(crate) fn place_stop_market_sync(
         &self,
         state: &GlobalState,
+        intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
+        if intent.order_type != OrderType::StopMarket {
+            return Err(Error::Invalid(
+                "place_stop_market requires StopMarket".into(),
+            ));
+        }
+        let meta = Self::meta(state, &intent.instrument)?;
+        let stop = intent
+            .stop_price
+            .or(intent.price)
+            .ok_or_else(|| Error::Invalid("stop market needs stop_price".into()))?;
+        let (qty, _, stop_price) =
+            Self::normalize_order(meta, intent.qty, intent.price, Some(stop))?;
+        let stop_price = stop_price.unwrap();
+        let id = OrderId::new_v4();
+        let o = Self::build_open(
+            id,
+            intent,
+            qty,
+            None,
+            Some(stop_price),
+            OrderType::StopMarket,
+        );
+
+        if let Some((high, low)) = Self::bar_high_low(state, &intent.instrument) {
+            if Self::stop_triggered(intent.side, stop_price, high, low) {
+                let mid = state
+                    .mid_or_last(&intent.instrument)
+                    .ok_or_else(|| Error::Invalid("no mid for stop market fill".into()))?;
+                let px = apply_slippage(intent.side, mid, self.cfg.market_slippage_bps);
+                return self.emit_fill_events(state, &o, meta, px, qty);
+            }
+        }
+
+        Ok(vec![Self::emit_order_update(&o)])
+    }
+
+    /// Sync stop-limit placement.
+    pub(crate) fn place_stop_limit_sync(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        if intent.order_type != OrderType::StopLimit {
+            return Err(Error::Invalid("place_stop_limit requires StopLimit".into()));
+        }
+        let meta = Self::meta(state, &intent.instrument)?;
+        let limit = intent
+            .price
+            .ok_or_else(|| Error::Invalid("stop limit needs limit price".into()))?;
+        let stop = intent
+            .stop_price
+            .ok_or_else(|| Error::Invalid("stop limit needs stop_price".into()))?;
+        let (qty, price, stop_price) =
+            Self::normalize_order(meta, intent.qty, Some(limit), Some(stop))?;
+        let price = price.unwrap();
+        let stop_price = stop_price.unwrap();
+        let id = OrderId::new_v4();
+        let o = Self::build_open(
+            id,
+            intent,
+            qty,
+            Some(price),
+            Some(stop_price),
+            OrderType::StopLimit,
+        );
+
+        if let Some((high, low)) = Self::bar_high_low(state, &intent.instrument) {
+            if Self::stop_triggered(intent.side, stop_price, high, low) {
+                if let Some((bid, ask)) = Self::l1_bid_ask(state, &intent.instrument) {
+                    if let Some(px) = Self::crossing_limit(
+                        self.cfg.fill_model.as_ref(),
+                        intent.side,
+                        price,
+                        bid,
+                        ask,
+                    ) {
+                        return self.emit_fill_events(state, &o, meta, px, qty);
+                    }
+                }
+            }
+        }
+
+        Ok(vec![Self::emit_order_update(&o)])
+    }
+
+    /// Sync passive limit fills after market data.
+    pub(crate) fn poll_after_market_sync(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
         let mut out = Vec::new();
         let orders: Vec<OpenOrder> = state.open_orders.values().cloned().collect();
         for o in orders {
-            if o.order_type != OrderType::Limit {
-                continue;
-            }
-            let limit = match o.price {
-                Some(p) => p,
-                None => continue,
-            };
-            let last = state
-                .registry
-                .index_of(&o.instrument)
-                .and_then(|ix| state.last_trade.get(ix.0).and_then(|cell| *cell))
-                .map(|(_, p)| p);
-            let Some(last_px) = last else { continue };
             let meta = match Self::meta(state, &o.instrument) {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let fill = match o.side {
-                Side::Buy if last_px <= limit => Some(last_px),
-                Side::Sell if last_px >= limit => Some(last_px),
-                _ => None,
-            };
-            if let Some(px) = fill {
-                let qty = o.remaining_qty;
-                let fee = Self::fee_notional(px * qty, self.cfg.fee_bps);
-                if Self::check_balance_for_fill(state, meta, o.side, px, qty, fee).is_err() {
-                    continue;
+            let qty = o.remaining_qty;
+
+            match o.order_type {
+                OrderType::Limit => {
+                    let limit = match o.price {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
+                        continue;
+                    };
+                    let Some(px) =
+                        Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
+                    else {
+                        continue;
+                    };
+                    match self.emit_fill_events(state, &o, meta, px, qty) {
+                        Ok(mut evs) => out.append(&mut evs),
+                        Err(_) => continue,
+                    }
                 }
-                let mut filled = o.clone();
-                filled.remaining_qty = Decimal::ZERO;
-                filled.status = OrderStatus::Filled;
-                out.push(Self::emit_order_update(&filled));
-                out.push(AccountEvent::Fill {
-                    order_id: filled.id.clone(),
-                    instrument: filled.instrument.clone(),
-                    side: filled.side,
-                    price: px,
-                    qty,
-                    fee,
-                    fee_asset: meta.quote.clone(),
-                    strategy_id: filled.strategy_id.clone(),
-                });
-                out.extend(Self::balance_updates_after_fill(
-                    state, &filled, meta, px, qty, fee,
-                ));
+                OrderType::StopMarket => {
+                    let stop = match o.stop_price {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
+                        continue;
+                    };
+                    if !Self::stop_triggered(o.side, stop, high, low) {
+                        continue;
+                    }
+                    let mid = match state.mid_or_last(&o.instrument) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+                    let px = apply_slippage(o.side, mid, self.cfg.market_slippage_bps);
+                    match self.emit_fill_events(state, &o, meta, px, qty) {
+                        Ok(mut evs) => out.append(&mut evs),
+                        Err(_) => continue,
+                    }
+                }
+                OrderType::StopLimit => {
+                    let stop = match o.stop_price {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let limit = match o.price {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
+                        continue;
+                    };
+                    if !Self::stop_triggered(o.side, stop, high, low) {
+                        continue;
+                    }
+                    let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
+                        continue;
+                    };
+                    let Some(px) =
+                        Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
+                    else {
+                        continue;
+                    };
+                    match self.emit_fill_events(state, &o, meta, px, qty) {
+                        Ok(mut evs) => out.append(&mut evs),
+                        Err(_) => continue,
+                    }
+                }
+                OrderType::Market => {}
             }
         }
         Ok(out)
@@ -361,12 +562,36 @@ impl PaperGateway {
 
 #[async_trait]
 impl ExecutionGateway for PaperGateway {
-    async fn place_limit(&self, state: &GlobalState, intent: &OrderIntent) -> Result<Vec<AccountEvent>> {
+    async fn place_limit(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
         self.place_limit_sync(state, intent)
     }
 
-    async fn place_market(&self, state: &GlobalState, intent: &OrderIntent) -> Result<Vec<AccountEvent>> {
+    async fn place_market(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
         self.place_market_sync(state, intent)
+    }
+
+    async fn place_stop_market(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        self.place_stop_market_sync(state, intent)
+    }
+
+    async fn place_stop_limit(
+        &self,
+        state: &GlobalState,
+        intent: &OrderIntent,
+    ) -> Result<Vec<AccountEvent>> {
+        self.place_stop_limit_sync(state, intent)
     }
 
     async fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
@@ -385,8 +610,8 @@ impl ExecutionGateway for PaperGateway {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::MarketEvent;
     use crate::events::AccountEvent;
+    use crate::events::MarketEvent;
     use crate::instrument::InstrumentRegistry;
     use crate::state::GlobalState;
     use crate::types::{Asset, InstrumentId};
@@ -403,7 +628,8 @@ mod tests {
         );
         let mut balances = HashMap::new();
         balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
-        let mut state = GlobalState::new(InstrumentRegistry::from_instruments(instruments), balances);
+        let mut state =
+            GlobalState::new(InstrumentRegistry::from_instruments(instruments), balances);
         state.apply_market(&MarketEvent::BookL1 {
             instrument: inst.clone(),
             ts: OffsetDateTime::now_utc(),
@@ -422,6 +648,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Limit,
             price: Some(Decimal::new(101, 0)),
+            stop_price: None,
             qty: Decimal::new(1, 2),
             client_order_id: None,
             source: crate::events::OrderIntentSource::User,
@@ -458,6 +685,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
             source: crate::events::OrderIntentSource::User,
@@ -469,7 +697,10 @@ mod tests {
         }
         let quote = *st.balances.get(&Asset("USDT".into())).unwrap();
         assert!(quote < Decimal::new(10_000, 0));
-        let base = *st.balances.get(&Asset("BTC".into())).unwrap_or(&Decimal::ZERO);
+        let base = *st
+            .balances
+            .get(&Asset("BTC".into()))
+            .unwrap_or(&Decimal::ZERO);
         assert_eq!(base, Decimal::ONE);
     }
 
@@ -489,6 +720,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
             source: crate::events::OrderIntentSource::User,
@@ -524,6 +756,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Limit,
             price: Some(Decimal::new(99, 0)),
+            stop_price: None,
             qty: Decimal::new(1, 2),
             client_order_id: None,
             source: crate::events::OrderIntentSource::User,
@@ -557,6 +790,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
             source: crate::events::OrderIntentSource::User,

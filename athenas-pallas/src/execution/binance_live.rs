@@ -10,7 +10,7 @@ use sha2::Sha256;
 use crate::error::{Error, Result};
 use crate::events::{AccountEvent, OrderIntent};
 use crate::state::GlobalState;
-use crate::types::{Asset, InstrumentId, OrderId, OrderStatus, OrderType, Side, Symbol};
+use crate::types::{Asset, InstrumentId, OrderId, OrderStatus, OrderType, Side};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -76,10 +76,7 @@ impl BinanceLiveGateway {
             query.push_str(v);
         }
         let sig = self.sign(&query)?;
-        let url = format!(
-            "{}{}?{}&signature={}",
-            self.base_url, path, query, sig
-        );
+        let url = format!("{}{}?{}&signature={}", self.base_url, path, query, sig);
         let resp = self
             .client
             .get(&url)
@@ -138,10 +135,7 @@ impl BinanceLiveGateway {
             query.push_str(v);
         }
         let sig = self.sign(&query)?;
-        let url = format!(
-            "{}{}?{}&signature={}",
-            self.base_url, path, query, sig
-        );
+        let url = format!("{}{}?{}&signature={}", self.base_url, path, query, sig);
         let resp = self
             .client
             .delete(&url)
@@ -256,6 +250,7 @@ impl BinanceLiveGateway {
             side,
             order_type,
             price,
+            stop_price: None,
             remaining_qty,
             original_qty: orig_qty,
             status,
@@ -300,10 +295,13 @@ impl super::ExecutionGateway for BinanceLiveGateway {
             .ok_or_else(|| Error::Invalid("limit needs price".into()))?;
         let mut params = vec![
             ("symbol".into(), sym),
-            ("side".into(), match intent.side {
-                Side::Buy => "BUY".into(),
-                Side::Sell => "SELL".into(),
-            }),
+            (
+                "side".into(),
+                match intent.side {
+                    Side::Buy => "BUY".into(),
+                    Side::Sell => "SELL".into(),
+                },
+            ),
             ("type".into(), "LIMIT".into()),
             ("timeInForce".into(), "GTC".into()),
             ("quantity".into(), intent.qty.to_string()),
@@ -329,10 +327,13 @@ impl super::ExecutionGateway for BinanceLiveGateway {
         let sym = intent.instrument.symbol.clone();
         let mut params = vec![
             ("symbol".into(), sym),
-            ("side".into(), match intent.side {
-                Side::Buy => "BUY".into(),
-                Side::Sell => "SELL".into(),
-            }),
+            (
+                "side".into(),
+                match intent.side {
+                    Side::Buy => "BUY".into(),
+                    Side::Sell => "SELL".into(),
+                },
+            ),
             ("type".into(), "MARKET".into()),
             ("quantity".into(), intent.qty.to_string()),
         ];
@@ -357,17 +358,11 @@ impl super::ExecutionGateway for BinanceLiveGateway {
             }
         }
         let sym = sym_for_symbol.ok_or_else(|| Error::Invalid("order not in local book".into()))?;
-        let oid = order_id
-            .0
-            .as_u128()
-            .min(u64::MAX as u128) as u64;
+        let oid = order_id.0.as_u128().min(u64::MAX as u128) as u64;
         let text = self
             .signed_delete(
                 "/api/v3/order",
-                vec![
-                    ("symbol".into(), sym),
-                    ("orderId".into(), oid.to_string()),
-                ],
+                vec![("symbol".into(), sym), ("orderId".into(), oid.to_string())],
             )
             .await?;
         let inst = state

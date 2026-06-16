@@ -118,11 +118,10 @@ pub async fn run_backtest(
                 return Err("data path is required".into());
             }
             let _ = app_worker.emit("run-progress", "loading data...");
-            if csv_row_count(&cfg.data_path)? > 50_000 {
-                cfg.record_equity_curve = false;
-            }
-            let equity_curve_skipped = !cfg.record_equity_curve;
+            let row_count = csv_row_count(&cfg.data_path).unwrap_or(0);
+            let equity_curve_downsampled = row_count > 50_000;
             let max_chart_points = 2000usize;
+            cfg.record_equity_curve = true;
             let _ = app_worker.emit("run-progress", "running backtest...");
             let report = if let Some(ref strategy) = cfg.strategy_path {
                 run_external_backtest_with_cancel(&cfg, strategy, Some(cancel.clone()))
@@ -131,7 +130,8 @@ pub async fn run_backtest(
                 run_backtest_with_cancel(&cfg, Some(cancel.clone())).map_err(|e| e.to_string())?
             };
             let equity_curve_downsampled =
-                !equity_curve_skipped && report.equity_curve.len() > max_chart_points;
+                report.equity_curve.len() > max_chart_points || equity_curve_downsampled;
+            let equity_curve_skipped = report.equity_curve.is_empty();
             let _ = app_worker.emit("run-progress", "building report...");
             let full_report_json =
                 serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
@@ -222,6 +222,10 @@ pub fn save_config_toml(path: String, config: ConfigDto) -> Result<(), String> {
             athenas_pallas::instrument::AssetClass::Forex => "forex",
             athenas_pallas::instrument::AssetClass::Future => "future",
             athenas_pallas::instrument::AssetClass::Crypto => "crypto",
+            athenas_pallas::instrument::AssetClass::Option => "option",
+            athenas_pallas::instrument::AssetClass::Perpetual => "perpetual",
+            athenas_pallas::instrument::AssetClass::Bond => "bond",
+            athenas_pallas::instrument::AssetClass::Hybrid => "hybrid",
         }
         .into(),
     );

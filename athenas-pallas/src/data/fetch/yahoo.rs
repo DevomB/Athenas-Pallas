@@ -26,9 +26,7 @@ pub async fn fetch_chart(
     interval: &str,
     range: &str,
 ) -> Result<Vec<YahooBar>> {
-    let url = format!(
-        "{CHART_URL}/{symbol}?interval={interval}&range={range}"
-    );
+    let url = format!("{CHART_URL}/{symbol}?interval={interval}&range={range}");
     let resp = client
         .get(&url)
         .header("User-Agent", "pallas-fetch/1.0")
@@ -82,6 +80,11 @@ pub fn parse_chart_json(body: &serde_json::Value) -> Result<Vec<YahooBar>> {
         .and_then(|v| v.as_array())
         .map(|a| a.as_slice())
         .unwrap_or(empty);
+    let adjcloses = result
+        .pointer("/indicators/adjclose/0/adjclose")
+        .and_then(|v| v.as_array())
+        .map(|a| a.as_slice())
+        .unwrap_or(empty);
 
     let mut bars = Vec::with_capacity(timestamps.len());
     for (i, ts) in timestamps.iter().enumerate() {
@@ -99,6 +102,7 @@ pub fn parse_chart_json(body: &serde_json::Value) -> Result<Vec<YahooBar>> {
             high: json_f64(highs.get(i))?.unwrap_or(Decimal::ZERO),
             low: json_f64(lows.get(i))?.unwrap_or(Decimal::ZERO),
             close: close.unwrap(),
+            adj_close: json_f64(adjcloses.get(i))?,
             volume: json_f64(volumes.get(i))?.unwrap_or(Decimal::ZERO),
         });
     }

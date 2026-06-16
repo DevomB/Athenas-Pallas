@@ -23,6 +23,8 @@ struct YahooRow {
     low: Decimal,
     #[serde(rename = "Close")]
     close: Decimal,
+    #[serde(rename = "Adj Close", default)]
+    adj_close: Option<Decimal>,
     #[serde(rename = "Volume")]
     volume: Decimal,
 }
@@ -41,7 +43,8 @@ impl YahooCsvSource {
         let mut rdr = csv::Reader::from_reader(buf.as_bytes());
         let mut rows = Vec::new();
         for (i, rec) in rdr.deserialize().enumerate() {
-            let row: YahooRow = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let row: YahooRow =
+                rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             parse_ts_required_err(&row.date, &format!("row {}", i + 2))
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             rows.push(row);
@@ -60,19 +63,39 @@ impl YahooCsvSource {
     }
 }
 
+impl YahooRow {
+    fn effective_close(&self) -> Decimal {
+        self.adj_close.unwrap_or(self.close)
+    }
+}
+
 impl HistoricalSource for YahooCsvSource {
     fn next_event(&mut self) -> Option<Event> {
         let row = self.rows.get(self.idx)?;
         self.idx += 1;
         let ts = parse_ts(&row.date).expect("timestamp validated at csv load");
+        let close = row.effective_close();
         Some(Event::Market(MarketEvent::Bar {
             instrument: self.instrument.clone(),
             ts,
             open: row.open,
             high: row.high,
             low: row.low,
-            close: row.close,
+            close,
             volume: row.volume,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefers_adj_close_when_present() {
+        let csv = "Date,Open,High,Low,Close,Adj Close,Volume\n2024-01-02,10,11,9,10,9.5,100\n";
+        let mut rdr = csv::Reader::from_reader(csv.as_bytes());
+        let row: YahooRow = rdr.deserialize().next().unwrap().unwrap();
+        assert_eq!(row.effective_close(), Decimal::new(95, 1));
     }
 }

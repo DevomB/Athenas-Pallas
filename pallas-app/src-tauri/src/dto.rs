@@ -122,6 +122,7 @@ impl ConfigDto {
             output_path: self.output_path.as_deref().map(PathBuf::from),
             verbose: false,
             on_progress: None,
+            ..Default::default()
         })
     }
 }
@@ -158,6 +159,10 @@ fn parse_asset_class(s: &str) -> AssetClass {
         "equity" => AssetClass::Equity,
         "forex" | "fx" => AssetClass::Forex,
         "future" | "futures" => AssetClass::Future,
+        "option" => AssetClass::Option,
+        "perpetual" | "perp" => AssetClass::Perpetual,
+        "bond" => AssetClass::Bond,
+        "hybrid" => AssetClass::Hybrid,
         _ => AssetClass::Crypto,
     }
 }
@@ -178,6 +183,10 @@ fn format_asset_class(c: AssetClass) -> String {
         AssetClass::Forex => "forex".into(),
         AssetClass::Future => "future".into(),
         AssetClass::Crypto => "crypto".into(),
+        AssetClass::Option => "option".into(),
+        AssetClass::Perpetual => "perpetual".into(),
+        AssetClass::Bond => "bond".into(),
+        AssetClass::Hybrid => "hybrid".into(),
     }
 }
 
@@ -198,9 +207,6 @@ fn decimal_to_u64(d: Decimal) -> u64 {
 fn parse_decimal_opt(s: Option<&str>) -> Result<Option<Decimal>, String> {
     match s {
         None => Ok(None),
-        Some(v) => v
-            .parse::<Decimal>()
-            .map(Some)
-            .map_err(|e| e.to_string()),
+        Some(v) => v.parse::<Decimal>().map(Some).map_err(|e| e.to_string()),
     }
 }

@@ -131,9 +131,7 @@ pub(crate) fn spawn_timer_tasks(handle: EngineHandle, schedules: Vec<TimerSchedu
             loop {
                 interval.tick().await;
                 let ts = OffsetDateTime::now_utc();
-                let _ = h
-                    .send(Event::Timer(TimerEvent { ts, id: s.id }))
-                    .await;
+                let _ = h.send(Event::Timer(TimerEvent { ts, id: s.id })).await;
             }
         });
     }
@@ -506,6 +504,7 @@ fn close_position_with_flatten_source_sync<E: SyncExecutionGateway>(
         },
         order_type: OrderType::Market,
         price: None,
+        stop_price: None,
         qty: pos.abs(),
         client_order_id: None,
         source: OrderIntentSource::Flatten,
@@ -533,6 +532,8 @@ fn dispatch_intent_sync<E: SyncExecutionGateway>(
     match intent.order_type {
         OrderType::Limit => exec.place_limit(state, intent),
         OrderType::Market => exec.place_market(state, intent),
+        OrderType::StopMarket => exec.place_stop_market(state, intent),
+        OrderType::StopLimit => exec.place_stop_limit(state, intent),
     }
 }
 
@@ -564,12 +565,7 @@ where
         Event::Control(c) => {
             apply_control(state, exec, risk, c).await?;
             if let Some(tx) = audit {
-                audit::try_emit(
-                    tx,
-                    EngineAudit::ControlApplied {
-                        control: c.into(),
-                    },
-                );
+                audit::try_emit(tx, EngineAudit::ControlApplied { control: c.into() });
             }
         }
         Event::Timer(_) => {}
@@ -602,10 +598,7 @@ where
     }
 
     let snap = state.snapshot();
-    let ctx = StrategyContext {
-        now,
-        state: &snap,
-    };
+    let ctx = StrategyContext { now, state: &snap };
     let mut intents = Vec::new();
     strategy.on_event(&ctx, &ev, &mut intents);
 
@@ -726,6 +719,7 @@ async fn close_position_with_flatten_source<E: ExecutionGateway>(
         },
         order_type: OrderType::Market,
         price: None,
+        stop_price: None,
         qty: pos.abs(),
         client_order_id: None,
         source: OrderIntentSource::Flatten,
@@ -758,10 +752,7 @@ async fn cancel_open_orders_for_instrument<E: ExecutionGateway>(
         .collect();
     for oid in ids {
         let snap = state.snapshot();
-        let evs = exec
-            .cancel(&snap, oid)
-            .await
-            .map_err(|e| e.to_string())?;
+        let evs = exec.cancel(&snap, oid).await.map_err(|e| e.to_string())?;
         for a in evs {
             state.apply_account(&a);
         }
@@ -825,6 +816,7 @@ async fn handle_engine_command<E: ExecutionGateway>(
                 },
                 order_type: OrderType::Market,
                 price: None,
+                stop_price: None,
                 qty: pos.abs(),
                 client_order_id: None,
                 source: OrderIntentSource::Flatten,
@@ -857,6 +849,8 @@ async fn dispatch_intent<E: ExecutionGateway>(
     match intent.order_type {
         OrderType::Limit => exec.place_limit(state, intent).await,
         OrderType::Market => exec.place_market(state, intent).await,
+        OrderType::StopMarket => exec.place_stop_market(state, intent).await,
+        OrderType::StopLimit => exec.place_stop_limit(state, intent).await,
     }
 }
 
@@ -870,10 +864,7 @@ mod tests {
     #[tokio::test]
     async fn timer_schedule_emits_id() {
         let (tx, mut rx) = mpsc::channel(16);
-        let handle = EngineHandle {
-            tx,
-            cmd_tx: None,
-        };
+        let handle = EngineHandle { tx, cmd_tx: None };
         spawn_timer_tasks(
             handle,
             vec![TimerSchedule {

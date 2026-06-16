@@ -16,6 +16,14 @@ pub enum AssetClass {
     Forex,
     /// Dated future.
     Future,
+    /// Listed option.
+    Option,
+    /// Perpetual swap.
+    Perpetual,
+    /// Fixed-income bond.
+    Bond,
+    /// Multi-leg or mixed structure.
+    Hybrid,
 }
 
 /// Static metadata for an instrument.
@@ -35,11 +43,35 @@ pub struct InstrumentMeta {
     pub tick_size: Option<rust_decimal::Decimal>,
     /// Contract month (e.g. `2025-03`).
     pub expiry: Option<String>,
+    /// Initial margin as fraction of notional (e.g. `0.1` = 10%).
+    pub margin_initial_rate: Option<rust_decimal::Decimal>,
+    /// Bond face / par value in quote currency.
+    pub face_value: Option<rust_decimal::Decimal>,
+    /// Annual coupon rate as decimal (e.g. `0.05` = 5%).
+    pub coupon_rate: Option<rust_decimal::Decimal>,
+    /// Coupon payments per calendar year.
+    pub coupon_payments_per_year: Option<u32>,
+    /// Bond maturity date string.
+    pub maturity: Option<String>,
 }
 
+type EmptyExtensions = (
+    Option<rust_decimal::Decimal>,
+    Option<rust_decimal::Decimal>,
+    Option<rust_decimal::Decimal>,
+    Option<u32>,
+    Option<String>,
+);
+
 impl InstrumentMeta {
+    fn empty_extensions() -> EmptyExtensions {
+        (None, None, None, None, None)
+    }
+
     /// Crypto-style spot pair.
     pub fn spot(base: impl Into<Asset>, quote: impl Into<Asset>) -> Self {
+        let (margin_initial_rate, face_value, coupon_rate, coupon_payments_per_year, maturity) =
+            Self::empty_extensions();
         Self {
             base: base.into(),
             quote: quote.into(),
@@ -48,6 +80,11 @@ impl InstrumentMeta {
             contract_multiplier: None,
             tick_size: None,
             expiry: None,
+            margin_initial_rate,
+            face_value,
+            coupon_rate,
+            coupon_payments_per_year,
+            maturity,
         }
     }
 
@@ -60,6 +97,8 @@ impl InstrumentMeta {
         lot_size: Option<rust_decimal::Decimal>,
         expiry: Option<String>,
     ) -> Self {
+        let (margin_initial_rate, face_value, coupon_rate, coupon_payments_per_year, maturity) =
+            Self::empty_extensions();
         Self {
             base: base.into(),
             quote: quote.into(),
@@ -68,12 +107,97 @@ impl InstrumentMeta {
             contract_multiplier: Some(contract_multiplier),
             tick_size: Some(tick_size),
             expiry,
+            margin_initial_rate,
+            face_value,
+            coupon_rate,
+            coupon_payments_per_year,
+            maturity,
+        }
+    }
+
+    /// Perpetual swap (qty = contracts or base units).
+    pub fn perpetual(
+        base: impl Into<Asset>,
+        quote: impl Into<Asset>,
+        contract_multiplier: Option<rust_decimal::Decimal>,
+        margin_initial_rate: Option<rust_decimal::Decimal>,
+    ) -> Self {
+        let (_, face_value, coupon_rate, coupon_payments_per_year, maturity) =
+            Self::empty_extensions();
+        Self {
+            base: base.into(),
+            quote: quote.into(),
+            asset_class: AssetClass::Perpetual,
+            lot_size: None,
+            contract_multiplier,
+            tick_size: None,
+            expiry: None,
+            margin_initial_rate,
+            face_value,
+            coupon_rate,
+            coupon_payments_per_year,
+            maturity,
+        }
+    }
+
+    /// Fixed-income bond.
+    pub fn bond(
+        base: impl Into<Asset>,
+        quote: impl Into<Asset>,
+        face_value: rust_decimal::Decimal,
+        coupon_rate: rust_decimal::Decimal,
+        coupon_payments_per_year: u32,
+        maturity: Option<String>,
+    ) -> Self {
+        let (margin_initial_rate, _, _, _, _) = Self::empty_extensions();
+        Self {
+            base: base.into(),
+            quote: quote.into(),
+            asset_class: AssetClass::Bond,
+            lot_size: None,
+            contract_multiplier: None,
+            tick_size: None,
+            expiry: None,
+            margin_initial_rate,
+            face_value: Some(face_value),
+            coupon_rate: Some(coupon_rate),
+            coupon_payments_per_year: Some(coupon_payments_per_year),
+            maturity,
+        }
+    }
+
+    /// Listed option contract metadata. `strike` is stored in `face_value` for exercise math.
+    pub fn option_meta(
+        base: impl Into<Asset>,
+        quote: impl Into<Asset>,
+        contract_multiplier: rust_decimal::Decimal,
+        tick_size: rust_decimal::Decimal,
+        margin_initial_rate: Option<rust_decimal::Decimal>,
+        expiry: Option<String>,
+        strike: rust_decimal::Decimal,
+    ) -> Self {
+        let (_, _, coupon_rate, coupon_payments_per_year, maturity) = Self::empty_extensions();
+        Self {
+            base: base.into(),
+            quote: quote.into(),
+            asset_class: AssetClass::Option,
+            lot_size: None,
+            contract_multiplier: Some(contract_multiplier),
+            tick_size: Some(tick_size),
+            expiry,
+            margin_initial_rate,
+            face_value: Some(strike),
+            coupon_rate,
+            coupon_payments_per_year,
+            maturity,
         }
     }
 }
 
 /// Legacy instrument key for engine state vectors.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct LegacyInstrumentId {
     /// Exchange.
     pub exchange: String,
@@ -119,11 +243,7 @@ impl InstrumentRegistry {
             ids.push(id);
             metas.push(meta);
         }
-        Self {
-            ids,
-            metas,
-            by_id,
-        }
+        Self { ids, metas, by_id }
     }
 
     /// Count.

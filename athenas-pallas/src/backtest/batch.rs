@@ -82,7 +82,9 @@ where
             let mut curve: Vec<EquityPoint> = Vec::new();
             for ev in sc.events {
                 let ts = equity_ts(&ev);
-                if let Err(e) = dispatch_event(&mut state, &mut strat, &risk, exec.as_ref(), ev).await {
+                if let Err(e) =
+                    dispatch_event(&mut state, &mut strat, &risk, exec.as_ref(), ev).await
+                {
                     tracing::warn!(target: "athenas_pallas::batch", "scenario {}: {e}", sc.name);
                 }
                 if let Some(eq) = state.mark_to_market_equity(&eq_inst) {
@@ -196,8 +198,8 @@ mod tests {
     use super::*;
     use crate::events::OrderIntent;
     use crate::execution::{PaperConfig, SimGateway};
-    use crate::risk::PauseCheck;
     use crate::instrument::InstrumentRegistry;
+    use crate::risk::PauseCheck;
     use crate::state::InstrumentMeta;
     use crate::strategy::{Strategy, StrategyContext};
     use crate::types::Asset;
@@ -207,7 +209,13 @@ mod tests {
     struct Noop;
 
     impl Strategy for Noop {
-        fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event, _: &mut Vec<OrderIntent>) {}
+        fn on_event(
+            &mut self,
+            _ctx: &StrategyContext<'_>,
+            _event: &Event,
+            _: &mut Vec<OrderIntent>,
+        ) {
+        }
     }
 
     fn mk_state(inst: &InstrumentId) -> GlobalState {
@@ -256,16 +264,8 @@ mod tests {
         let build = Arc::new(move |_: &Scenario| (mk_state(&inst_for_build), Noop));
         let risk = Arc::new(RiskPipeline::new(vec![Box::new(PauseCheck::default())]));
         let exec = Arc::new(SimGateway::new(PaperConfig::default()));
-        let reports = run_scenarios_parallel(
-            scenarios,
-            2,
-            build,
-            risk,
-            exec,
-            inst.clone(),
-            252.0,
-        )
-        .await;
+        let reports =
+            run_scenarios_parallel(scenarios, 2, build, risk, exec, inst.clone(), 252.0).await;
         assert_eq!(reports.len(), 3);
         assert!(reports.iter().all(|r| r.summary.equity.len() >= 1));
     }

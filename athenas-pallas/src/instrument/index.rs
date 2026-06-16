@@ -5,6 +5,7 @@ use crate::instrument::config::InstrumentConfig;
 use crate::instrument::kind::{InstrumentId, InstrumentKind, Underlying};
 use crate::instrument::registry::{InstrumentMeta, LegacyInstrumentId};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 /// Row index into per-instrument vectors.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -43,12 +44,12 @@ impl IndexedInstruments {
                 ExchangeId::new(cfg.exchange.clone()),
                 Symbol::new(cfg.name_exchange.clone()),
                 underlying.clone(),
-                kind,
+                kind.clone(),
             );
-            let meta = InstrumentMeta::spot(underlying.base.clone(), underlying.quote.clone());
+            let meta = meta_from_kind(&kind, &underlying, &cfg);
             ids.push((id, meta));
         }
-        ids.sort_by(|(a, _), (b, _)| a.key().cmp(&b.key()));
+        ids.sort_by_key(|(id, _)| id.key());
         let mut instruments = Vec::with_capacity(ids.len());
         let mut by_key = HashMap::with_capacity(ids.len());
         let mut legacy_map = HashMap::new();
@@ -62,7 +63,8 @@ impl IndexedInstruments {
                 meta,
             });
         }
-        let registry = crate::instrument::registry::InstrumentRegistry::from_instruments(legacy_map);
+        let registry =
+            crate::instrument::registry::InstrumentRegistry::from_instruments(legacy_map);
         Self {
             instruments,
             by_key,
@@ -106,10 +108,7 @@ fn parse_kind(kind: &str, cfg: &InstrumentConfig) -> InstrumentKind {
         "perpetual" => InstrumentKind::Perpetual,
         "future" => InstrumentKind::Future {
             contract: crate::instrument::kind::FutureContract {
-                expiry: cfg
-                    .expiry
-                    .clone()
-                    .unwrap_or_else(|| "unknown".into()),
+                expiry: cfg.expiry.clone().unwrap_or_else(|| "unknown".into()),
             },
         },
         "option" => InstrumentKind::Option {
@@ -125,13 +124,49 @@ fn parse_kind(kind: &str, cfg: &InstrumentConfig) -> InstrumentKind {
                     })
                     .unwrap_or(crate::instrument::kind::OptionKind::Call),
                 exercise: crate::instrument::kind::OptionExercise::European,
-                expiry: cfg
-                    .expiry
-                    .clone()
-                    .unwrap_or_else(|| "unknown".into()),
+                expiry: cfg.expiry.clone().unwrap_or_else(|| "unknown".into()),
             },
         },
         _ => InstrumentKind::Spot,
+    }
+}
+
+fn meta_from_kind(
+    kind: &InstrumentKind,
+    underlying: &Underlying,
+    _cfg: &InstrumentConfig,
+) -> InstrumentMeta {
+    use rust_decimal::Decimal;
+    match kind {
+        InstrumentKind::Perpetual => InstrumentMeta::perpetual(
+            underlying.base.clone(),
+            underlying.quote.clone(),
+            None,
+            None,
+        ),
+        InstrumentKind::Future { contract } => InstrumentMeta::future(
+            underlying.base.clone(),
+            underlying.quote.clone(),
+            Decimal::ONE,
+            Decimal::new(25, 2),
+            None,
+            Some(contract.expiry.clone()),
+        ),
+        InstrumentKind::Option { contract } => {
+            let strike = Decimal::from_str(&contract.strike).unwrap_or(Decimal::from(100u64));
+            InstrumentMeta::option_meta(
+                underlying.base.clone(),
+                underlying.quote.clone(),
+                Decimal::ONE,
+                Decimal::new(1, 2),
+                None,
+                Some(contract.expiry.clone()),
+                strike,
+            )
+        }
+        InstrumentKind::Spot => {
+            InstrumentMeta::spot(underlying.base.clone(), underlying.quote.clone())
+        }
     }
 }
 

@@ -11,16 +11,23 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::bar::{default_tick_size, BarSeries, BarSeriesSource};
-use super::config::{parse_base_quote, BacktestConfig, DataFormat};
+use super::config::{
+    instrument_meta_from_config, instrument_meta_from_extra, BacktestConfig, DataFormat,
+};
+use super::interval::{
+    infer_periods_per_year_from_timestamps, periods_per_year_from_interval_for_class,
+};
+use super::lifecycle::apply_bar_lifecycle;
+use super::merge::merge_sources;
+use super::pbar::is_pbar_path;
 use super::sources::{FutureCsvSource, FxCsvSource, YahooCsvSource};
 use super::{CsvBarSource, HistoricalSource};
+use crate::calendar::{is_session_open, SessionFilter};
 use crate::dispatch_replay_sync;
-use crate::events::FillRecord;
-use crate::events::{Event, OrderIntent};
+use crate::events::{Event, FillRecord, MarketEvent, OrderIntent};
 use crate::execution::{PaperConfig, SyncPaperGateway};
-use crate::instrument::{AssetClass, InstrumentMeta};
-use crate::metrics::{summarize, PerformanceSummary, RollingMetrics};
-use crate::risk::BacktestChecks;
+use crate::metrics::{summarize_with_fills_and_rf, PerformanceSummary, RollingMetrics};
+use crate::risk::{BacktestChecks, MaxDailyLossQuote, MaxPositionSize};
 use crate::state::{GlobalState, InstrumentRegistry};
 use crate::strategy::{Strategy, StrategyContext};
 use crate::types::{Asset, EquityPoint, ExchangeId, InstrumentId, OrderType, Side, Symbol};
@@ -47,6 +54,12 @@ pub struct BacktestReport {
     pub fills: Vec<FillRecord>,
     /// Wall-clock runtime in milliseconds.
     pub wall_time_ms: u64,
+    /// Fraction of closed round-trips with positive PnL.
+    pub win_rate: f64,
+    /// Gross profit / gross loss.
+    pub profit_factor: f64,
+    /// Closed round-trip count from fill ledger.
+    pub closed_trades: usize,
 }
 
 /// Built-in buy-on-first-bar strategy when no external script is given.
@@ -78,6 +91,7 @@ impl Strategy for BuyAndHold {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
+            stop_price: None,
             qty: self.qty,
             client_order_id: None,
             source: crate::events::OrderIntentSource::User,
@@ -124,9 +138,17 @@ impl BacktestRunner {
         cancel: Option<Arc<AtomicBool>>,
     ) -> crate::Result<BacktestReport> {
         let started = Instant::now();
+        let session = cfg
+            .session_filter
+            .as_deref()
+            .map(SessionFilter::parse)
+            .unwrap_or_default();
         let meta = instrument_meta_from_config(cfg);
         let mut instruments = HashMap::new();
         instruments.insert(cfg.instrument.clone(), meta.clone());
+        for extra in &cfg.extra_instruments {
+            instruments.insert(extra.instrument.clone(), instrument_meta_from_extra(extra));
+        }
         let mut balances = cfg.balances.clone();
         if balances.is_empty() {
             balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
@@ -135,7 +157,18 @@ impl BacktestRunner {
         let registry = InstrumentRegistry::from_instruments(instruments);
         let mut state = GlobalState::new(registry, balances);
         state.synthetic_half_spread_bps = cfg.half_spread_bps;
-        let checks = BacktestChecks;
+        let mut checks = BacktestChecks::default();
+        if let Some(max_abs) = cfg.max_position_abs {
+            checks = checks.with_max_position(MaxPositionSize {
+                instrument: cfg.instrument.clone(),
+                max_abs,
+            });
+        }
+        if let Some(max_loss) = cfg.max_daily_loss_quote {
+            let quote = meta.quote.clone();
+            state.daily_risk_quote = Some(quote.clone());
+            checks = checks.with_max_daily_loss(MaxDailyLossQuote { quote, max_loss });
+        }
         let paper = PaperConfig {
             fee_bps: cfg.fee_bps,
             market_slippage_bps: cfg.slippage_bps,
@@ -149,23 +182,28 @@ impl BacktestRunner {
             DataFormat::Auto => detect_format(&cfg.data_path)?,
             other => other,
         };
-        let mut ohlcv_series = if matches!(fmt, DataFormat::Ohlcv) {
-            BarSeries::from_csv_path(&cfg.data_path, default_tick_size()).ok()
+        let mut ohlcv_series = if matches!(fmt, DataFormat::Ohlcv) || is_pbar_path(&cfg.data_path) {
+            BarSeries::from_csv_path_or_pbar(&cfg.data_path, default_tick_size()).ok()
         } else {
             None
         };
+        let multi_instrument = cfg.extra_instruments.iter().any(|e| e.data_path.is_some());
+        let periods_per_year = resolve_periods_per_year(cfg, ohlcv_series.as_ref());
         let bar_count = ohlcv_series.as_ref().map_or(0, BarSeries::len);
         let mut equity = Vec::with_capacity(bar_count.max(1));
         let mut metrics = RollingMetrics::new();
         let mut intents = Vec::with_capacity(4);
         let inst_ix = 0usize;
 
-        if strategy.uses_tick_replay() && matches!(fmt, DataFormat::Ohlcv) {
+        if strategy.uses_tick_replay() && matches!(fmt, DataFormat::Ohlcv) && !multi_instrument {
             if let Some(series) = ohlcv_series.take() {
                 let tick = series.tick_size();
                 let mut src = BarSeriesSource::new(series, exchange.clone(), symbol.clone());
                 let mut bar_ix = 0u64;
                 while let Some((bar, ts)) = src.next_bar() {
+                    if !is_session_open(session, ts) {
+                        continue;
+                    }
                     bar_ix += 1;
                     if bar_ix % 64 == 0 {
                         if let Some(ref hook) = cfg.on_progress {
@@ -176,11 +214,13 @@ impl BacktestRunner {
                         }
                     }
                     state.apply_bar(inst_ix, &bar, tick, cfg.half_spread_bps);
+                    state.refresh_daily_risk_anchor(ts);
                     let ev = src.bar_to_event(&bar, ts);
                     dispatch_replay_sync(&mut state, strategy, &checks, &exec, ev, &mut intents)?;
+                    apply_bar_lifecycle(&mut state, ts);
                     if cfg.record_equity_curve {
-                        if let Some(eq) = state.mark_to_market_equity_ix(inst_ix) {
-                            metrics.record(eq, cfg.periods_per_year);
+                        if let Some(eq) = record_equity(&state, multi_instrument, inst_ix) {
+                            metrics.record(eq, periods_per_year);
                             equity.push(EquityPoint {
                                 ts,
                                 equity_quote: eq,
@@ -188,12 +228,18 @@ impl BacktestRunner {
                         }
                     }
                 }
-                let summary = summarize(equity, cfg.periods_per_year);
+                let fills = state.take_fill_log();
+                let summary = summarize_with_fills_and_rf(
+                    equity,
+                    periods_per_year,
+                    &fills,
+                    cfg.risk_free_annual,
+                );
                 let mut report = report_from_summary(
                     summary,
                     state.fill_count,
                     started.elapsed().as_millis() as u64,
-                    state.take_fill_log(),
+                    fills,
                 );
                 if report.max_drawdown == 0.0 {
                     report.max_drawdown = metrics.max_drawdown();
@@ -202,40 +248,87 @@ impl BacktestRunner {
             }
         }
 
-        let mut src = load_source(cfg, exchange, symbol, fmt, ohlcv_series)?;
-        let mut bar_ix = 0u64;
-        while let Some(ev) = src.next_event() {
-            bar_ix += 1;
-            if bar_ix % 64 == 0 {
-                if let Some(ref hook) = cfg.on_progress {
-                    hook(&format!("processed {bar_ix} bars"));
+        if multi_instrument {
+            let mut sources = load_all_sources(cfg, exchange, symbol, fmt, ohlcv_series)?;
+            let merged = merge_sources(&mut sources);
+            let mut bar_ix = 0u64;
+            for ev in merged {
+                let ts = event_ts(&ev);
+                if !is_session_open(session, ts) {
+                    continue;
                 }
-                if cancelled(&cancel) {
-                    return Err(crate::Error::Cancelled);
+                bar_ix += 1;
+                if bar_ix % 64 == 0 {
+                    if let Some(ref hook) = cfg.on_progress {
+                        hook(&format!("processed {bar_ix} bars"));
+                    }
+                    if cancelled(&cancel) {
+                        return Err(crate::Error::Cancelled);
+                    }
+                }
+                if let Event::Market(ref m) = ev {
+                    state.apply_market(m);
+                    state.refresh_daily_risk_anchor(ts);
+                    if matches!(m, MarketEvent::Bar { .. }) {
+                        apply_bar_lifecycle(&mut state, ts);
+                    }
+                }
+                dispatch_replay_sync(&mut state, strategy, &checks, &exec, ev, &mut intents)?;
+                if cfg.record_equity_curve {
+                    if let Some(eq) = record_equity(&state, true, inst_ix) {
+                        metrics.record(eq, periods_per_year);
+                        equity.push(EquityPoint {
+                            ts,
+                            equity_quote: eq,
+                        });
+                    }
                 }
             }
-            let ts = event_ts(&ev);
-            if let Event::Market(ref m) = ev {
-                state.apply_market(m);
-            }
-            dispatch_replay_sync(&mut state, strategy, &checks, &exec, ev, &mut intents)?;
-            if cfg.record_equity_curve {
-                if let Some(eq) = state.mark_to_market_equity_ix(inst_ix) {
-                    metrics.record(eq, cfg.periods_per_year);
-                    equity.push(EquityPoint {
-                        ts,
-                        equity_quote: eq,
-                    });
+        } else {
+            let mut src = load_source(cfg, exchange, symbol, fmt, ohlcv_series)?;
+            let mut bar_ix = 0u64;
+            while let Some(ev) = src.next_event() {
+                let ts = event_ts(&ev);
+                if !is_session_open(session, ts) {
+                    continue;
+                }
+                bar_ix += 1;
+                if bar_ix % 64 == 0 {
+                    if let Some(ref hook) = cfg.on_progress {
+                        hook(&format!("processed {bar_ix} bars"));
+                    }
+                    if cancelled(&cancel) {
+                        return Err(crate::Error::Cancelled);
+                    }
+                }
+                if let Event::Market(ref m) = ev {
+                    state.apply_market(m);
+                    state.refresh_daily_risk_anchor(ts);
+                    if matches!(m, MarketEvent::Bar { .. }) {
+                        apply_bar_lifecycle(&mut state, ts);
+                    }
+                }
+                dispatch_replay_sync(&mut state, strategy, &checks, &exec, ev, &mut intents)?;
+                if cfg.record_equity_curve {
+                    if let Some(eq) = record_equity(&state, false, inst_ix) {
+                        metrics.record(eq, periods_per_year);
+                        equity.push(EquityPoint {
+                            ts,
+                            equity_quote: eq,
+                        });
+                    }
                 }
             }
         }
 
-        let summary = summarize(equity, cfg.periods_per_year);
+        let fills = state.take_fill_log();
+        let summary =
+            summarize_with_fills_and_rf(equity, periods_per_year, &fills, cfg.risk_free_annual);
         let mut report = report_from_summary(
             summary,
             state.fill_count,
             started.elapsed().as_millis() as u64,
-            state.take_fill_log(),
+            fills,
         );
         if report.max_drawdown == 0.0 {
             report.max_drawdown = metrics.max_drawdown();
@@ -248,28 +341,75 @@ fn cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
     cancel.as_ref().is_some_and(|f| f.load(Ordering::Relaxed))
 }
 
-fn instrument_meta_from_config(cfg: &BacktestConfig) -> InstrumentMeta {
-    let (base, quote) = parse_base_quote(&cfg.instrument.symbol, cfg.asset_class);
-    if cfg.asset_class == AssetClass::Future {
-        InstrumentMeta::future(
-            base,
-            quote,
-            cfg.contract_multiplier.unwrap_or(Decimal::ONE),
-            cfg.tick_size.unwrap_or(Decimal::new(25, 2)),
-            cfg.lot_size,
-            cfg.expiry.clone(),
-        )
-    } else {
-        InstrumentMeta {
-            base: Asset::new(base),
-            quote: Asset::new(quote),
-            asset_class: cfg.asset_class,
-            lot_size: cfg.lot_size,
-            contract_multiplier: None,
-            tick_size: cfg.tick_size,
-            expiry: cfg.expiry.clone(),
+fn resolve_periods_per_year(cfg: &BacktestConfig, series: Option<&BarSeries>) -> f64 {
+    if !cfg.auto_periods_per_year {
+        return cfg.periods_per_year;
+    }
+    if let Some(iv) = &cfg.bar_interval {
+        return periods_per_year_from_interval_for_class(iv, cfg.asset_class);
+    }
+    if let Some(series) = series {
+        let mut ts = Vec::new();
+        for i in 0..series.len() {
+            if let Some(bar) = series.get(i) {
+                if let Some(t) = bar.timestamp() {
+                    ts.push(t);
+                }
+            }
+        }
+        if ts.len() >= 2 {
+            return infer_periods_per_year_from_timestamps(&ts, cfg.asset_class);
         }
     }
+    cfg.periods_per_year
+}
+
+fn record_equity(state: &GlobalState, multi: bool, primary_ix: usize) -> Option<Decimal> {
+    if multi {
+        Some(state.portfolio_equity())
+    } else {
+        state.mark_to_market_equity_ix(primary_ix)
+    }
+}
+
+fn load_all_sources(
+    cfg: &BacktestConfig,
+    exchange: ExchangeId,
+    symbol: Symbol,
+    fmt: DataFormat,
+    ohlcv_series: Option<BarSeries>,
+) -> crate::Result<Vec<Box<dyn HistoricalSource>>> {
+    let mut out = vec![load_source(cfg, exchange, symbol, fmt, ohlcv_series)?];
+    for extra in &cfg.extra_instruments {
+        let Some(path) = &extra.data_path else {
+            continue;
+        };
+        let ex = ExchangeId::new(extra.instrument.exchange.as_str());
+        let sym = Symbol::new(extra.instrument.symbol.as_str());
+        let fmt = extra.data_format.unwrap_or(DataFormat::Auto);
+        let fmt = if fmt == DataFormat::Auto {
+            detect_format(path)?
+        } else {
+            fmt
+        };
+        out.push(open_source_path(path, ex, sym, fmt)?);
+    }
+    Ok(out)
+}
+
+fn open_source_path(
+    path: &Path,
+    exchange: ExchangeId,
+    symbol: Symbol,
+    fmt: DataFormat,
+) -> crate::Result<Box<dyn HistoricalSource>> {
+    Ok(match fmt {
+        DataFormat::Ohlcv => Box::new(CsvBarSource::from_path(path, exchange, symbol)?),
+        DataFormat::Yahoo => Box::new(YahooCsvSource::from_path(path, exchange, symbol)?),
+        DataFormat::Fx => Box::new(FxCsvSource::from_path(path, exchange, symbol)?),
+        DataFormat::Future => Box::new(FutureCsvSource::from_path(path, exchange, symbol)?),
+        DataFormat::Auto => unreachable!(),
+    })
 }
 
 fn load_source(
@@ -283,6 +423,10 @@ fn load_source(
     Ok(match fmt {
         DataFormat::Ohlcv => {
             if let Some(series) = ohlcv_series {
+                Box::new(BarSeriesSource::new(series, exchange, symbol))
+            } else if is_pbar_path(path) {
+                let series = BarSeries::from_csv_path_or_pbar(path, default_tick_size())
+                    .map_err(crate::error::Error::Io)?;
                 Box::new(BarSeriesSource::new(series, exchange, symbol))
             } else {
                 Box::new(CsvBarSource::from_path(path, exchange, symbol)?)
@@ -341,6 +485,9 @@ fn report_from_summary(
         equity_curve: s.equity,
         fills,
         wall_time_ms,
+        win_rate: s.win_rate,
+        profit_factor: s.profit_factor,
+        closed_trades: s.closed_trades,
     }
 }
 

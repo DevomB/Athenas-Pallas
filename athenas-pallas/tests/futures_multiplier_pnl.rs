@@ -50,6 +50,7 @@ fn futures_pnl_scales_by_multiplier() {
 
     let spot_pnl: Decimal = spot.pnl.parse().unwrap();
     let fut_pnl: Decimal = fut.pnl.parse().unwrap();
+    eprintln!("spot_pnl={spot_pnl} fut_pnl={fut_pnl}");
     assert!(fut_pnl.abs() > spot_pnl.abs() * Decimal::from(10u64));
 }
 
@@ -59,7 +60,14 @@ fn mark_equity_uses_multiplier() {
     let mut map = HashMap::new();
     map.insert(
         i.clone(),
-        InstrumentMeta::future("ES", "USD", Decimal::from(50u64), Decimal::new(25, 2), Some(Decimal::ONE), None),
+        InstrumentMeta::future(
+            "ES",
+            "USD",
+            Decimal::from(50u64),
+            Decimal::new(25, 2),
+            Some(Decimal::ONE),
+            None,
+        ),
     );
     let mut bal = HashMap::new();
     bal.insert(Asset("USD".into()), Decimal::from(100_000u64));

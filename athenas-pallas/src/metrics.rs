@@ -1,9 +1,10 @@
 //! Performance metrics from an equity curve.
 
+use crate::events::FillRecord;
 use crate::instrument::InstrumentIndex;
 use crate::state::GlobalState;
-use crate::types::{EquityPoint, InstrumentId, StrategyId};
-use rust_decimal::prelude::ToPrimitive;
+use crate::types::{EquityPoint, InstrumentId, Side, StrategyId};
+use rust_decimal::prelude::{Signed, ToPrimitive};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
@@ -60,6 +61,31 @@ pub struct PerformanceSummary {
     pub returns: Vec<f64>,
     /// Copy of equity series.
     pub equity: Vec<EquityPoint>,
+    /// Fraction of closed round-trips with positive PnL (0 if none).
+    pub win_rate: f64,
+    /// Gross profit / gross loss; `f64::INFINITY` when no losing trades.
+    pub profit_factor: f64,
+    /// Closed round-trip count from fill ledger.
+    pub closed_trades: usize,
+}
+
+/// Round-trip trade statistics derived from an ordered fill blotter.
+#[derive(Clone, Debug, Default)]
+pub struct TradeLedger {
+    /// Closed round trips.
+    pub closed_trades: usize,
+    /// Winning trades.
+    pub wins: usize,
+    /// Losing trades.
+    pub losses: usize,
+    /// `wins / closed_trades`.
+    pub win_rate: f64,
+    /// Sum of wins / sum of losses (absolute).
+    pub profit_factor: f64,
+    /// Total winning PnL.
+    pub gross_profit: Decimal,
+    /// Total losing PnL (positive magnitude).
+    pub gross_loss: Decimal,
 }
 
 /// O(1) rolling drawdown and Welford return stats during replay.
@@ -126,6 +152,26 @@ impl RollingMetrics {
 
 /// Compute summary. `periods_per_year` scales Sharpe/Sortino (e.g. 252 for daily bars).
 pub fn summarize(equity: Vec<EquityPoint>, periods_per_year: f64) -> PerformanceSummary {
+    summarize_with_fills_and_rf(equity, periods_per_year, &[], 0.0)
+}
+
+/// Like [`summarize`] but attaches trade ledger stats from fills.
+pub fn summarize_with_fills(
+    equity: Vec<EquityPoint>,
+    periods_per_year: f64,
+    fills: &[FillRecord],
+) -> PerformanceSummary {
+    summarize_with_fills_and_rf(equity, periods_per_year, fills, 0.0)
+}
+
+/// Like [`summarize_with_fills`] but subtracts `risk_free_annual` from Sharpe/Sortino.
+pub fn summarize_with_fills_and_rf(
+    equity: Vec<EquityPoint>,
+    periods_per_year: f64,
+    fills: &[FillRecord],
+    risk_free_annual: f64,
+) -> PerformanceSummary {
+    let ledger = trade_ledger_from_fills(fills);
     if equity.is_empty() {
         return PerformanceSummary {
             pnl: Decimal::ZERO,
@@ -135,6 +181,9 @@ pub fn summarize(equity: Vec<EquityPoint>, periods_per_year: f64) -> Performance
             sortino: 0.0,
             returns: vec![],
             equity,
+            win_rate: ledger.win_rate,
+            profit_factor: ledger.profit_factor,
+            closed_trades: ledger.closed_trades,
         };
     }
     let pnl = equity[equity.len() - 1].equity_quote - equity[0].equity_quote;
@@ -158,8 +207,13 @@ pub fn summarize(equity: Vec<EquityPoint>, periods_per_year: f64) -> Performance
         .collect();
 
     let max_dd = max_drawdown(&equity);
-    let sharpe = sharpe_ratio(&rets, periods_per_year);
-    let sortino = sortino_ratio(&rets, periods_per_year);
+    let rf_per_period = if periods_per_year > 0.0 {
+        risk_free_annual / periods_per_year
+    } else {
+        0.0
+    };
+    let sharpe = sharpe_ratio_excess(&rets, periods_per_year, rf_per_period);
+    let sortino = sortino_ratio_excess(&rets, periods_per_year, rf_per_period);
 
     PerformanceSummary {
         pnl,
@@ -169,6 +223,96 @@ pub fn summarize(equity: Vec<EquityPoint>, periods_per_year: f64) -> Performance
         sortino,
         returns: rets,
         equity,
+        win_rate: ledger.win_rate,
+        profit_factor: ledger.profit_factor,
+        closed_trades: ledger.closed_trades,
+    }
+}
+
+/// Build round-trip stats from chronological fills (FIFO position tracking).
+pub fn trade_ledger_from_fills(fills: &[FillRecord]) -> TradeLedger {
+    let mut position = Decimal::ZERO;
+    let mut entry_price = Decimal::ZERO;
+    let mut gross_profit = Decimal::ZERO;
+    let mut gross_loss = Decimal::ZERO;
+    let mut wins = 0usize;
+    let mut losses = 0usize;
+    let mut closed = 0usize;
+
+    for fill in fills {
+        let Ok(qty) = fill.qty.parse::<Decimal>() else {
+            continue;
+        };
+        let Ok(price) = fill.price.parse::<Decimal>() else {
+            continue;
+        };
+        let Ok(fee) = fill.fee.parse::<Decimal>() else {
+            continue;
+        };
+        if qty.is_zero() {
+            continue;
+        }
+        let sign = match fill.side {
+            Side::Buy => Decimal::ONE,
+            Side::Sell => -Decimal::ONE,
+        };
+        let delta = sign * qty;
+
+        if position.is_zero() {
+            position = delta;
+            entry_price = price;
+            continue;
+        }
+
+        if position.signum() == delta.signum() {
+            let new_abs = position.abs() + qty;
+            entry_price = (entry_price * position.abs() + price * qty) / new_abs;
+            position += delta;
+            continue;
+        }
+
+        let close_qty = qty.min(position.abs());
+        let pnl_per_unit = (price - entry_price) * position.signum();
+        let trade_pnl = pnl_per_unit * close_qty - fee;
+        closed += 1;
+        if trade_pnl > Decimal::ZERO {
+            wins += 1;
+            gross_profit += trade_pnl;
+        } else if trade_pnl < Decimal::ZERO {
+            losses += 1;
+            gross_loss += trade_pnl.abs();
+        }
+        position += delta;
+        if !position.is_zero() {
+            entry_price = price;
+        } else {
+            entry_price = Decimal::ZERO;
+        }
+    }
+
+    let win_rate = if closed == 0 {
+        0.0
+    } else {
+        wins as f64 / closed as f64
+    };
+    let profit_factor = if gross_loss.is_zero() {
+        if gross_profit.is_zero() {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        gross_profit.to_f64().unwrap_or(0.0) / gross_loss.to_f64().unwrap_or(1.0)
+    };
+
+    TradeLedger {
+        closed_trades: closed,
+        wins,
+        losses,
+        win_rate,
+        profit_factor,
+        gross_profit,
+        gross_loss,
     }
 }
 
@@ -300,8 +444,8 @@ fn downside_std(xs: &[f64]) -> f64 {
     (m2 / (count as f64 - 1.0)).sqrt()
 }
 
-fn sharpe_ratio(rets: &[f64], periods_per_year: f64) -> f64 {
-    let m = mean(rets);
+fn sharpe_ratio_excess(rets: &[f64], periods_per_year: f64, rf_per_period: f64) -> f64 {
+    let m = mean(rets) - rf_per_period;
     let s = std_dev(rets);
     if s < 1e-12 {
         return 0.0;
@@ -309,8 +453,8 @@ fn sharpe_ratio(rets: &[f64], periods_per_year: f64) -> f64 {
     (m / s) * periods_per_year.sqrt()
 }
 
-fn sortino_ratio(rets: &[f64], periods_per_year: f64) -> f64 {
-    let m = mean(rets);
+fn sortino_ratio_excess(rets: &[f64], periods_per_year: f64, rf_per_period: f64) -> f64 {
+    let m = mean(rets) - rf_per_period;
     let ds = downside_std(rets);
     if ds < 1e-12 {
         return 0.0;

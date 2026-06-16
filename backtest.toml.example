@@ -19,3 +19,11 @@ output = "target/backtest_report.json"
 [[balances]]
 asset = "USDT"
 amount = "10000"
+
+# Optional extra symbols for merged multi-instrument replay:
+# [[instruments]]
+# exchange = "yahoo"
+# symbol = "AAPL"
+# asset_class = "equity"
+# data = "data/AAPL_live.csv"
+# data_format = "yahoo"

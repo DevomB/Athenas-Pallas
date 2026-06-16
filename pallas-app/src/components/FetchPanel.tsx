@@ -44,8 +44,39 @@ export function FetchPanel({ config, onConfigChange, onNavigate }: Props) {
   const intervalOptions = useMemo(
     () =>
       provider === "binance"
-        ? ["1m", "5m", "15m", "1h", "4h", "1d"]
-        : ["1d", "1wk", "1mo"],
+        ? [
+            "1s",
+            "1m",
+            "3m",
+            "5m",
+            "15m",
+            "30m",
+            "1h",
+            "2h",
+            "4h",
+            "6h",
+            "8h",
+            "12h",
+            "1d",
+            "3d",
+            "1w",
+            "1M",
+          ]
+        : [
+            "1m",
+            "2m",
+            "5m",
+            "15m",
+            "30m",
+            "60m",
+            "90m",
+            "1h",
+            "1d",
+            "5d",
+            "1wk",
+            "1mo",
+            "3mo",
+          ],
     [provider],
   );
 
@@ -137,16 +168,17 @@ export function FetchPanel({ config, onConfigChange, onNavigate }: Props) {
           </label>
           <label>
             Interval
-            <select
+            <input
+              list="interval-presets"
               value={interval}
               onChange={(e) => setInterval(e.target.value)}
-            >
+              placeholder="e.g. 30m or custom"
+            />
+            <datalist id="interval-presets">
               {intervalOptions.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
+                <option key={value} value={value} />
               ))}
-            </select>
+            </datalist>
           </label>
           <label>
             Lookback

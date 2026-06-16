@@ -49,14 +49,16 @@ impl FutureCsvSource {
         let mut rows = Vec::new();
         if yahoo {
             for (i, rec) in rdr.deserialize::<YahooRow>().enumerate() {
-                let row = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let row =
+                    rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 parse_ts_required_err(&row.date, &format!("row {}", i + 2))
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 rows.push(FutureRow::Yahoo(row));
             }
         } else {
             for (i, rec) in rdr.deserialize::<OhlcvRow>().enumerate() {
-                let row = rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let row =
+                    rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 parse_ts_required_err(&row.ts, &format!("row {}", i + 2))
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 rows.push(FutureRow::Ohlcv(row));
@@ -125,12 +127,8 @@ mod tests {
             "Date,Open,High,Low,Close,Volume\n2024-01-02,4800,4810,4790,4805,100000"
         )
         .unwrap();
-        let mut src = FutureCsvSource::from_path(
-            &path,
-            ExchangeId::new("cme"),
-            Symbol::new("ES"),
-        )
-        .unwrap();
+        let mut src =
+            FutureCsvSource::from_path(&path, ExchangeId::new("cme"), Symbol::new("ES")).unwrap();
         assert!(src.next_event().is_some());
         assert!(src.next_event().is_none());
     }

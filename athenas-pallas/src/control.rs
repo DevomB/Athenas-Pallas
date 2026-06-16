@@ -72,11 +72,7 @@ async fn pause_handler(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Statu
     if !authorize(&headers, &ctx.secret) {
         return StatusCode::UNAUTHORIZED;
     }
-    match ctx
-        .handle
-        .send(Event::Control(ControlEvent::Pause))
-        .await
-    {
+    match ctx.handle.send(Event::Control(ControlEvent::Pause)).await {
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
@@ -86,11 +82,7 @@ async fn resume_handler(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Stat
     if !authorize(&headers, &ctx.secret) {
         return StatusCode::UNAUTHORIZED;
     }
-    match ctx
-        .handle
-        .send(Event::Control(ControlEvent::Resume))
-        .await
-    {
+    match ctx.handle.send(Event::Control(ControlEvent::Resume)).await {
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }
@@ -142,11 +134,7 @@ async fn flatten_handler(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Sta
     if !authorize(&headers, &ctx.secret) {
         return StatusCode::UNAUTHORIZED;
     }
-    match ctx
-        .handle
-        .send(Event::Control(ControlEvent::Flatten))
-        .await
-    {
+    match ctx.handle.send(Event::Control(ControlEvent::Flatten)).await {
         Ok(()) => StatusCode::NO_CONTENT,
         Err(_) => StatusCode::SERVICE_UNAVAILABLE,
     }

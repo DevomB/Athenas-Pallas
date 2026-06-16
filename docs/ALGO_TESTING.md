@@ -41,6 +41,27 @@ cp backtest.toml.example backtest.toml
 cargo run --release -p athenas-pallas --bin pallas-backtest -- --config backtest.toml
 ```
 
+## 6. Merge, sweep, stress
+
+```bash
+# Merge two CSV streams by timestamp
+cargo run -p athenas-pallas --bin pallas-merge -- \
+  --source ohlcv:binance:BTCUSDT:data/BTC.csv \
+  --source yahoo:yahoo:AAPL:data/AAPL.csv \
+  -o data/merged.csv
+
+# Parameter grid from TOML
+cargo run -p athenas-pallas --bin pallas-sweep -- \
+  --config backtest.toml --sweep sweep.toml -o target/sweep.csv
+
+# Large-run throughput smoke test
+cargo run --release -p athenas-pallas --example stress_backtest -- 100000
+```
+
+## 7. JSONL event replay
+
+Record events with `backtest::write_events_jsonl`, then replay via `read_events_jsonl` + `replay_events_serial` for deterministic strategy debugging without reloading CSV.
+
 ## 5. Golden tests (CI)
 
 ```bash

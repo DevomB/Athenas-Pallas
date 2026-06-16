@@ -50,6 +50,18 @@ sha2 = { version = "0.10", optional = true }
 hex = { version = "0.4", optional = true }
 
 [[bin]]
+name = "pallas-resample"
+path = "src/bin/pallas-resample.rs"
+
+[[bin]]
+name = "pallas-merge"
+path = "src/bin/pallas-merge.rs"
+
+[[bin]]
+name = "pallas-sweep"
+path = "src/bin/pallas-sweep.rs"
+
+[[bin]]
 name = "pallas-backtest"
 path = "src/bin/pallas-backtest.rs"
 
@@ -57,6 +69,10 @@ path = "src/bin/pallas-backtest.rs"
 name = "pallas-fetch"
 path = "src/bin/pallas-fetch.rs"
 required-features = ["data-fetch"]
+
+[[example]]
+name = "stress_backtest"
+path = "examples/stress_backtest.rs"
 
 [[example]]
 name = "backtest_csv"

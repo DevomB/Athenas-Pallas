@@ -27,6 +27,7 @@ impl Strategy for OneShot {
                     side: Side::Buy,
                     order_type: OrderType::Market,
                     price: None,
+                    stop_price: None,
                     qty: Decimal::new(1, 3),
                     client_order_id: None,
                     source: OrderIntentSource::User,

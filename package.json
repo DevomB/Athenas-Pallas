@@ -1,7 +1,7 @@
 {
   "name": "athenas-pallas",
   "private": true,
-  "packageManager": "pnpm@10.12.1",
+  "packageManager": "pnpm@11.6.0",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "start": "pnpm dev",
