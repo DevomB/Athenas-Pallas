@@ -1,26 +1,35 @@
 import type { ConfigDto } from "../types";
 
 export function validateConfig(config: ConfigDto): string | null {
+  const fields = validateConfigFields(config);
+  const first = Object.values(fields)[0];
+  return first ?? null;
+}
+
+export function validateConfigFields(
+  config: ConfigDto,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
   if (!config.data_path.trim()) {
-    return "Data path is required";
+    errors.data_path = "Data path is required";
   }
   if (!config.symbol.trim()) {
-    return "Symbol is required";
+    errors.symbol = "Symbol is required";
   }
   if (!config.exchange.trim()) {
-    return "Exchange is required";
+    errors.exchange = "Exchange is required";
   }
   if (!Number.isFinite(config.fee_bps) || config.fee_bps < 0) {
-    return "Fee bps must be a non-negative number";
+    errors.fee_bps = "Fee bps must be a non-negative number";
   }
   if (!Number.isFinite(config.slippage_bps) || config.slippage_bps < 0) {
-    return "Slippage bps must be a non-negative number";
+    errors.slippage_bps = "Slippage bps must be a non-negative number";
   }
   if (!Number.isFinite(config.half_spread_bps) || config.half_spread_bps < 0) {
-    return "Half spread bps must be a non-negative number";
+    errors.half_spread_bps = "Half spread bps must be a non-negative number";
   }
   if (!Number.isFinite(config.periods_per_year) || config.periods_per_year <= 0) {
-    return "Periods per year must be a positive number";
+    errors.periods_per_year = "Periods per year must be a positive number";
   }
-  return null;
+  return errors;
 }

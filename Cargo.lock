@@ -2649,6 +2649,7 @@ name = "pallas-app"
 version = "2.0.0"
 dependencies = [
  "athenas-pallas",
+ "csv",
  "reqwest 0.12.28",
  "rust_decimal",
  "serde",

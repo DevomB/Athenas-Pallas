@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "Pallas Backtest",
-        "width": 1100,
-        "height": 780,
+        "title": "Pallas",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 700,
         "resizable": true
       }
     ],
