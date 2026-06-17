@@ -29,7 +29,7 @@ jobs:
       - name: python SMA golden
         run: cargo test -p athenas-pallas --test external_strategy_golden -- --ignored
       - name: python SDK tests
-        run: python trading/sdk/test_pallas_strategy.py
+        run: python trading/_sdk/python/test_pallas_strategy.py
       - name: build examples
         run: cargo build -p athenas-pallas --examples
 
