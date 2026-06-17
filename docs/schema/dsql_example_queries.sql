@@ -1,5 +1,5 @@
--- Example readonly_query patterns for the pallas-app / CLI once runs are persisted.
--- Always include tenant_id - DSQL MCP has no parameterized queries; validate IDs in app code.
+-- Example readonly_query patterns for CLI/reporting once runs are persisted.
+-- Always include tenant_id - DSQL MCP has no parameterized queries; validate IDs in caller code.
 
 -- Top strategies by Sharpe on BTCUSDT (last 30 days)
 SELECT
@@ -23,7 +23,7 @@ FROM backtest_runs
 WHERE tenant_id = 'default'
   AND run_id IN ('run-abc', 'run-def');
 
--- Equity curve for charting (matches BacktestReportDto downsample in pallas-app)
+-- Equity curve for reporting/charting.
 SELECT ts_unix_ms, equity_quote
 FROM backtest_equity_points
 WHERE tenant_id = 'default'

@@ -5,8 +5,8 @@ Event-driven trading engine with one core loop for backtest, paper, and live mod
 ```mermaid
 flowchart LR
   subgraph ingest
-    CSV[CSV / pbar / fetch]
-    WS[Binance WS]
+    CSV[CSV / pbar / Alpha Vantage fetch]
+    WS[Optional broker WS]
   end
   subgraph engine
     EV[Event queue]
@@ -39,7 +39,7 @@ flowchart LR
 
 ## Backtest Flow
 
-1. Load `BacktestConfig` from TOML, CLI, or the Tauri DTO.
+1. Load `BacktestConfig` from TOML or CLI flags.
 2. Build `InstrumentRegistry` from the primary symbol plus `[[instruments]]` extras.
 3. Resolve strategy names/paths through `backtest::strategy_resolver`.
 4. Load OHLCV from `.pbar` or streamed CSV.
@@ -70,7 +70,7 @@ The resolver detects CMake C++ directories, Python directories/files, and compil
 | Binary | Purpose |
 |--------|---------|
 | `pallas-backtest` | Run backtest from TOML/flags |
-| `pallas-fetch` | Download Binance/Yahoo OHLCV |
+| `pallas-fetch` | Download Alpha Vantage daily OHLCV |
 | `pallas-resample` | Offline bar aggregation |
 | `pallas-merge` | K-way merge CSV streams by timestamp |
 | `pallas-sweep` | Grid search over TOML parameters |

@@ -42,7 +42,8 @@ impl ExternalStrategy {
 
     /// Spawn a compiled strategy binary.
     pub fn spawn_binary(path: &std::path::Path) -> Result<Self> {
-        let child = Command::new(path)
+        let binary = std::fs::canonicalize(path).map_err(Error::Io)?;
+        let child = Command::new(&binary)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

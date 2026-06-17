@@ -1,7 +1,6 @@
-//! Library API for loading config and running backtests (CLI and GUI).
+//! Library API for loading config and running backtests.
 
 use rust_decimal::Decimal;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -13,43 +12,7 @@ use super::runner::{BacktestReport, BacktestRunner};
 use super::strategy_resolver::{resolve_strategy_path, ResolvedStrategy};
 use crate::instrument::AssetClass;
 use crate::strategy::ExternalStrategy;
-use crate::types::{Asset, EquityPoint};
-
-/// JSON-friendly report for GUI / IPC (f64 metrics, no Decimal string parsing in JS).
-#[derive(Clone, Debug, Serialize)]
-pub struct EquityPointDto {
-    /// Unix timestamp in milliseconds.
-    pub ts_unix_ms: i64,
-    /// Mark-to-market equity in quote currency.
-    pub equity_f64: f64,
-}
-
-/// Downsampled, chart-ready backtest output.
-#[derive(Clone, Debug, Serialize)]
-pub struct BacktestReportDto {
-    /// Net PnL in quote currency.
-    pub pnl: f64,
-    /// PnL as fraction of starting equity.
-    pub pnl_pct: f64,
-    /// Peak-to-trough drawdown (0..1).
-    pub max_drawdown: f64,
-    /// Annualized Sharpe ratio.
-    pub sharpe: f64,
-    /// Annualized Sortino ratio.
-    pub sortino: f64,
-    /// Number of fills.
-    pub fill_count: u64,
-    /// Wall-clock runtime in milliseconds.
-    pub wall_time_ms: u64,
-    /// Downsampled equity curve for charting.
-    pub equity_curve: Vec<EquityPointDto>,
-    /// Fraction of closed round-trips with positive PnL.
-    pub win_rate: f64,
-    /// Gross profit / gross loss.
-    pub profit_factor: f64,
-    /// Closed round-trip count.
-    pub closed_trades: usize,
-}
+use crate::types::Asset;
 
 impl BacktestConfig {
     /// Load settings from a TOML file into a new config (defaults for omitted fields).
@@ -114,71 +77,6 @@ pub fn run_external_backtest_with_cancel(
     Ok(report)
 }
 
-/// Build chart-ready DTO from a full report (equity downsampled).
-pub fn report_to_dto(report: &BacktestReport, max_chart_points: usize) -> BacktestReportDto {
-    BacktestReportDto {
-        pnl: decimal_str_to_f64(&report.pnl),
-        pnl_pct: decimal_str_to_f64(&report.pnl_pct),
-        max_drawdown: report.max_drawdown,
-        sharpe: report.sharpe,
-        sortino: report.sortino,
-        fill_count: report.fill_count,
-        wall_time_ms: report.wall_time_ms,
-        equity_curve: downsample_equity(&report.equity_curve, max_chart_points),
-        win_rate: report.win_rate,
-        profit_factor: report.profit_factor,
-        closed_trades: report.closed_trades,
-    }
-}
-
-/// Reduce equity curve to at most `max_points`, preserving first and last samples.
-pub fn downsample_equity(curve: &[EquityPoint], max_points: usize) -> Vec<EquityPointDto> {
-    if curve.is_empty() {
-        return Vec::new();
-    }
-    if max_points == 0 {
-        return Vec::new();
-    }
-    if curve.len() <= max_points {
-        return curve.iter().map(equity_point_to_dto).collect();
-    }
-    let last_idx = curve.len() - 1;
-    let mut out = Vec::with_capacity(max_points);
-    out.push(equity_point_to_dto(&curve[0]));
-    if max_points == 1 {
-        return out;
-    }
-    if max_points == 2 {
-        out.push(equity_point_to_dto(&curve[last_idx]));
-        return out;
-    }
-    let inner_slots = max_points - 2;
-    let step = (last_idx as f64) / (inner_slots as f64 + 1.0);
-    for i in 1..=inner_slots {
-        let idx = (step * i as f64).round() as usize;
-        let idx = idx.min(last_idx);
-        out.push(equity_point_to_dto(&curve[idx]));
-    }
-    out.push(equity_point_to_dto(&curve[last_idx]));
-    out
-}
-
-fn equity_point_to_dto(p: &EquityPoint) -> EquityPointDto {
-    EquityPointDto {
-        ts_unix_ms: p.ts.unix_timestamp() * 1000 + (p.ts.nanosecond() / 1_000_000) as i64,
-        equity_f64: decimal_to_f64(p.equity_quote),
-    }
-}
-
-fn decimal_to_f64(d: Decimal) -> f64 {
-    use rust_decimal::prelude::ToPrimitive;
-    d.to_f64().unwrap_or(0.0)
-}
-
-fn decimal_str_to_f64(s: &str) -> f64 {
-    s.parse::<Decimal>().map(decimal_to_f64).unwrap_or(0.0)
-}
-
 fn parse_asset_class(s: &str) -> AssetClass {
     match s.to_lowercase().as_str() {
         "equity" => AssetClass::Equity,
@@ -194,7 +92,7 @@ fn parse_asset_class(s: &str) -> AssetClass {
 
 fn parse_data_format(s: &str) -> DataFormat {
     match s.to_lowercase().as_str() {
-        "ohlcv" => DataFormat::Ohlcv,
+        "ohlcv" | "alpha-vantage" | "alphavantage" => DataFormat::Ohlcv,
         "yahoo" => DataFormat::Yahoo,
         "fx" => DataFormat::Fx,
         "future" | "futures" => DataFormat::Future,
@@ -402,47 +300,6 @@ fn spawn_external_strategy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal::Decimal;
-    use time::macros::datetime;
-
-    #[test]
-    fn dto_roundtrip_json() {
-        let report = BacktestReport {
-            pnl: "100.5".into(),
-            pnl_pct: "0.01".into(),
-            max_drawdown: 0.05,
-            sharpe: 1.2,
-            sortino: 1.5,
-            fill_count: 3,
-            equity_curve: vec![EquityPoint {
-                ts: datetime!(2024-01-01 00:00:00 UTC),
-                equity_quote: Decimal::new(10_000, 0),
-            }],
-            fills: vec![],
-            wall_time_ms: 42,
-            win_rate: 0.0,
-            profit_factor: 0.0,
-            closed_trades: 0,
-        };
-        let dto = report_to_dto(&report, 2000);
-        let json = serde_json::to_string(&dto).unwrap();
-        assert!(json.contains("\"pnl\":100.5"));
-        assert!(json.contains("\"equity_f64\":10000"));
-    }
-
-    #[test]
-    fn downsample_preserves_endpoints() {
-        let curve: Vec<EquityPoint> = (0..100_000)
-            .map(|i| EquityPoint {
-                ts: datetime!(2024-01-01 00:00:00 UTC) + time::Duration::seconds(i),
-                equity_quote: Decimal::from(i),
-            })
-            .collect();
-        let out = downsample_equity(&curve, 2000);
-        assert!(out.len() <= 2000);
-        assert_eq!(out.first().unwrap().equity_f64, 0.0);
-        assert_eq!(out.last().unwrap().equity_f64, 99_999.0);
-    }
 
     #[test]
     fn load_toml_example_fields() {

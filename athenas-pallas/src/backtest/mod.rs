@@ -336,8 +336,8 @@ pub use replay::{read_events_jsonl, replay_events_serial};
 pub use runner::BuyAndHold;
 pub use runner::{BacktestReport, BacktestRunner};
 pub use session::{
-    downsample_equity, report_to_dto, run_backtest, run_backtest_with_cancel,
-    run_external_backtest, run_external_backtest_with_cancel, BacktestReportDto, EquityPointDto,
+    run_backtest, run_backtest_with_cancel, run_external_backtest,
+    run_external_backtest_with_cancel,
 };
 pub use strategy_resolver::{detect_strategy, resolve_strategy_path, ResolvedStrategy};
 

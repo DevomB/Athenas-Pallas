@@ -4,12 +4,11 @@ Event-driven algorithmic trading in Rust: **backtest**, **paper**, and **live** 
 
 - Sync CSV replay hot path (~0.43 microseconds/bar amortized; see [benchmarks](docs/benchmarks.txt))
 - Python and C++ strategies over newline JSON ([protocol](trading/protocol.md))
-- `pallas-fetch` for Yahoo / Binance history
-- Desktop app (`pallas-app`) for fetch, configure, backtest, and chart workflows
+- `pallas-fetch` for Alpha Vantage daily history
 
 ## Install
 
-**Requirements:** Rust 1.85+, Python 3 for Python strategies, optional Node 20+ / pnpm for the desktop app.
+**Requirements:** Rust 1.85+, Python 3 for Python strategies.
 
 ```bash
 git clone https://github.com/DevomB/Athenas-Pallas.git
@@ -28,13 +27,13 @@ cargo test -p athenas-pallas
 Built-in buy-and-hold over the committed BTCUSDT fixture:
 
 ```bash
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument binance:BTCUSDT --initial-balance USDT:10000
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument alpha-vantage:BTCUSDT --initial-balance USDT:10000
 ```
 
 Direct strategy-name resolution:
 
 ```bash
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument binance:BTCUSDT --initial-balance USDT:10000 --strategy simple_sma
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument alpha-vantage:BTCUSDT --initial-balance USDT:10000 --strategy simple_sma
 ```
 
 Or use the helper scripts:
@@ -75,29 +74,21 @@ Legacy paths such as `trading/strategies/simple_sma/strategy.py` are still resol
 Fetch into `data/` (gitignored local workspace):
 
 ```bash
-cargo run -p athenas-pallas --bin pallas-fetch --features data-fetch -- --provider yahoo --symbol AAPL --interval 1d --days 90 -o data/AAPL_live.csv
+cp .env.example .env
+# Fill ALPHA_VANTAGE_API_KEY in .env, or set it in your shell.
 
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_live.csv --data-format yahoo --instrument nasdaq:AAPL --initial-balance USD:10000
+cargo run -p athenas-pallas --bin pallas-fetch --features data-fetch -- --provider alpha-vantage --asset equity --symbol AAPL --days 90 -o data/AAPL_live.csv
+
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_live.csv --data-format ohlcv --instrument alpha-vantage:AAPL --initial-balance USD:10000
 ```
 
 Copy [`backtest.toml.example`](backtest.toml.example) to `backtest.toml` and point `[backtest].data` at your file.
-
-## Desktop App
-
-```bash
-cd pallas-app
-pnpm install
-pnpm tauri dev
-```
-
-Build installer: `pnpm tauri build` (WebView2 on Windows).
 
 ## Project Layout
 
 | Path | Purpose |
 |------|---------|
 | `athenas-pallas/` | Rust engine, CLI (`pallas-backtest`, `pallas-fetch`) |
-| `pallas-app/` | Tauri desktop UI |
 | `trading/` | Direct Python/C++ strategy folders plus shared SDKs in `_sdk/` |
 | `data/` | Your fetched CSVs (empty in git) |
 | `athenas-pallas/tests/fixtures/` | CI / golden test data only |
@@ -109,13 +100,13 @@ cargo run -p athenas-pallas --example backtest_csv
 cargo run -p athenas-pallas --example paper_binance --features binance,control-server
 ```
 
-Live Binance can trade real funds. Use the `live_binance` example with the `binance-live` feature and read the example source for required environment variables.
+Alpha Vantage is a market-data API, not a broker execution venue. The old Binance execution examples remain optional broker-specific demos only; do not use them unless you intentionally want Binance order routing.
 
 ## Features
 
 | Cargo feature | Enables |
 |---------------|---------|
-| `data-fetch` | `pallas-fetch` (Yahoo / Binance) |
+| `data-fetch` | `pallas-fetch` (Alpha Vantage daily bars) |
 | `binance` | Public WebSocket connector |
 | `binance-live` | Signed REST + user stream |
 | `control-server` | Localhost HTTP control plane |

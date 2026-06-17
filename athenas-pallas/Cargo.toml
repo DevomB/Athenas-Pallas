@@ -9,7 +9,7 @@ repository.workspace = true
 readme = "../README.md"
 documentation = "https://docs.rs/athenas-pallas"
 homepage = "https://github.com/DevomB/Athenas-Pallas"
-keywords = ["trading", "backtest", "binance", "strategy", "algo"]
+keywords = ["trading", "backtest", "alphavantage", "strategy", "algo"]
 categories = ["asynchronous", "network-programming"]
 
 [features]

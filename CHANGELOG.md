@@ -8,7 +8,7 @@
 - Inlined `pallas-instrument` into `athenas-pallas`; removed `pallas-data`, `pallas-execution`, `pallas-macro` from the workspace.
 - Test fixtures under `athenas-pallas/tests/fixtures/`; `data/` is a gitignored fetch workspace.
 - Python SMA proof strategy in `Backtesting-Engine/trading/` with golden integration test.
-- Tauri desktop app (`pallas-app`) for fetch, configure, backtest, and chart results.
+- Removed the Tauri desktop app; workflows are CLI/Rust-only.
 
 ### Historical (pre-consolidation)
 

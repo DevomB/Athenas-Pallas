@@ -1,7 +1,7 @@
 # Copy to backtest.toml and set [backtest].data to a CSV you fetched into data/
 
 [instrument]
-exchange = "binance"
+exchange = "alpha-vantage"
 symbol = "BTCUSDT"
 asset_class = "crypto"
 

@@ -1,65 +1,53 @@
 //! Provider-native bar interval labels and validation helpers.
 //!
-//! Intervals are passed through to Yahoo/Binance APIs as opaque strings. Lists below
-//! document what each provider documents; any other string is still accepted (custom).
+//! Alpha Vantage's non-premium fetch path here downloads daily bars. Intraday Alpha
+//! Vantage is a separate premium endpoint and is intentionally not wired into `pallas-fetch`.
 
-/// Binance Spot kline intervals (documented API values).
-pub const BINANCE_INTERVALS: &[&str] = &[
-    "1s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w",
-    "1M",
-];
+/// Alpha Vantage intervals supported by this fetcher.
+pub const ALPHA_VANTAGE_INTERVALS: &[&str] = &["1d", "daily"];
 
-/// Yahoo Finance chart intervals (documented API values).
-pub const YAHOO_INTERVALS: &[&str] = &[
-    "1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo",
-];
-
-/// Provider name for fetch CLI / GUI.
+/// Provider name for fetch CLI/integration callers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FetchProvider {
-    Binance,
-    Yahoo,
+    AlphaVantage,
 }
 
 impl FetchProvider {
     /// All documented intervals for this provider.
     pub fn documented_intervals(self) -> &'static [&'static str] {
         match self {
-            FetchProvider::Binance => BINANCE_INTERVALS,
-            FetchProvider::Yahoo => YAHOO_INTERVALS,
+            FetchProvider::AlphaVantage => ALPHA_VANTAGE_INTERVALS,
         }
     }
 
-    /// Parse CLI/GUI provider string.
+    /// Parse provider string.
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "binance" => Some(FetchProvider::Binance),
-            "yahoo" => Some(FetchProvider::Yahoo),
+            "alpha-vantage" | "alphavantage" | "alpha" | "av" => Some(FetchProvider::AlphaVantage),
             _ => None,
         }
     }
 }
 
-/// True if `interval` is in the provider's documented list (case-sensitive for Binance `1M`).
+/// True if `interval` is in the provider's documented list.
 pub fn is_documented_interval(provider: FetchProvider, interval: &str) -> bool {
     provider.documented_intervals().contains(&interval)
 }
 
-/// Normalize user input: trim whitespace; do not rewrite casing (Binance `1M` vs `1m` matters).
+/// Normalize user input.
 pub fn normalize_interval(interval: &str) -> String {
-    interval.trim().to_string()
+    interval.trim().to_ascii_lowercase()
 }
 
-/// Human-readable hint when interval is not in the documented list (still allowed).
+/// Human-readable hint when interval is not supported by this fetcher.
 pub fn interval_hint(provider: FetchProvider, interval: &str) -> Option<String> {
     if is_documented_interval(provider, interval) {
         return None;
     }
     Some(format!(
-        "interval '{interval}' is not in the documented {} list; passing through to API anyway",
+        "interval '{interval}' is not supported by {}; this fetcher downloads daily bars",
         match provider {
-            FetchProvider::Binance => "Binance",
-            FetchProvider::Yahoo => "Yahoo",
+            FetchProvider::AlphaVantage => "Alpha Vantage",
         }
     ))
 }
@@ -69,20 +57,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binance_includes_30m_and_1s() {
-        assert!(is_documented_interval(FetchProvider::Binance, "30m"));
-        assert!(is_documented_interval(FetchProvider::Binance, "1s"));
+    fn alpha_vantage_includes_daily() {
+        assert!(is_documented_interval(FetchProvider::AlphaVantage, "1d"));
+        assert!(is_documented_interval(FetchProvider::AlphaVantage, "daily"));
     }
 
     #[test]
-    fn yahoo_includes_60m_and_90m() {
-        assert!(is_documented_interval(FetchProvider::Yahoo, "60m"));
-        assert!(is_documented_interval(FetchProvider::Yahoo, "90m"));
-    }
-
-    #[test]
-    fn custom_interval_allowed() {
-        assert!(!is_documented_interval(FetchProvider::Binance, "7m"));
-        assert!(interval_hint(FetchProvider::Binance, "7m").is_some());
+    fn intraday_interval_warns() {
+        assert!(!is_documented_interval(FetchProvider::AlphaVantage, "5min"));
+        assert!(interval_hint(FetchProvider::AlphaVantage, "5min").is_some());
     }
 }

@@ -6,19 +6,19 @@ See the [README](../README.md) for install and quickstart. This page is the long
 
 ```bash
 cargo run -p athenas-pallas --bin pallas-fetch --features data-fetch -- \
-  --provider yahoo --symbol AAPL --interval 1d --days 30 \
+  --provider alpha-vantage --asset equity --symbol AAPL --days 30 \
   -o data/AAPL_live.csv
 ```
 
-Files in `data/` are local only (gitignored).
+Files in `data/` are local only (gitignored). Set `ALPHA_VANTAGE_API_KEY` in your shell or repo-local `.env` before fetching.
 
 ## 2. Backtest (built-in buy-and-hold)
 
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
   --data data/AAPL_live.csv \
-  --data-format yahoo \
-  --instrument nasdaq:AAPL \
+  --data-format ohlcv \
+  --instrument alpha-vantage:AAPL \
   --initial-balance USD:10000
 ```
 
@@ -27,7 +27,7 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- \
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
   --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv \
-  --instrument binance:BTCUSDT \
+  --instrument alpha-vantage:BTCUSDT \
   --initial-balance USDT:10000 \
   --strategy simple_sma \
   --output target/report.json
@@ -46,8 +46,8 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- --config backtest
 ```bash
 # Merge two CSV streams by timestamp
 cargo run -p athenas-pallas --bin pallas-merge -- \
-  --source ohlcv:binance:BTCUSDT:data/BTC.csv \
-  --source yahoo:yahoo:AAPL:data/AAPL.csv \
+  --source ohlcv:alpha-vantage:BTCUSDT:data/BTC.csv \
+  --source ohlcv:alpha-vantage:AAPL:data/AAPL.csv \
   -o data/merged.csv
 
 # Parameter grid from TOML

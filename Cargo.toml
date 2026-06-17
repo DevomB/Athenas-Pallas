@@ -2,7 +2,6 @@
 resolver = "3"
 members = [
     "athenas-pallas",
-    "pallas-app/src-tauri",
 ]
 
 [workspace.package]

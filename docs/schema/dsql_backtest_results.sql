@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 2) Equity curve points (many rows per run; downsampled in GUI, full series here)
+-- 2) Equity curve points (many rows per run; full series here)
 CREATE TABLE IF NOT EXISTS backtest_equity_points (
     run_id          TEXT NOT NULL,
     tenant_id       TEXT NOT NULL,

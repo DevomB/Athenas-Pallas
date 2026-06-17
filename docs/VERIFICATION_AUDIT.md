@@ -98,7 +98,7 @@ This file is the audit log (plan file is read-only). Pass 2 is required before `
 | Item | Status | Evidence / gap |
 |------|--------|----------------|
 | `pallas-sweep` CLI | **DONE** | `bin/pallas-sweep.rs` |
-| GUI equity curve >50k bars | **DONE** | `commands.rs` records + downsample flag |
+| Desktop equity curve >50k bars | **REMOVED** | Desktop app removed; CLI reports keep full engine output |
 | Protocol strategy_id / client order id | **DONE** | `strategy/protocol.rs`, `trading/protocol.md` |
 | Sharpe/Sortino minus risk-free | **DONE** | `summarize_with_fills_and_rf` |
 | Yahoo Adj Close | **DONE** | `yahoo.rs` `effective_close()` |
@@ -120,7 +120,7 @@ This file is the audit log (plan file is read-only). Pass 2 is required before `
 | Backtest subset of risk checks | **partial** - MaxPosition + MaxDailyLoss wired; not full `RiskEngine` |
 | Protocol drops strategy_id / client id | **fixed** |
 | Sharpe ignores risk-free | **fixed** |
-| GUI skips equity >50k | **fixed** |
+| Desktop skips equity >50k | **removed with desktop app** |
 | DSQL never written | **not done** |
 | Yahoo Adj Close ignored | **fixed** |
 | No corporate-action table | **wontfix** (deferred) |

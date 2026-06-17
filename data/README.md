@@ -6,13 +6,12 @@ This folder is your workspace for downloaded history. Nothing here is committed 
 
 ```bash
 cargo run -p athenas-pallas --bin pallas-fetch --features data-fetch -- \
-  --provider yahoo --symbol AAPL --interval 1d --days 90 \
+  --provider alpha-vantage --asset equity --symbol AAPL --days 90 \
   -o data/AAPL_live.csv
 ```
 
-Or use the **Fetch** tab in `pallas-app` (`pnpm tauri dev`).
-
 Point `pallas-backtest --data` or `[backtest].data` in your TOML at a file in this directory.
+Set `ALPHA_VANTAGE_API_KEY` in your shell or in the repo-local `.env` file. `.env` is gitignored; `.env.example` is the placeholder other users can copy.
 
 ## Resample offline
 
@@ -27,7 +26,7 @@ cargo run -p athenas-pallas --bin pallas-resample -- \
 
 ### Crypto / generic OHLCV (`DataFormat::Ohlcv`)
 
-Used by Binance fetch and most crypto backtests.
+Used by Alpha Vantage fetch and most crypto backtests.
 
 | Column  | Type    | Description                          |
 |---------|---------|--------------------------------------|
@@ -47,23 +46,13 @@ ts,open,high,low,close,volume
 
 Set `asset_class = "crypto"` (default). For Sharpe annualization, set `bar_interval = "1h"` or enable `auto_periods_per_year = true` in TOML.
 
-### Equities (`DataFormat::Yahoo`)
+### Equities (`DataFormat::Ohlcv`)
 
-Yahoo Finance daily/intraday export.
+Alpha Vantage daily export normalized by `pallas-fetch`.
 
-| Column   | Type    | Description        |
-|----------|---------|--------------------|
-| `Date`   | string  | `YYYY-MM-DD`       |
-| `Open`   | decimal | Open               |
-| `High`   | decimal | High               |
-| `Low`    | decimal | Low                |
-| `Close`  | decimal | Close              |
-| `Adj Close` | decimal | Optional; used for backtest close when present |
-| `Volume` | decimal | Share volume       |
+Use the same `ts,open,high,low,close,volume` schema as generic OHLCV.
 
-When `Adj Close` is present, the loader uses it for the bar close (split/dividend adjusted).
-
-Set `asset_class = "equity"`, `exchange = "yahoo"`. Optional `session_filter = "equity_rth"` filters to US regular hours when using intraday bars.
+Set `asset_class = "equity"`, `exchange = "alpha-vantage"`. Optional `session_filter = "equity_rth"` filters to US regular hours if you later import intraday bars from another source.
 
 ### Forex (`DataFormat::Fx`)
 
@@ -77,11 +66,11 @@ L1 quote snapshots (not OHLCV). Used for spread-aware FX replay.
 
 Set `asset_class = "forex"`. Optional `session_filter = "forex_245"` for Sunday–Friday FX hours.
 
-**Free FX data (manual export):** Dukascopy Historical Data Export, TrueFX (historical tick/quote CSV), or broker exports. There is no built-in FX fetch adapter yet — use `pallas-fetch` for Binance/Yahoo only.
+**Free FX data (manual export):** Dukascopy Historical Data Export, TrueFX (historical tick/quote CSV), or broker exports. The built-in `pallas-fetch` path currently covers Alpha Vantage daily equity and crypto bars.
 
 ### Bonds (`AssetClass::Bond`)
 
-Bond economics use config metadata; CSV can match Yahoo or OHLCV layout for price history.
+Bond economics use config metadata; CSV can match OHLCV layout for price history.
 
 | Config field | Example | Role |
 |--------------|---------|------|
@@ -94,7 +83,7 @@ Coupons are applied on scheduled dates during replay (`backtest/lifecycle.rs`). 
 
 ### Futures (`DataFormat::Future`)
 
-Same columns as Yahoo or OHLCV. Contract economics come from config, not the CSV.
+Same columns as OHLCV. Contract economics come from config, not the CSV.
 
 Required TOML instrument fields:
 
@@ -115,7 +104,7 @@ auto_periods_per_year = true
 session_filter = "none"   # or equity_rth, forex_245
 
 [instrument]
-exchange = "binance"
+exchange = "alpha-vantage"
 symbol = "BTCUSDT"
 asset_class = "crypto"
 ```

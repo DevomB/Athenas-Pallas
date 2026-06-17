@@ -44,12 +44,6 @@ STYLE.md
 __pycache__/
 *.pyc
 
-# Node / pnpm (desktop app)
-node_modules/
-package-lock.json
-pnpm-debug.log*
-pallas-app/dist/
-
 # User market data workspace (see data/README.md)
 data/*
 !data/.gitignore

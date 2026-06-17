@@ -43,7 +43,7 @@ pub enum DataFormat {
     Future,
 }
 
-/// Optional progress callback for GUI/CLI (`bar N` messages).
+/// Optional progress callback for CLI/integration consumers (`bar N` messages).
 pub type ProgressHook = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// User-facing backtest settings.

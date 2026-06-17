@@ -7,10 +7,11 @@
 //!   [`strategy::Strategy`] and [`risk::RiskCheck`] unchanged.
 //!
 //! ## Extension
-//! - Add venues: implement [`connectors::MarketConnector`] (see `connectors::binance_spot` with feature `binance`).
+//! - Add live venues: implement [`connectors::MarketConnector`].
 //! - Add fill logic: document custom models via [`backtest::FillModel`].
 //!
 //! ## Features
+//! - `data-fetch` - Alpha Vantage daily market data fetcher.
 //! - `binance` - public WebSocket connector for Binance Spot.
 //! - `control-server` - localhost HTTP control (`/pause`, `/resume`, `/cancel-all`).
 //! - `binance-live` - signed Spot REST ([`execution::BinanceLiveGateway`]), user stream connector, signing deps (`hmac`, `sha2`, `hex`).
