@@ -24,7 +24,7 @@ pub struct GlobalState {
     pub open_orders: OrderStore,
     /// Free balances.
     pub balances: HashMap<Asset, Decimal>,
-    /// Net base position per instrument row (signed) — venue / account **aggregate**.
+    /// Net base position per instrument row (signed) - venue / account **aggregate**.
     pub positions: Vec<Decimal>,
     /// Attributed net base per `(instrument_row, strategy_id)` when fills carry a [`StrategyId`].
     ///

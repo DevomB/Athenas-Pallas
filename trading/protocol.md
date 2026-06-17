@@ -2,7 +2,7 @@
 
 Newline-delimited JSON on stdin/stdout between `pallas-backtest` and a strategy process.
 
-## Engine → strategy
+## Engine -> strategy
 
 **init**
 ```json
@@ -19,7 +19,7 @@ Newline-delimited JSON on stdin/stdout between `pallas-backtest` and a strategy 
 {"msg":"shutdown"}
 ```
 
-## Strategy → engine
+## Strategy -> engine
 
 **ready** (once after init)
 ```json

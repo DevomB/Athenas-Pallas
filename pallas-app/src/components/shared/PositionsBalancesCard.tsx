@@ -75,7 +75,7 @@ export function PositionsBalancesCard({ snapshot }: Props) {
                 <TableRow key={p.instrument}>
                   <TableCell>{p.instrument}</TableCell>
                   <TableCell>{p.qty}</TableCell>
-                  <TableCell>{p.mark_price ?? "—"}</TableCell>
+                  <TableCell>{p.mark_price ?? "-"}</TableCell>
                 </TableRow>
               ))
             )}

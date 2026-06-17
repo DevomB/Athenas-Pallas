@@ -88,7 +88,7 @@ impl Default for ConfigDto {
             contract_multiplier: None,
             expiry: None,
             record_equity_curve: true,
-            strategy_path: Some("trading/strategies/simple_sma/strategy.py".into()),
+            strategy_path: Some("simple_sma".into()),
             python_exe: "python".into(),
             output_path: None,
             balances: vec![BalanceDto {
@@ -241,6 +241,12 @@ pub struct RunResultDto {
     pub full_report_json: String,
     pub equity_curve_skipped: bool,
     pub equity_curve_downsampled: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct StrategyResolutionDto {
+    pub kind: String,
+    pub path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -18,9 +18,7 @@ fn cpp_strategy_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("trading")
-        .join("cpp")
-        .join("strategies")
-        .join("simple_sma")
+        .join("simple_sma_cpp")
 }
 
 #[test]

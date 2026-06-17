@@ -10,6 +10,6 @@ cargo run --release --bin pallas-backtest -- `
   --data $DemoCsv `
   --instrument binance:BTCUSDT `
   --initial-balance USDT:10000 `
-  --strategy trading/strategies/simple_sma/strategy.py `
+  --strategy simple_sma `
   --output target/sma_report.json `
   --verbose

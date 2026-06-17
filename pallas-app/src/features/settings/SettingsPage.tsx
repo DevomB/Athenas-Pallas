@@ -104,7 +104,7 @@ export function SettingsPage({ config, onConfigChange }: Props) {
 
   async function runSweep() {
     setSweepBusy(true);
-    setSweepProgress("Starting sweep…");
+    setSweepProgress("Starting sweep...");
     try {
       const result = await invoke<SweepResultDto>("run_parameter_sweep", {
         req: {
@@ -186,7 +186,7 @@ export function SettingsPage({ config, onConfigChange }: Props) {
           <CardHeader>
             <CardTitle>Binance API</CardTitle>
             <CardDescription>
-              Stored in your app data folder — never written to TOML configs
+              Stored in your app data folder - never written to TOML configs
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
@@ -269,7 +269,7 @@ export function SettingsPage({ config, onConfigChange }: Props) {
             </div>
             <div className="flex flex-wrap gap-2">
               <Button disabled={sweepBusy} onClick={runSweep}>
-                {sweepBusy ? "Running sweep…" : "Run parameter sweep"}
+                {sweepBusy ? "Running sweep..." : "Run parameter sweep"}
               </Button>
               {bestRow && (
                 <Button variant="secondary" onClick={applyBestConfig}>

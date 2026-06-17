@@ -1,7 +1,7 @@
 -- Aurora DSQL schema for Backtesting-Engine run history.
 -- Maps Rust types: BacktestReport, FillRecord, EquityPoint (athenas-pallas).
 --
--- Apply with the aurora-dsql MCP `transact` tool — one statement per call.
+-- Apply with the aurora-dsql MCP `transact` tool - one statement per call.
 -- Example: transact(["CREATE TABLE IF NOT EXISTS backtest_runs (...)"])
 --
 -- DSQL rules followed:

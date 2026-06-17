@@ -29,7 +29,7 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- \
   --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv \
   --instrument binance:BTCUSDT \
   --initial-balance USDT:10000 \
-  --strategy trading/strategies/simple_sma/strategy.py \
+  --strategy simple_sma \
   --output target/report.json
 ```
 

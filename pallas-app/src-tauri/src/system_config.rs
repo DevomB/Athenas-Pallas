@@ -16,8 +16,7 @@ pub fn load_system_config(app: &AppHandle) -> Result<String, String> {
 }
 
 pub fn save_system_config(app: &AppHandle, json: String) -> Result<(), String> {
-    serde_json::from_str::<serde_json::Value>(&json)
-        .map_err(|e| format!("Invalid JSON: {e}"))?;
+    serde_json::from_str::<serde_json::Value>(&json).map_err(|e| format!("Invalid JSON: {e}"))?;
     let path = config_path(app)?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }

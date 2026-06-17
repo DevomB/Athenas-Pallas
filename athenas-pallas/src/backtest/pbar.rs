@@ -1,7 +1,7 @@
 //! Binary bar cache (`.pbar`) for fast replay without CSV parsing.
 
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 
 use rust_decimal::Decimal;
@@ -10,10 +10,11 @@ use super::bar::{Bar, BarSeries};
 
 const MAGIC: &[u8; 4] = b"PBAR";
 const VERSION: u32 = 1;
+const BAR_BYTES: usize = 6 * std::mem::size_of::<i64>();
 
 /// Write a [`BarSeries`] to a `.pbar` file.
 pub fn write_pbar(path: &Path, series: &BarSeries) -> std::io::Result<()> {
-    let mut f = File::create(path)?;
+    let mut f = BufWriter::new(File::create(path)?);
     f.write_all(MAGIC)?;
     f.write_all(&VERSION.to_le_bytes())?;
     let tick = series.tick_size();
@@ -71,28 +72,27 @@ pub fn read_pbar(path: &Path) -> std::io::Result<BarSeries> {
     let mut count_buf = [0u8; 8];
     f.read_exact(&mut count_buf)?;
     let count = u64::from_le_bytes(count_buf) as usize;
+    let expected = count.checked_mul(BAR_BYTES).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "pbar row count overflow")
+    })?;
+    let mut payload = Vec::with_capacity(expected);
+    f.read_to_end(&mut payload)?;
+    if payload.len() != expected {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("pbar payload length {} expected {expected}", payload.len()),
+        ));
+    }
+
     let mut bars = Vec::with_capacity(count);
-    for _ in 0..count {
-        let mut i8 = [0u8; 8];
-        f.read_exact(&mut i8)?;
-        let ts_unix_nanos = i64::from_le_bytes(i8);
-        f.read_exact(&mut i8)?;
-        let open_ticks = i64::from_le_bytes(i8);
-        f.read_exact(&mut i8)?;
-        let high_ticks = i64::from_le_bytes(i8);
-        f.read_exact(&mut i8)?;
-        let low_ticks = i64::from_le_bytes(i8);
-        f.read_exact(&mut i8)?;
-        let close_ticks = i64::from_le_bytes(i8);
-        f.read_exact(&mut i8)?;
-        let volume_lots = i64::from_le_bytes(i8);
+    for chunk in payload.chunks_exact(BAR_BYTES) {
         bars.push(Bar {
-            ts_unix_nanos,
-            open_ticks,
-            high_ticks,
-            low_ticks,
-            close_ticks,
-            volume_lots,
+            ts_unix_nanos: read_i64(&chunk[0..8]),
+            open_ticks: read_i64(&chunk[8..16]),
+            high_ticks: read_i64(&chunk[16..24]),
+            low_ticks: read_i64(&chunk[24..32]),
+            close_ticks: read_i64(&chunk[32..40]),
+            volume_lots: read_i64(&chunk[40..48]),
         });
     }
     if bars.is_empty() {
@@ -102,6 +102,12 @@ pub fn read_pbar(path: &Path) -> std::io::Result<BarSeries> {
         ));
     }
     Ok(BarSeries::from_bars(bars, tick_size))
+}
+
+fn read_i64(bytes: &[u8]) -> i64 {
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(bytes);
+    i64::from_le_bytes(buf)
 }
 
 /// True when path looks like a `.pbar` cache file.

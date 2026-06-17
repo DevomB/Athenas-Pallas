@@ -47,7 +47,7 @@ export function OpenOrdersTable({ orders }: Props) {
             </TableCell>
             <TableCell>{o.order_type}</TableCell>
             <TableCell>{o.remaining_qty}</TableCell>
-            <TableCell>{o.price ?? "—"}</TableCell>
+            <TableCell>{o.price ?? "-"}</TableCell>
             <TableCell>{o.status}</TableCell>
           </TableRow>
         ))}

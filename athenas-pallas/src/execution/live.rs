@@ -1,4 +1,4 @@
-//! Live trading scaffold — wire signed REST / private WS in a venue adapter.
+//! Live trading scaffold - wire signed REST / private WS in a venue adapter.
 //!
 //! Requires feature `live-trading`. Prefer [`crate::execution::BinanceLiveGateway`] with `binance-live`.
 
@@ -11,7 +11,7 @@ use crate::types::OrderId;
 
 /// HTTP client placeholder for future authenticated calls.
 pub struct LiveGateway {
-    /// Reserved — configure timeouts, proxies, and HMAC signing middleware here.
+    /// Reserved - configure timeouts, proxies, and HMAC signing middleware here.
     pub client: reqwest::Client,
 }
 

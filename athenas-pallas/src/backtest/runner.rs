@@ -18,7 +18,7 @@ use super::interval::{
     infer_periods_per_year_from_timestamps, periods_per_year_from_interval_for_class,
 };
 use super::lifecycle::apply_bar_lifecycle;
-use super::merge::merge_sources;
+use super::merge::merge_sources_iter;
 use super::pbar::is_pbar_path;
 use super::sources::{FutureCsvSource, FxCsvSource, YahooCsvSource};
 use super::{CsvBarSource, HistoricalSource};
@@ -250,9 +250,8 @@ impl BacktestRunner {
 
         if multi_instrument {
             let mut sources = load_all_sources(cfg, exchange, symbol, fmt, ohlcv_series)?;
-            let merged = merge_sources(&mut sources);
             let mut bar_ix = 0u64;
-            for ev in merged {
+            for ev in merge_sources_iter(&mut sources) {
                 let ts = event_ts(&ev);
                 if !is_session_open(session, ts) {
                     continue;

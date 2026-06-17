@@ -48,31 +48,54 @@ impl Ord for HeapItem {
 }
 
 /// K-way merge events from multiple sources ordered by timestamp.
-pub fn merge_sources(sources: &mut [Box<dyn HistoricalSource>]) -> Vec<Event> {
-    let mut heap = BinaryHeap::new();
-    for (ix, src) in sources.iter_mut().enumerate() {
-        if let Some(ev) = src.next_event() {
-            let ts = event_ts(&ev);
-            heap.push(HeapItem {
-                ts,
-                source_ix: ix,
-                event: ev,
-            });
+pub struct MergedSources<'a> {
+    sources: &'a mut [Box<dyn HistoricalSource>],
+    heap: BinaryHeap<HeapItem>,
+}
+
+impl<'a> MergedSources<'a> {
+    /// Build a streaming merger with one pending event per source.
+    pub fn new(sources: &'a mut [Box<dyn HistoricalSource>]) -> Self {
+        let mut heap = BinaryHeap::new();
+        for (ix, src) in sources.iter_mut().enumerate() {
+            if let Some(ev) = src.next_event() {
+                let ts = event_ts(&ev);
+                heap.push(HeapItem {
+                    ts,
+                    source_ix: ix,
+                    event: ev,
+                });
+            }
         }
+        Self { sources, heap }
     }
-    let mut out = Vec::new();
-    while let Some(item) = heap.pop() {
-        out.push(item.event);
-        if let Some(ev) = sources[item.source_ix].next_event() {
+}
+
+impl Iterator for MergedSources<'_> {
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.heap.pop()?;
+        if let Some(ev) = self.sources[item.source_ix].next_event() {
             let ts = event_ts(&ev);
-            heap.push(HeapItem {
+            self.heap.push(HeapItem {
                 ts,
                 source_ix: item.source_ix,
                 event: ev,
             });
         }
+        Some(item.event)
     }
-    out
+}
+
+/// Stream events from multiple sources ordered by timestamp.
+pub fn merge_sources_iter(sources: &mut [Box<dyn HistoricalSource>]) -> MergedSources<'_> {
+    MergedSources::new(sources)
+}
+
+/// K-way merge events from multiple sources ordered by timestamp.
+pub fn merge_sources(sources: &mut [Box<dyn HistoricalSource>]) -> Vec<Event> {
+    merge_sources_iter(sources).collect()
 }
 
 #[cfg(test)]
@@ -110,5 +133,34 @@ mod tests {
         assert!(merged
             .iter()
             .any(|e| matches!(e, Event::Market(MarketEvent::Bar { .. }))));
+    }
+
+    #[test]
+    fn merge_iterator_streams_in_order() {
+        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data");
+        let a = CsvBarSource::from_path(
+            &base.join("BTCUSDT_1d.csv"),
+            ExchangeId::new("binance"),
+            Symbol::new("BTCUSDT"),
+        )
+        .unwrap();
+        let b = YahooCsvSource::from_path(
+            &base.join("AAPL_1d.csv"),
+            ExchangeId::new("yahoo"),
+            Symbol::new("AAPL"),
+        )
+        .unwrap();
+        let mut sources: Vec<Box<dyn HistoricalSource>> = vec![Box::new(a), Box::new(b)];
+        let mut prev = None;
+        let mut count = 0usize;
+        for ev in merge_sources_iter(&mut sources) {
+            let ts = event_ts(&ev);
+            if let Some(prev) = prev {
+                assert!(prev <= ts);
+            }
+            prev = Some(ts);
+            count += 1;
+        }
+        assert!(count > 0);
     }
 }

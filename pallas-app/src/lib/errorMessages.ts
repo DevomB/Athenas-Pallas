@@ -13,7 +13,7 @@ const ERROR_PATTERNS: Array<{ pattern: RegExp; message: string }> = [
   },
   {
     pattern: /strategy.*not found/i,
-    message: "Strategy file not found. Check the path or browse for a file.",
+    message: "Strategy not found. Use a strategy name, folder, Python file, or binary.",
   },
   {
     pattern: /invalid.*toml|toml parse/i,

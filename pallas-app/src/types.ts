@@ -89,6 +89,11 @@ export interface RunResultDto {
   equity_curve_downsampled: boolean;
 }
 
+export interface StrategyResolutionDto {
+  kind: string;
+  path: string;
+}
+
 export interface FetchRequest {
   provider: string;
   symbol: string;
@@ -244,7 +249,7 @@ export const defaultConfig = (): ConfigDto => ({
   auto_periods_per_year: true,
   risk_free_annual: 0,
   record_equity_curve: true,
-  strategy_path: "trading/strategies/simple_sma/strategy.py",
+  strategy_path: "simple_sma",
   python_exe: "python",
   balances: [{ asset: "USDT", amount: "10000" }],
   extra_instruments: [],

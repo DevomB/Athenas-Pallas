@@ -12,7 +12,7 @@ fee_bps = 10
 slippage_bps = 5
 half_spread_bps = 5
 periods_per_year = 365.0
-strategy = "trading/strategies/simple_sma/strategy.py"
+strategy = "simple_sma"
 python = "python"
 output = "target/backtest_report.json"
 

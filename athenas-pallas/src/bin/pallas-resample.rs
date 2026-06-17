@@ -1,4 +1,4 @@
-//! Offline OHLCV bar aggregation (e.g. 1m CSV → 30m).
+//! Offline OHLCV bar aggregation (e.g. 1m CSV -> 30m).
 
 use athenas_pallas::backtest::OhlcvRow;
 use clap::Parser;
@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let aggregated = aggregate_rows(&rows, bucket_secs);
     write_ohlcv(&args.output, &aggregated)?;
     println!(
-        "wrote {} bars ({} → {}) to {}",
+        "wrote {} bars ({} -> {}) to {}",
         aggregated.len(),
         rows.len(),
         args.to,

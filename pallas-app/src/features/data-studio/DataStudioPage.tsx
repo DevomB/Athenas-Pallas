@@ -84,7 +84,7 @@ export function DataStudioPage({ config, onConfigChange }: Props) {
 
   async function onFetch() {
     setFetchBusy(true);
-    setFetchStatus("fetching…");
+    setFetchStatus("fetching...");
     try {
       const path = await invoke<string>("fetch_bars", {
         req: {
@@ -234,7 +234,7 @@ export function DataStudioPage({ config, onConfigChange }: Props) {
               />
             </div>
             <Button disabled={fetchBusy} onClick={onFetch}>
-              {fetchBusy ? "Fetching…" : "Fetch data"}
+              {fetchBusy ? "Fetching..." : "Fetch data"}
             </Button>
             {fetchStatus && (
               <p className="text-sm text-muted-foreground sm:col-span-2">

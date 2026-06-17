@@ -1,6 +1,6 @@
-# Athena's Pallas — architecture
+# Athena's Pallas Architecture
 
-Event-driven trading engine with one core loop for **live**, **paper**, and **backtest** modes.
+Event-driven trading engine with one core loop for backtest, paper, and live modes.
 
 ```mermaid
 flowchart LR
@@ -30,26 +30,42 @@ flowchart LR
 | Layer | Crate path | Role |
 |-------|------------|------|
 | Data | `data/fetch`, `backtest/sources` | Download OHLCV; normalize CSV layouts |
-| Replay | `backtest/runner`, `backtest/merge` | Deterministic historical event stream |
+| Replay | `backtest/runner`, `backtest/merge` | Deterministic historical event stream and streaming k-way source merge |
 | State | `state.rs` | Balances, positions, L1/L2, fills |
 | Execution | `execution/paper.rs` | Simulated fills, fees, margin-aware cash flows |
-| Strategy | `strategy/` | In-process trait or external JSON-line subprocess |
-| Risk | `risk.rs` | Position limits, pause, daily loss (live-oriented) |
+| Strategy | `strategy/`, `trading/` | In-process trait or external JSON-line subprocess; strategy folders are auto-detected |
+| Risk | `risk.rs` | Position limits, pause, daily loss checks |
 | Results | `results/mod.rs` | JSON + JSONL persistence |
 
-## Backtest hot path
+## Backtest Flow
 
-1. Load config (`BacktestConfig`) from TOML or CLI.
-2. Build `InstrumentRegistry` (primary + `[[instruments]]` extras).
-3. Merge CSV sources when extras declare `data` paths.
-4. For each bar: `apply_market` → strategy → risk → paper gateway → `apply_bar_lifecycle` (funding/coupons/exercise).
-5. Record portfolio equity; summarize with trade ledger + optional risk-free Sharpe.
+1. Load `BacktestConfig` from TOML, CLI, or the Tauri DTO.
+2. Build `InstrumentRegistry` from the primary symbol plus `[[instruments]]` extras.
+3. Resolve strategy names/paths through `backtest::strategy_resolver`.
+4. Load OHLCV from `.pbar` or streamed CSV.
+5. For multi-instrument runs, stream-merge sources with `merge_sources_iter`.
+6. For each event: update state, call strategy, run risk checks, simulate fills, apply lifecycle hooks, and record equity.
+7. Summarize with trade ledger stats and optional risk-free Sharpe/Sortino.
 
-## Performance notes
+## Strategy Layout
 
-See [PERFORMANCE.md](PERFORMANCE.md). Binary `.pbar` sidecars avoid CSV parse on repeat runs; criterion benches live under `athenas-pallas/benches/`.
+New strategies should live directly under `trading/<strategy_name>/`.
 
-## CLI tools
+```text
+trading/
+  _sdk/
+    python/
+    cpp/
+  simple_sma/
+    strategy.py
+  simple_sma_cpp/
+    CMakeLists.txt
+    main.cpp
+```
+
+The resolver detects CMake C++ directories, Python directories/files, and compiled binaries. Legacy `trading/strategies/...` and `trading/cpp/strategies/...` paths are mapped to the new layout for compatibility.
+
+## CLI Tools
 
 | Binary | Purpose |
 |--------|---------|
@@ -58,3 +74,5 @@ See [PERFORMANCE.md](PERFORMANCE.md). Binary `.pbar` sidecars avoid CSV parse on
 | `pallas-resample` | Offline bar aggregation |
 | `pallas-merge` | K-way merge CSV streams by timestamp |
 | `pallas-sweep` | Grid search over TOML parameters |
+
+See [PERFORMANCE.md](PERFORMANCE.md) for hot-path details and benchmark commands.

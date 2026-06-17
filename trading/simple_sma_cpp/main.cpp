@@ -1,4 +1,4 @@
-#include "../../sdk/pallas_strategy.hpp"
+#include "pallas_strategy.hpp"
 
 #include <cstdlib>
 #include <string>

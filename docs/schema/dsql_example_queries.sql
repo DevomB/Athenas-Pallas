@@ -1,5 +1,5 @@
 -- Example readonly_query patterns for the pallas-app / CLI once runs are persisted.
--- Always include tenant_id — DSQL MCP has no parameterized queries; validate IDs in app code.
+-- Always include tenant_id - DSQL MCP has no parameterized queries; validate IDs in app code.
 
 -- Top strategies by Sharpe on BTCUSDT (last 30 days)
 SELECT

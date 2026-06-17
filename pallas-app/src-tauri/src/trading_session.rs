@@ -6,7 +6,9 @@ use athenas_pallas::connectors::binance_spot::BinanceCombinedStream;
 use athenas_pallas::connectors::MarketConnector;
 use athenas_pallas::engine::{EngineBuilder, EngineCommand, EngineConfig, EngineHandle};
 use athenas_pallas::events::{ControlEvent, Event, OrderIntent};
-use athenas_pallas::execution::{BinanceCredentials, BinanceLiveGateway, PaperConfig, PaperGateway};
+use athenas_pallas::execution::{
+    BinanceCredentials, BinanceLiveGateway, PaperConfig, PaperGateway,
+};
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
 use athenas_pallas::state::{GlobalState, InstrumentIndex, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
@@ -16,8 +18,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
 use crate::dto::{
-    BalanceSnapshotDto, ConnectorStatusDto, FillEventDto, LiveSessionConfigDto,
-    OpenOrderDto, PaperSessionConfigDto, PositionDto, PositionsSnapshotDto, TradingStateDto,
+    BalanceSnapshotDto, ConnectorStatusDto, FillEventDto, LiveSessionConfigDto, OpenOrderDto,
+    PaperSessionConfigDto, PositionDto, PositionsSnapshotDto, TradingStateDto,
 };
 use athenas_pallas::connectors::binance_user_data::BinanceUserDataStream;
 
@@ -80,12 +82,12 @@ impl TradingSessionManager {
 
     pub fn snapshot(&self) -> Result<PositionsSnapshotDto, String> {
         let guard = self.inner.lock().unwrap();
-        let s = guard.as_ref().ok_or_else(|| "no active trading session".to_string())?;
+        let s = guard
+            .as_ref()
+            .ok_or_else(|| "no active trading session".to_string())?;
         let state = s.state.blocking_lock();
         let quote = Asset("USDT".into());
-        let equity = state
-            .portfolio_equity_for_quote(&quote)
-            .to_string();
+        let equity = state.portfolio_equity_for_quote(&quote).to_string();
         let balances: Vec<BalanceSnapshotDto> = state
             .balances
             .iter()
@@ -125,11 +127,7 @@ impl TradingSessionManager {
         })
     }
 
-    pub fn start_paper(
-        &self,
-        app: AppHandle,
-        config: PaperSessionConfigDto,
-    ) -> Result<(), String> {
+    pub fn start_paper(&self, app: AppHandle, config: PaperSessionConfigDto) -> Result<(), String> {
         self.stop()?;
         let instrument = InstrumentId::new(&config.exchange, &config.symbol);
         let (base, quote) = split_symbol(&config.symbol);
@@ -147,7 +145,9 @@ impl TradingSessionManager {
         balances.insert(Asset(base.into()), Decimal::ZERO);
 
         let registry = InstrumentRegistry::from_instruments(instruments);
-        let state = Arc::new(tokio::sync::Mutex::new(GlobalState::new(registry, balances)));
+        let state = Arc::new(tokio::sync::Mutex::new(GlobalState::new(
+            registry, balances,
+        )));
         let fee = Decimal::from(config.fee_bps);
         let slip = Decimal::from(config.slippage_bps);
         let paper_cfg = PaperConfig {
@@ -267,7 +267,9 @@ impl TradingSessionManager {
         balances.insert(Asset(base.into()), Decimal::ZERO);
 
         let registry = InstrumentRegistry::from_instruments(instruments);
-        let state = Arc::new(tokio::sync::Mutex::new(GlobalState::new(registry, balances)));
+        let state = Arc::new(tokio::sync::Mutex::new(GlobalState::new(
+            registry, balances,
+        )));
         let risk = RiskPipeline::new(vec![
             Box::new(PauseCheck::default()),
             Box::new(athenas_pallas::risk::TradingDisabledCheck::default()),
@@ -413,10 +415,7 @@ impl TradingSessionManager {
                         });
                     }
                     let fill_count = st.fill_count;
-                    let instrument_label = format!(
-                        "{}:{}",
-                        instrument.exchange, instrument.symbol
-                    );
+                    let instrument_label = format!("{}:{}", instrument.exchange, instrument.symbol);
                     let new_fills: Vec<FillEventDto> = if fill_count > last_fill_count {
                         st.fill_log
                             .iter()
@@ -440,7 +439,10 @@ impl TradingSessionManager {
                         .values()
                         .map(|o| OpenOrderDto {
                             id: format!("{:?}", o.id),
-                            instrument: format!("{}:{}", o.instrument.exchange, o.instrument.symbol),
+                            instrument: format!(
+                                "{}:{}",
+                                o.instrument.exchange, o.instrument.symbol
+                            ),
                             side: format!("{:?}", o.side),
                             order_type: format!("{:?}", o.order_type),
                             price: o.price.map(|d| d.to_string()),
@@ -493,10 +495,7 @@ impl TradingSessionManager {
     }
 
     pub fn stop_with_emit(&self, app: &AppHandle) {
-        let instrument = self
-            .trading_state()
-            .instrument
-            .clone();
+        let instrument = self.trading_state().instrument.clone();
         let _ = self.stop();
         let _ = app.emit("trading-session-stopped", ());
         let _ = app.emit(
@@ -523,14 +522,15 @@ impl TradingSessionManager {
         F: FnOnce(&EngineHandle) -> Result<R, String>,
     {
         let guard = self.inner.lock().unwrap();
-        let s = guard.as_ref().ok_or_else(|| "no active trading session".to_string())?;
+        let s = guard
+            .as_ref()
+            .ok_or_else(|| "no active trading session".to_string())?;
         f(&s.handle)
     }
 
     pub fn send_control(&self, app: &AppHandle, evt: ControlEvent) -> Result<(), String> {
         self.with_handle(|h| {
-            h.try_send(Event::Control(evt))
-                .map_err(|e| e.to_string())?;
+            h.try_send(Event::Control(evt)).map_err(|e| e.to_string())?;
             Ok(())
         })?;
         let _ = app.emit("trading-state-changed", self.trading_state());

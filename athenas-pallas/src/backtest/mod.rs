@@ -12,9 +12,10 @@ pub mod replay;
 pub mod runner;
 pub mod session;
 pub mod sources;
+pub mod strategy_resolver;
 
 use std::fs::File;
-use std::io::Read as _;
+use std::io::BufReader;
 use std::path::Path;
 
 use rust_decimal::Decimal;
@@ -59,10 +60,26 @@ pub struct CsvBarSource {
 impl CsvBarSource {
     /// Load from disk.
     pub fn from_path(path: &Path, exchange: ExchangeId, symbol: Symbol) -> std::io::Result<Self> {
-        let mut buf = String::new();
-        File::open(path)?.read_to_string(&mut buf)?;
-        Self::from_str(&buf, exchange, symbol)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        let file = File::open(path)?;
+        let mut rdr = csv::Reader::from_reader(BufReader::new(file));
+        let mut rows = Vec::new();
+        for (i, rec) in rdr.deserialize().enumerate() {
+            let row: OhlcvRow =
+                rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            parse_ts_required(&row.ts, &format!("row {}", i + 2))?;
+            rows.push(row);
+        }
+        if rows.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "empty csv",
+            ));
+        }
+        Ok(Self {
+            rows,
+            idx: 0,
+            instrument: InstrumentId::new(exchange.to_string(), symbol.to_string()),
+        })
     }
 
     /// Parse UTF-8 CSV text.
@@ -313,7 +330,7 @@ pub use interval::{
     infer_periods_per_year_from_timestamps, periods_per_year_from_interval,
     periods_per_year_from_interval_for_class,
 };
-pub use merge::merge_sources;
+pub use merge::{merge_sources, merge_sources_iter, MergedSources};
 pub use pbar::{is_pbar_path, read_pbar, write_pbar};
 pub use replay::{read_events_jsonl, replay_events_serial};
 pub use runner::BuyAndHold;
@@ -322,6 +339,7 @@ pub use session::{
     downsample_equity, report_to_dto, run_backtest, run_backtest_with_cancel,
     run_external_backtest, run_external_backtest_with_cancel, BacktestReportDto, EquityPointDto,
 };
+pub use strategy_resolver::{detect_strategy, resolve_strategy_path, ResolvedStrategy};
 
 #[cfg(test)]
 mod csv_tests {

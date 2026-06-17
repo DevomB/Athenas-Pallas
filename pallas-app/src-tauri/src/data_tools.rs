@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
 
 use athenas_pallas::backtest::sources::{FutureCsvSource, FxCsvSource, YahooCsvSource};
-use athenas_pallas::backtest::{merge_sources, CsvBarSource, DataFormat, HistoricalSource, OhlcvRow};
+use athenas_pallas::backtest::{
+    merge_sources_iter, CsvBarSource, DataFormat, HistoricalSource, OhlcvRow,
+};
 use athenas_pallas::events::{Event, MarketEvent};
 use athenas_pallas::types::{ExchangeId, Symbol};
 
@@ -36,17 +38,16 @@ pub fn merge_bars(req: &MergeRequest) -> Result<String, String> {
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let mut boxes: Vec<Box<dyn HistoricalSource>> =
-        Vec::with_capacity(req.sources.len());
+    let mut boxes: Vec<Box<dyn HistoricalSource>> = Vec::with_capacity(req.sources.len());
     for src in &req.sources {
         let format = parse_data_format(&src.format);
         let exchange = ExchangeId::new(&src.exchange);
         let symbol = Symbol::new(&src.symbol);
         let path = PathBuf::from(&src.path);
         let opened: Box<dyn HistoricalSource> = match format {
-            DataFormat::Auto | DataFormat::Ohlcv => {
-                Box::new(CsvBarSource::from_path(&path, exchange, symbol).map_err(|e| e.to_string())?)
-            }
+            DataFormat::Auto | DataFormat::Ohlcv => Box::new(
+                CsvBarSource::from_path(&path, exchange, symbol).map_err(|e| e.to_string())?,
+            ),
             DataFormat::Yahoo => Box::new(
                 YahooCsvSource::from_path(&path, exchange, symbol).map_err(|e| e.to_string())?,
             ),
@@ -59,8 +60,7 @@ pub fn merge_bars(req: &MergeRequest) -> Result<String, String> {
         };
         boxes.push(opened);
     }
-    let merged = merge_sources(&mut boxes);
-    write_bar_csv(&output, &merged)?;
+    write_bar_csv(&output, merge_sources_iter(&mut boxes))?;
     Ok(output.display().to_string())
 }
 
@@ -73,26 +73,33 @@ pub fn preview_csv(path: &str) -> Result<CsvPreviewDto, String> {
         .transpose()
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "empty file".to_string())?;
-    let headers: Vec<String> = header_line.split(',').map(|s| s.trim().to_string()).collect();
-    let mut data_rows: Vec<Vec<String>> = Vec::new();
+    let headers: Vec<String> = header_line
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .collect();
+    let mut head_rows: Vec<Vec<String>> = Vec::new();
+    let mut tail_rows: std::collections::VecDeque<Vec<String>> =
+        std::collections::VecDeque::with_capacity(5);
+    let mut total_rows = 0usize;
     for line in lines {
         let line = line.map_err(|e| e.to_string())?;
         if line.trim().is_empty() {
             continue;
         }
-        data_rows.push(line.split(',').map(|s| s.trim().to_string()).collect());
+        let row: Vec<String> = line.split(',').map(|s| s.trim().to_string()).collect();
+        if head_rows.len() < 5 {
+            head_rows.push(row.clone());
+        }
+        if tail_rows.len() == 5 {
+            tail_rows.pop_front();
+        }
+        tail_rows.push_back(row);
+        total_rows += 1;
     }
-    let total_rows = data_rows.len();
-    let head_rows: Vec<Vec<String>> = data_rows.iter().take(5).cloned().collect();
-    let tail_rows: Vec<Vec<String>> = data_rows
-        .iter()
-        .skip(total_rows.saturating_sub(5))
-        .cloned()
-        .collect();
     Ok(CsvPreviewDto {
         headers,
         head_rows,
-        tail_rows,
+        tail_rows: tail_rows.into_iter().collect(),
         total_rows,
     })
 }
@@ -108,10 +115,8 @@ struct ParsedRow {
 }
 
 fn load_rows(path: &Path) -> Result<Vec<ParsedRow>, String> {
-    let mut buf = String::new();
-    std::io::Read::read_to_string(&mut File::open(path).map_err(|e| e.to_string())?, &mut buf)
-        .map_err(|e| e.to_string())?;
-    let mut rdr = csv::Reader::from_reader(buf.as_bytes());
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let mut rdr = csv::Reader::from_reader(BufReader::new(file));
     let headers = rdr.headers().map_err(|e| e.to_string())?.clone();
     let yahoo = headers.iter().any(|h| h == "Date");
     let mut out = Vec::new();
@@ -213,7 +218,7 @@ fn write_ohlcv(path: &Path, rows: &[ParsedRow]) -> Result<(), String> {
     Ok(())
 }
 
-fn write_bar_csv(path: &Path, events: &[Event]) -> Result<(), String> {
+fn write_bar_csv(path: &Path, events: impl IntoIterator<Item = Event>) -> Result<(), String> {
     let mut w = BufWriter::new(File::create(path).map_err(|e| e.to_string())?);
     writeln!(w, "ts,exchange,symbol,open,high,low,close,volume").map_err(|e| e.to_string())?;
     for ev in events {

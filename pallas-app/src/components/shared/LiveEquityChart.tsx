@@ -31,12 +31,12 @@ export function LiveEquityChart({ points, height = 280 }: Props) {
   const reducedMotion = usePrefersReducedMotion();
 
   const summary = useMemo(() => {
-    if (points.length === 0) return "Waiting for equity updates…";
+    if (points.length === 0) return "Waiting for equity updates...";
     const first = points[0].equity;
     const last = points[points.length - 1].equity;
     const change = last - first;
     const changePct = first !== 0 ? (change / first) * 100 : 0;
-    return `${points.length} ticks · ${first.toFixed(2)} → ${last.toFixed(2)} (${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%)`;
+    return `${points.length} ticks | ${first.toFixed(2)} -> ${last.toFixed(2)} (${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%)`;
   }, [points]);
 
   useEffect(() => {

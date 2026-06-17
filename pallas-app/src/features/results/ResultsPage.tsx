@@ -79,7 +79,7 @@ export function ResultsPage({
           <CardHeader>
             <CardTitle className="text-base">{resultSummary}</CardTitle>
             <CardDescription>
-              {result.report.equity_curve.length} equity points ·{" "}
+              {result.report.equity_curve.length} equity points |{" "}
               {result.report.wall_time_ms} ms wall time
             </CardDescription>
           </CardHeader>
@@ -91,7 +91,7 @@ export function ResultsPage({
           <CardHeader>
             <CardTitle>Active session snapshot</CardTitle>
             <CardDescription>
-              {tradingState.mode === "paper" ? "Paper" : "Live"} ·{" "}
+              {tradingState.mode === "paper" ? "Paper" : "Live"} |{" "}
               {tradingState.instrument}
             </CardDescription>
           </CardHeader>
@@ -132,7 +132,7 @@ export function ResultsPage({
           />
           <Suspense
             fallback={
-              <p className="text-sm text-muted-foreground">Loading chart…</p>
+              <p className="text-sm text-muted-foreground">Loading chart...</p>
             }
           >
             <EquityChart

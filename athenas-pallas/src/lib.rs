@@ -11,9 +11,9 @@
 //! - Add fill logic: document custom models via [`backtest::FillModel`].
 //!
 //! ## Features
-//! - `binance` — public WebSocket connector for Binance Spot.
-//! - `control-server` — localhost HTTP control (`/pause`, `/resume`, `/cancel-all`).
-//! - `binance-live` — signed Spot REST ([`execution::BinanceLiveGateway`]), user stream connector, signing deps (`hmac`, `sha2`, `hex`).
+//! - `binance` - public WebSocket connector for Binance Spot.
+//! - `control-server` - localhost HTTP control (`/pause`, `/resume`, `/cancel-all`).
+//! - `binance-live` - signed Spot REST ([`execution::BinanceLiveGateway`]), user stream connector, signing deps (`hmac`, `sha2`, `hex`).
 
 #![warn(missing_docs)]
 

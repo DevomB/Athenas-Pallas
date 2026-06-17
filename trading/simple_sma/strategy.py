@@ -6,7 +6,7 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sdk"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_sdk" / "python"))
 
 from pallas_strategy import Ctx, RollingSma, run
 

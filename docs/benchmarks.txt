@@ -1,24 +1,25 @@
-backtest_hotpath (release, Windows 11, Ryzen-class desktop)
+﻿backtest_hotpath (release, Windows 11, local workspace)
 
-2026-06-11 before (pre snapshot removal, rebuild-each-iter):
-  noop_100k_bars: ~245 ms / 100k bars ≈ 2.45 µs/bar
-
-2026-06-11 after:
-  noop_100k_bars:        ~50 ms  (49.996 ms median) ≈ 0.50 µs/bar
-  noop_100k_amortized:   ~43 ms  (42.548 ms median) ≈ 0.43 µs/bar
-  snapshot_clone:        ~1.03 µs
+2026-06-11 baseline:
+  noop_100k_bars:        ~50 ms  (49.996 ms median), ~0.50 us/bar
+  noop_100k_amortized:   ~43 ms  (42.548 ms median), ~0.43 us/bar
+  snapshot_clone:        ~1.03 us
   buy_and_hold_100k:     ~43 ms
   equity_curve/10k true:  ~5.0 ms
   equity_curve/10k false: ~4.2 ms
 
-command: cargo bench -p athenas-pallas --bench backtest_hotpath -- --noplot
+2026-06-17 after direct strategy layout and pbar reader cleanup:
+  noop_100k_bars:        ~36.8 ms
+  noop_100k_amortized:   ~33.1 ms
+  snapshot_clone:        ~1.15 us
+  buy_and_hold_100k:     ~33.9 ms
+  equity_curve/10k true:  ~4.44 ms
+  equity_curve/10k false: ~3.31 ms
+  session_overhead_100k: ~53.1 ms
 
-session_overhead_100k (run_backtest via session API, CSV reload each iter, record_equity_curve=false):
-  ~270 ms median (2026-06-12 release) — dominated by CSV parse + replay, not wrapper
+command: cargo bench -p athenas-pallas --bench backtest_hotpath
 
-noop_100k_amortized (2026-06-12 release, in-memory rewind):
-  ~57 ms median
-
-session API vs BacktestRunner::run_buy_and_hold: thin delegate; wrapper overhead negligible
-
-90-bar noop (debug): sub-millisecond in integration tests
+Notes:
+  - session_overhead_100k now reuses a fresh CSV sidecar .pbar cache when available.
+  - session API remains a thin delegate around the backtest runner.
+  - 90-bar noop debug integration tests remain sub-millisecond.

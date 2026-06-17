@@ -74,7 +74,7 @@ export function FillsTable({ fills }: Props) {
         <CardDescription>
           {fills.length} total
           {paginated
-            ? ` — showing ${safePage * PAGE_SIZE + 1}–${Math.min((safePage + 1) * PAGE_SIZE, fills.length)}`
+            ? ` - showing ${safePage * PAGE_SIZE + 1}-${Math.min((safePage + 1) * PAGE_SIZE, fills.length)}`
             : ""}
         </CardDescription>
       </CardHeader>

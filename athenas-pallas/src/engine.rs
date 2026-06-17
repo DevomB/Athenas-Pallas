@@ -1,4 +1,4 @@
-//! Engine: single consumer loop — market → (passive fills) → strategy → risk → execution.
+//! Engine: single consumer loop - market -> (passive fills) -> strategy -> risk -> execution.
 
 use crate::audit::{self, EngineAudit, StrategySkipReason};
 use crate::error::{Error, Result};
@@ -274,7 +274,7 @@ where
     process_event(state, strategy, risk, exec, ev, None).await
 }
 
-/// Legacy type alias — prefer [`EngineBuilder::spawn`].
+/// Legacy type alias - prefer [`EngineBuilder::spawn`].
 pub type Engine = EngineBuilder;
 
 /// Process a single event with optional audit broadcast (replicas, logging).
@@ -293,7 +293,7 @@ where
     process_event(state, strategy, risk, exec, ev, audit).await
 }
 
-/// Process a single event (market/account/control/timer) through strategy → risk → execution.
+/// Process a single event (market/account/control/timer) through strategy -> risk -> execution.
 /// Use this in backtests or tests; live engines use [`EngineBuilder::spawn`].
 pub async fn dispatch_event<S, E>(
     state: &mut GlobalState,

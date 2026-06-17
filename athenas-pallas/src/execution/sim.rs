@@ -1,4 +1,4 @@
-//! Simulation gateway — delegates to [`super::paper::PaperGateway`] fill logic.
+//! Simulation gateway - delegates to [`super::paper::PaperGateway`] fill logic.
 
 use async_trait::async_trait;
 

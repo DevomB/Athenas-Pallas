@@ -53,7 +53,7 @@ export function EquityChart({
     const last = curve[curve.length - 1].equity_f64;
     const change = last - first;
     const changePct = first !== 0 ? (change / first) * 100 : 0;
-    return `${curve.length} points, ${first.toFixed(2)} → ${last.toFixed(2)} (${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%)`;
+    return `${curve.length} points, ${first.toFixed(2)} -> ${last.toFixed(2)} (${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%)`;
   }, [curve]);
 
   useEffect(() => {

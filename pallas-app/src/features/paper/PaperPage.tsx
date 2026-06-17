@@ -35,7 +35,7 @@ import { LiveEquityChart } from "@/components/shared/LiveEquityChart";
 import { OpenOrdersTable } from "@/components/shared/OpenOrdersTable";
 import { PositionsBalancesCard } from "@/components/shared/PositionsBalancesCard";
 import type { useTradingSession } from "@/hooks/useTradingSession";
-import type { PaperSessionConfigDto } from "@/types";
+import type { PaperSessionConfigDto, StrategyResolutionDto } from "@/types";
 import { defaultPaperConfig } from "@/types";
 import { validatePaperSession } from "@/lib/paperValidation";
 
@@ -47,8 +47,11 @@ export function PaperPage({ session }: Props) {
   const [config, setConfig] = useState<PaperSessionConfigDto>(defaultPaperConfig());
   const [sheetOpen, setSheetOpen] = useState(false);
   const [flattenOpen, setFlattenOpen] = useState(false);
+  const [strategyInfo, setStrategyInfo] =
+    useState<StrategyResolutionDto | null>(null);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
   const isPaper = session.tradingState.mode === "paper";
-  const validationError = validatePaperSession(config);
+  const validationError = validatePaperSession(config) ?? strategyError;
 
   useEffect(() => {
     if (isPaper) {
@@ -56,6 +59,32 @@ export function PaperPage({ session }: Props) {
       return () => clearInterval(id);
     }
   }, [isPaper, session]);
+
+  useEffect(() => {
+    const path = config.strategy_path?.trim();
+    if (!path) {
+      setStrategyInfo(null);
+      setStrategyError(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<StrategyResolutionDto>("detect_strategy", { path })
+      .then((info) => {
+        if (!cancelled) {
+          setStrategyInfo(info);
+          setStrategyError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setStrategyInfo(null);
+          setStrategyError(String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.strategy_path]);
 
   function setField<K extends keyof PaperSessionConfigDto>(
     key: K,
@@ -190,12 +219,13 @@ export function PaperPage({ session }: Props) {
               </div>
             </div>
             <div className="grid gap-2">
-              <Label>Strategy path (optional)</Label>
-              <div className="flex gap-2">
+              <Label>Strategy</Label>
+              <div className="flex flex-wrap gap-2">
                 <Input
+                  className="min-w-56 flex-1"
                   value={config.strategy_path ?? ""}
                   disabled={isPaper}
-                  placeholder="Hold strategy if empty"
+                  placeholder="simple_sma, folder, or file"
                   onChange={(e) =>
                     setField("strategy_path", e.target.value || null)
                   }
@@ -204,13 +234,29 @@ export function PaperPage({ session }: Props) {
                   variant="secondary"
                   disabled={isPaper}
                   onClick={async () => {
+                    const path = await invoke<string | null>("pick_strategy_dir");
+                    if (path) setField("strategy_path", path);
+                  }}
+                >
+                  Folder
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={isPaper}
+                  onClick={async () => {
                     const path = await invoke<string | null>("pick_strategy");
                     if (path) setField("strategy_path", path);
                   }}
                 >
-                  Browse
+                  File
                 </Button>
               </div>
+              {strategyInfo && (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <Badge variant="secondary">{strategyInfo.kind}</Badge>
+                  <span className="break-all">{strategyInfo.path}</span>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               {!isPaper ? (
@@ -220,7 +266,7 @@ export function PaperPage({ session }: Props) {
                     session.startPaper(config).catch(() => undefined)
                   }
                 >
-                  {session.starting ? "Starting…" : "Start paper"}
+                  {session.starting ? "Starting..." : "Start paper"}
                 </Button>
               ) : (
                 <Button
@@ -228,7 +274,7 @@ export function PaperPage({ session }: Props) {
                   disabled={session.stopping}
                   onClick={() => session.stopSession().catch(() => undefined)}
                 >
-                  {session.stopping ? "Stopping…" : "Stop session"}
+                  {session.stopping ? "Stopping..." : "Stop session"}
                 </Button>
               )}
             </div>
@@ -253,7 +299,7 @@ export function PaperPage({ session }: Props) {
               {session.snapshot?.mark_price && (
                 <>
                   {" "}
-                  · L1 mark{" "}
+                  | L1 mark{" "}
                   <strong>{session.snapshot.mark_price}</strong>
                 </>
               )}

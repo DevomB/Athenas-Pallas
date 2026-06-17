@@ -14,7 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { validateConfig } from "@/lib/configValidation";
-import type { AppRoute, ConfigDto } from "@/types";
+import type { AppRoute, ConfigDto, StrategyResolutionDto } from "@/types";
 
 interface Props {
   config: ConfigDto;
@@ -45,7 +45,36 @@ export function RunPanel({
 }: Props) {
   const logEndRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const validationError = validateConfig(config);
+  const [strategyInfo, setStrategyInfo] =
+    useState<StrategyResolutionDto | null>(null);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
+  const validationError = validateConfig(config) ?? strategyError;
+
+  useEffect(() => {
+    const path = config.strategy_path?.trim();
+    if (!path) {
+      setStrategyInfo(null);
+      setStrategyError(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<StrategyResolutionDto>("detect_strategy", { path })
+      .then((info) => {
+        if (!cancelled) {
+          setStrategyInfo(info);
+          setStrategyError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setStrategyInfo(null);
+          setStrategyError(String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.strategy_path]);
 
   useEffect(() => {
     if (autoScroll) {
@@ -101,7 +130,7 @@ export function RunPanel({
               {config.exchange}:{config.symbol}
             </CardTitle>
             <CardDescription>
-              {config.asset_class} · {config.fee_bps} bps fees ·{" "}
+              {config.asset_class} | {config.fee_bps} bps fees |{" "}
               {config.balances[0]?.amount ?? "10000"}{" "}
               {config.balances[0]?.asset ?? "USDT"}
             </CardDescription>
@@ -118,7 +147,7 @@ export function RunPanel({
               disabled={!running || stopping}
               onClick={stop}
             >
-              {stopping ? "Stopping…" : "Stop"}
+              {stopping ? "Stopping..." : "Stop"}
             </Button>
           </div>
         </CardHeader>
@@ -131,6 +160,11 @@ export function RunPanel({
             <div>
               <span className="text-muted-foreground">Strategy: </span>
               {config.strategy_path || "Built-in buy & hold"}
+              {strategyInfo && (
+                <span className="ml-2 text-xs text-muted-foreground">
+                  ({strategyInfo.kind})
+                </span>
+              )}
             </div>
           </div>
           <div className="flex gap-2">
@@ -166,7 +200,7 @@ export function RunPanel({
             <CardTitle>Worker log</CardTitle>
             <CardDescription>
               {stopping
-                ? "Stopping worker…"
+                ? "Stopping worker..."
                 : running
                   ? "Backtest in progress"
                   : "Idle"}

@@ -32,6 +32,8 @@ pub fn run() {
             commands::pick_csv,
             commands::pick_toml,
             commands::pick_strategy,
+            commands::pick_strategy_dir,
+            commands::detect_strategy,
             commands::fetch_bars,
             commands::run_backtest,
             commands::stop_run,

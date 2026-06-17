@@ -70,9 +70,7 @@ export function QuickStartWizard({
         exchange: isCrypto ? "binance" : "yahoo",
         asset_class: isCrypto ? "crypto" : "equity",
         periods_per_year: isCrypto ? 365 : 252,
-        strategy_path:
-          config.strategy_path ??
-          "trading/strategies/simple_sma/strategy.py",
+        strategy_path: config.strategy_path ?? "simple_sma",
       });
       toast.success("Data downloaded", { description: path });
       setStep(1);
@@ -185,7 +183,7 @@ export function QuickStartWizard({
             )}
             {stepId === "market" && (
               <Button disabled={busy} onClick={fetchPreset}>
-                {busy ? "Downloading…" : "Download & continue"}
+                {busy ? "Downloading..." : "Download & continue"}
               </Button>
             )}
             {stepId === "strategy" && (
@@ -193,7 +191,7 @@ export function QuickStartWizard({
             )}
             {stepId === "run" && (
               <Button disabled={busy} onClick={handleRun}>
-                {busy ? "Running…" : "Run backtest"}
+                {busy ? "Running..." : "Run backtest"}
               </Button>
             )}
           </DialogFooter>

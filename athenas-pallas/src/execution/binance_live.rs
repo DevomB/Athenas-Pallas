@@ -14,7 +14,7 @@ use crate::types::{Asset, InstrumentId, OrderId, OrderStatus, OrderType, Side};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// API credentials (load from environment in binaries — never log secrets).
+/// API credentials (load from environment in binaries - never log secrets).
 #[derive(Clone, Debug)]
 pub struct BinanceCredentials {
     /// `X-MBX-APIKEY` header value.

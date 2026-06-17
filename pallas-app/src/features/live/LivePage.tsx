@@ -126,7 +126,7 @@ export function LivePage({ session, credentialsConfigured }: Props) {
           <CardHeader>
             <CardTitle>Live session</CardTitle>
             <CardDescription>
-              Real execution — defaults to testnet for safety
+              Real execution - defaults to testnet for safety
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
@@ -153,7 +153,7 @@ export function LivePage({ session, credentialsConfigured }: Props) {
                   disabled={session.starting || !credentialsConfigured}
                   onClick={requestStart}
                 >
-                  {session.starting ? "Starting…" : "Start live"}
+                  {session.starting ? "Starting..." : "Start live"}
                 </Button>
               ) : (
                 <Button
@@ -176,7 +176,7 @@ export function LivePage({ session, credentialsConfigured }: Props) {
               {session.snapshot?.mark_price && (
                 <>
                   {" "}
-                  · L1 mark <strong>{session.snapshot.mark_price}</strong>
+                  | L1 mark <strong>{session.snapshot.mark_price}</strong>
                 </>
               )}
             </CardDescription>
@@ -185,7 +185,7 @@ export function LivePage({ session, credentialsConfigured }: Props) {
             {session.equityHistory.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {isLive
-                  ? "Waiting for equity updates…"
+                  ? "Waiting for equity updates..."
                   : "Start a session to see equity updates."}
               </p>
             ) : (
@@ -255,7 +255,7 @@ export function LivePage({ session, credentialsConfigured }: Props) {
                 setConfirmSymbol("");
               }}
             >
-              I understand — start mainnet
+              I understand - start mainnet
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -18,7 +18,6 @@ fn strategy_py() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("trading")
-        .join("strategies")
         .join("simple_sma")
         .join("strategy.py")
 }

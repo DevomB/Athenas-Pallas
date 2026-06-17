@@ -51,9 +51,9 @@ pub enum OrderType {
     Limit,
     /// Market order.
     Market,
-    /// Stop market — triggers at stop price, then fills at market.
+    /// Stop market - triggers at stop price, then fills at market.
     StopMarket,
-    /// Stop limit — triggers at stop price, then rests as limit.
+    /// Stop limit - triggers at stop price, then rests as limit.
     StopLimit,
 }
 

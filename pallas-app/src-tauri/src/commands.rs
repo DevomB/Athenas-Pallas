@@ -7,15 +7,15 @@ use crate::data_tools::{
     resample_bars as resample_bars_file,
 };
 use crate::dto::{
-    ConfigDto, CredentialsDto, FetchRequest, FillDto, LiveSessionConfigDto, MergeRequest,
-    OpenOrderDto, PaperSessionConfigDto, ResampleRequest, RunResultDto, ApplySweepRequest,
-    SweepRequest, SweepResultDto, SweepResultRow,
+    ApplySweepRequest, ConfigDto, CredentialsDto, FetchRequest, FillDto, LiveSessionConfigDto,
+    MergeRequest, OpenOrderDto, PaperSessionConfigDto, ResampleRequest, RunResultDto,
+    StrategyResolutionDto, SweepRequest, SweepResultDto, SweepResultRow,
 };
 use crate::session::AppSession;
 use crate::trading_session::TradingSessionManager;
 use athenas_pallas::backtest::{
-    report_to_dto, run_backtest as engine_run_backtest, run_backtest_with_cancel,
-    run_external_backtest_with_cancel, BacktestConfig,
+    report_to_dto, resolve_strategy_path, run_backtest as engine_run_backtest,
+    run_backtest_with_cancel, run_external_backtest_with_cancel, BacktestConfig,
 };
 use athenas_pallas::data::fetch::{binance, yahoo};
 use athenas_pallas::events::ControlEvent;
@@ -60,9 +60,30 @@ pub async fn pick_strategy(app: AppHandle) -> Result<Option<String>, String> {
     let file = app
         .dialog()
         .file()
-        .add_filter("Strategy", &["py", "exe"])
+        .add_filter("Strategy file", &["py", "exe"])
         .blocking_pick_file();
     Ok(file.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub async fn pick_strategy_dir(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let folder = app.dialog().file().blocking_pick_folder();
+    Ok(folder.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub fn detect_strategy(path: String) -> Result<StrategyResolutionDto, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("strategy path is empty".into());
+    }
+    let resolved =
+        resolve_strategy_path(PathBuf::from(trimmed).as_path()).map_err(|e| e.to_string())?;
+    Ok(StrategyResolutionDto {
+        kind: resolved.kind().to_string(),
+        path: resolved.path().display().to_string(),
+    })
 }
 
 #[tauri::command]
@@ -509,10 +530,7 @@ pub fn list_open_orders(
 }
 
 #[tauri::command]
-pub fn save_credentials(
-    app: AppHandle,
-    credentials: CredentialsDto,
-) -> Result<(), String> {
+pub fn save_credentials(app: AppHandle, credentials: CredentialsDto) -> Result<(), String> {
     write_stored_credentials(&app, credentials)
 }
 
@@ -586,7 +604,13 @@ fn run_parameter_sweep_sync(app: &AppHandle, req: SweepRequest) -> Result<SweepR
     }
     let mut wtr = csv::Writer::from_path(&req.output_path).map_err(|e| e.to_string())?;
     wtr.write_record([
-        "name", "pnl", "sharpe", "sortino", "max_drawdown", "closed_trades", "win_rate",
+        "name",
+        "pnl",
+        "sharpe",
+        "sortino",
+        "max_drawdown",
+        "closed_trades",
+        "win_rate",
         "profit_factor",
     ])
     .map_err(|e| e.to_string())?;

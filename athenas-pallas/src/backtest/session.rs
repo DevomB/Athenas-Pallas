@@ -10,6 +10,7 @@ use std::sync::Arc;
 use super::config::{instrument_meta_from_config, BacktestConfig, DataFormat, ExtraInstrument};
 use super::cpp_build::build_cpp_strategy;
 use super::runner::{BacktestReport, BacktestRunner};
+use super::strategy_resolver::{resolve_strategy_path, ResolvedStrategy};
 use crate::instrument::AssetClass;
 use crate::strategy::ExternalStrategy;
 use crate::types::{Asset, EquityPoint};
@@ -386,39 +387,16 @@ fn spawn_external_strategy(
     cfg: &BacktestConfig,
     strategy_path: &Path,
 ) -> crate::Result<ExternalStrategy> {
-    if strategy_path.is_dir() && strategy_path.join("CMakeLists.txt").is_file() {
-        let binary = build_cpp_strategy(strategy_path)?;
-        return ExternalStrategy::spawn_binary(&binary);
-    }
-    let script = resolve_strategy_path(strategy_path)?;
-    if script.extension().and_then(|e| e.to_str()) == Some("py") {
-        ExternalStrategy::spawn_python(&script, &cfg.python_exe)
-    } else {
-        ExternalStrategy::spawn_binary(&script)
-    }
-}
-
-fn resolve_strategy_path(path: &Path) -> crate::Result<PathBuf> {
-    if path.is_file() {
-        return Ok(path.to_path_buf());
-    }
-    if path.is_dir() {
-        if path.join("CMakeLists.txt").is_file() {
-            return Ok(path.to_path_buf());
+    match resolve_strategy_path(strategy_path)? {
+        ResolvedStrategy::CmakeCpp(dir) => {
+            let binary = build_cpp_strategy(&dir)?;
+            ExternalStrategy::spawn_binary(&binary)
         }
-        let py = path.join("strategy.py");
-        if py.is_file() {
-            return Ok(py);
+        ResolvedStrategy::Python(script) => {
+            ExternalStrategy::spawn_python(&script, &cfg.python_exe)
         }
-        let main_py = path.join("main.py");
-        if main_py.is_file() {
-            return Ok(main_py);
-        }
+        ResolvedStrategy::Binary(binary) => ExternalStrategy::spawn_binary(&binary),
     }
-    Err(crate::Error::Invalid(format!(
-        "no strategy script at {}",
-        path.display()
-    )))
 }
 
 #[cfg(test)]

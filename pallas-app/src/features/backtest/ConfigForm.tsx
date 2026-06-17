@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -27,7 +28,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import type { ConfigDto, ExtraInstrumentDto } from "@/types";
+import type {
+  ConfigDto,
+  ExtraInstrumentDto,
+  StrategyResolutionDto,
+} from "@/types";
 import { validateConfig } from "@/lib/configValidation";
 
 interface Props {
@@ -60,7 +65,36 @@ function parseFeeBps(raw: string, fallback: number): number {
 export function ConfigForm({ config, onChange }: Props) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [strategyInfo, setStrategyInfo] =
+    useState<StrategyResolutionDto | null>(null);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
   const validationError = validateConfig(config);
+
+  useEffect(() => {
+    const path = config.strategy_path?.trim();
+    if (!path) {
+      setStrategyInfo(null);
+      setStrategyError(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<StrategyResolutionDto>("detect_strategy", { path })
+      .then((info) => {
+        if (!cancelled) {
+          setStrategyInfo(info);
+          setStrategyError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setStrategyInfo(null);
+          setStrategyError(String(e));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.strategy_path]);
 
   function set<K extends keyof ConfigDto>(key: K, value: ConfigDto[K]) {
     onChange({ ...config, [key]: value });
@@ -131,6 +165,15 @@ export function ConfigForm({ config, onChange }: Props) {
     }
   }
 
+  async function pickStrategyDir() {
+    try {
+      const path = await invoke<string | null>("pick_strategy_dir");
+      if (path) set("strategy_path", path);
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+
   function updateExtra(index: number, patch: Partial<ExtraInstrumentDto>) {
     const extras = [...(config.extra_instruments ?? [])];
     extras[index] = { ...extras[index], ...patch };
@@ -161,10 +204,10 @@ export function ConfigForm({ config, onChange }: Props) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" disabled={loading} onClick={loadToml}>
-          {loading ? "Loading…" : "Load TOML"}
+          {loading ? "Loading..." : "Load TOML"}
         </Button>
         <Button variant="secondary" disabled={saving} onClick={saveToml}>
-          {saving ? "Saving…" : "Save TOML"}
+          {saving ? "Saving..." : "Save TOML"}
         </Button>
       </div>
 
@@ -236,7 +279,7 @@ export function ConfigForm({ config, onChange }: Props) {
                       </span>
                     </TooltipTrigger>
                     <TooltipContent>
-                      Historical OHLCV CSV — fetch one in Data Studio if needed
+                      Historical OHLCV CSV - fetch one in Data Studio if needed
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -260,25 +303,38 @@ export function ConfigForm({ config, onChange }: Props) {
             <CardHeader>
               <CardTitle>Strategy</CardTitle>
               <CardDescription>
-                Python or compiled strategy (optional — defaults to buy & hold)
+                Folder, name, Python file, or compiled binary
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="strategy">Strategy path</Label>
-                <div className="flex gap-2">
+                <Label htmlFor="strategy">Strategy</Label>
+                <div className="flex flex-wrap gap-2">
                   <Input
                     id="strategy"
+                    className="min-w-64 flex-1"
                     value={config.strategy_path ?? ""}
                     onChange={(e) =>
                       set("strategy_path", e.target.value || null)
                     }
-                    placeholder="Leave empty for built-in buy & hold"
+                    placeholder="simple_sma, trading/simple_sma, or a file path"
                   />
+                  <Button variant="secondary" onClick={pickStrategyDir}>
+                    Folder
+                  </Button>
                   <Button variant="secondary" onClick={pickStrategy}>
-                    Browse
+                    File
                   </Button>
                 </div>
+                {strategyInfo && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant="secondary">{strategyInfo.kind}</Badge>
+                    <span className="break-all">{strategyInfo.path}</span>
+                  </div>
+                )}
+                {strategyError && (
+                  <p className="text-xs text-destructive">{strategyError}</p>
+                )}
               </div>
             </CardContent>
           </Card>
