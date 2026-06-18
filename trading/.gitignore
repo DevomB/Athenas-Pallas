@@ -1,0 +1,6 @@
+# Keep Git focused on the supported strategy examples and SDK folders.
+*/
+!_sdk/
+!_template/
+!simple_sma/
+!simple_sma_cpp/
