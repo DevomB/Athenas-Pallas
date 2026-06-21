@@ -20,3 +20,6 @@ pub enum SubKind {
     /// Bounded depth snapshot.
     BookL2Snapshot,
 }
+
+#[cfg(feature = "databento")]
+pub mod databento;

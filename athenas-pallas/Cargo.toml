@@ -16,10 +16,11 @@ categories = ["asynchronous", "network-programming"]
 default = []
 binance = ["dep:tokio-tungstenite", "dep:futures-util"]
 control-server = ["dep:axum", "dep:tower", "dep:hyper"]
+databento = ["dep:databento"]
 live-trading = ["dep:reqwest"]
 binance-live = ["binance", "live-trading", "dep:hmac", "dep:sha2", "dep:hex"]
 tracing-full = ["dep:tracing-subscriber"]
-all = ["binance-live", "control-server", "tracing-full"]
+all = ["binance-live", "control-server", "databento", "tracing-full"]
 
 [dependencies]
 async-trait = "0.1"
@@ -36,6 +37,7 @@ smol_str = "0.3"
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
 rayon = "1.10"
+databento = { version = "0.53", optional = true, default-features = false, features = ["historical"] }
 tokio-tungstenite = { version = "0.24", optional = true, default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", optional = true }
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls"] }
@@ -63,6 +65,11 @@ path = "src/bin/pallas-sweep.rs"
 [[bin]]
 name = "pallas-backtest"
 path = "src/bin/pallas-backtest.rs"
+
+[[bin]]
+name = "pallas-databento-fetch"
+path = "src/bin/pallas-databento-fetch.rs"
+required-features = ["databento"]
 
 [[example]]
 name = "stress_backtest"

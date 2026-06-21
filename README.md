@@ -79,6 +79,28 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_
 
 Copy [`backtest.toml.example`](backtest.toml.example) to `backtest.toml` and point `[backtest].data` at your file.
 
+### Databento Historical Fetch
+
+Enable the optional Databento Rust client to pull OHLCV bars into the same CSV format:
+
+```bash
+$env:DATABENTO_API_KEY="YOUR_KEY"  # PowerShell
+cargo run --release -p athenas-pallas --features databento --bin pallas-databento-fetch -- `
+  --dataset XNAS.ITCH `
+  --symbol AAPL `
+  --schema ohlcv-1d `
+  --start 2024-01-01 `
+  --end 2024-02-01 `
+  --output data/AAPL_databento.csv
+
+cargo run --release -p athenas-pallas --bin pallas-backtest -- `
+  --data data/AAPL_databento.csv `
+  --data-format ohlcv `
+  --instrument databento:AAPL `
+  --asset-class equity `
+  --initial-balance USD:10000
+```
+
 ## Project Layout
 
 | Path | Purpose |
@@ -104,6 +126,7 @@ Binance execution examples are optional broker-specific demos only; do not use t
 | `binance` | Public WebSocket connector |
 | `binance-live` | Signed REST + user stream |
 | `control-server` | Localhost HTTP control plane |
+| `databento` | Databento historical OHLCV fetch CLI |
 | `all` | All optional deps |
 
 ## Benchmarks
@@ -111,6 +134,8 @@ Binance execution examples are optional broker-specific demos only; do not use t
 ```bash
 cargo bench -p athenas-pallas --bench backtest_hotpath
 ```
+
+See [`docs/OPTIMIZATION_AUDIT.md`](docs/OPTIMIZATION_AUDIT.md) for the ranked Rust optimization backlog.
 
 ## License
 

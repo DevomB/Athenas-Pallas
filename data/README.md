@@ -6,6 +6,23 @@ This folder is your workspace for local market-history files. Nothing here is co
 
 Export or copy a CSV into this directory, then point `pallas-backtest --data` or `[backtest].data` in your TOML at that file.
 
+## Pull from Databento
+
+The optional Databento integration writes engine-compatible OHLCV CSV from the official Rust client. Set `DATABENTO_API_KEY`, choose a Databento dataset/symbol/schema, then backtest the output file.
+
+```powershell
+$env:DATABENTO_API_KEY="YOUR_KEY"
+cargo run --release -p athenas-pallas --features databento --bin pallas-databento-fetch -- `
+  --dataset XNAS.ITCH `
+  --symbol AAPL `
+  --schema ohlcv-1d `
+  --start 2024-01-01 `
+  --end 2024-02-01 `
+  --output data/AAPL_databento.csv
+```
+
+Supported fetch schemas are `ohlcv-1s`, `ohlcv-1m`, `ohlcv-1h`, and `ohlcv-1d`. The output columns are exactly `ts,open,high,low,close,volume`, so use `data_format = "ohlcv"` or `--data-format ohlcv`.
+
 ## Resample offline
 
 Aggregate a finer CSV to a coarser interval:

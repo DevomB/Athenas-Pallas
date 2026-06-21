@@ -6,6 +6,19 @@ See the [README](../README.md) for install and quickstart. This page is the long
 
 Files in `data/` are local only (gitignored). Export or copy your market-history CSVs there before running a backtest.
 
+Optional Databento pull:
+
+```powershell
+$env:DATABENTO_API_KEY="YOUR_KEY"
+cargo run --release -p athenas-pallas --features databento --bin pallas-databento-fetch -- `
+  --dataset XNAS.ITCH `
+  --symbol AAPL `
+  --schema ohlcv-1d `
+  --start 2024-01-01 `
+  --end 2024-02-01 `
+  --output data/AAPL_databento.csv
+```
+
 ## 2. Backtest (built-in buy-and-hold)
 
 ```bash
