@@ -7,7 +7,6 @@ use athenas_pallas::types::{InstrumentId, OrderType, Side};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
 
 struct StopTestStrategy {
     instrument: InstrumentId,

@@ -4,7 +4,7 @@ Event-driven algorithmic trading in Rust: **backtest**, **paper**, and **live** 
 
 - Sync CSV replay hot path (~0.43 microseconds/bar amortized; see [benchmarks](docs/benchmarks.txt))
 - Python and C++ strategies over newline JSON ([protocol](trading/protocol.md))
-- `pallas-fetch` for Alpha Vantage daily history
+- Local CSV, pbar, and strategy-driven backtest workflows
 
 ## Install
 
@@ -27,13 +27,13 @@ cargo test -p athenas-pallas
 Built-in buy-and-hold over the committed BTCUSDT fixture:
 
 ```bash
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument alpha-vantage:BTCUSDT --initial-balance USDT:10000
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument csv:BTCUSDT --initial-balance USDT:10000
 ```
 
 Direct strategy-name resolution:
 
 ```bash
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument alpha-vantage:BTCUSDT --initial-balance USDT:10000 --strategy simple_sma
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument csv:BTCUSDT --initial-balance USDT:10000 --strategy simple_sma
 ```
 
 Or use the helper scripts:
@@ -69,17 +69,12 @@ Detection order:
 
 Legacy paths such as `trading/strategies/simple_sma/strategy.py` are still resolved for compatibility, but new configs should use `strategy = "simple_sma"`.
 
-## Real Market Data
+## Market Data
 
-Fetch into `data/` (gitignored local workspace):
+Put local CSV exports into `data/` (gitignored local workspace), then point the backtest at the file:
 
 ```bash
-cp .env.example .env
-# Fill ALPHA_VANTAGE_API_KEY in .env, or set it in your shell.
-
-cargo run -p athenas-pallas --bin pallas-fetch --features data-fetch -- --provider alpha-vantage --asset equity --symbol AAPL --days 90 -o data/AAPL_live.csv
-
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_live.csv --data-format ohlcv --instrument alpha-vantage:AAPL --initial-balance USD:10000
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_live.csv --data-format ohlcv --instrument csv:AAPL --asset-class equity --initial-balance USD:10000
 ```
 
 Copy [`backtest.toml.example`](backtest.toml.example) to `backtest.toml` and point `[backtest].data` at your file.
@@ -88,9 +83,9 @@ Copy [`backtest.toml.example`](backtest.toml.example) to `backtest.toml` and poi
 
 | Path | Purpose |
 |------|---------|
-| `athenas-pallas/` | Rust engine, CLI (`pallas-backtest`, `pallas-fetch`) |
+| `athenas-pallas/` | Rust engine and CLI tools |
 | `trading/` | Direct Python/C++ strategy folders plus shared SDKs in `_sdk/` |
-| `data/` | Your fetched CSVs (empty in git) |
+| `data/` | Your local CSVs (empty in git) |
 | `athenas-pallas/tests/fixtures/` | CI / golden test data only |
 
 ## Examples
@@ -100,13 +95,12 @@ cargo run -p athenas-pallas --example backtest_csv
 cargo run -p athenas-pallas --example paper_binance --features binance,control-server
 ```
 
-Alpha Vantage is a market-data API, not a broker execution venue. The old Binance execution examples remain optional broker-specific demos only; do not use them unless you intentionally want Binance order routing.
+Binance execution examples are optional broker-specific demos only; do not use them unless you intentionally want Binance order routing.
 
 ## Features
 
 | Cargo feature | Enables |
 |---------------|---------|
-| `data-fetch` | `pallas-fetch` (Alpha Vantage daily bars) |
 | `binance` | Public WebSocket connector |
 | `binance-live` | Signed REST + user stream |
 | `control-server` | Localhost HTTP control plane |

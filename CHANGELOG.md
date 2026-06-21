@@ -6,7 +6,7 @@
 
 - Single-crate backtest path: `pallas-backtest` CLI, sync `dispatch_event_sync`, `BarSeries`, `ExternalStrategy` (Python/C++ JSON IPC).
 - Inlined `pallas-instrument` into `athenas-pallas`; removed `pallas-data`, `pallas-execution`, `pallas-macro` from the workspace.
-- Test fixtures under `athenas-pallas/tests/fixtures/`; `data/` is a gitignored fetch workspace.
+- Test fixtures under `athenas-pallas/tests/fixtures/`; `data/` is a gitignored local data workspace.
 - Python SMA proof strategy in `Backtesting-Engine/trading/` with golden integration test.
 - Removed the Tauri desktop app; workflows are CLI/Rust-only.
 

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
     about = "Merge multiple OHLCV CSVs by timestamp"
 )]
 struct Args {
-    /// `format:exchange:symbol:path` (repeatable). Format: ohlcv|alpha-vantage|yahoo|fx|future
+    /// `format:exchange:symbol:path` (repeatable). Format: ohlcv|yahoo|fx|future
     #[arg(long = "source", value_name = "SPEC")]
     sources: Vec<String>,
     #[arg(short, long)]
@@ -50,12 +50,12 @@ fn parse_source_spec(
     let parts: Vec<&str> = spec.splitn(4, ':').collect();
     if parts.len() != 4 {
         return Err(
-            "source spec must be format:exchange:symbol:path (e.g. ohlcv:alpha-vantage:AAPL:data/AAPL.csv)"
+            "source spec must be format:exchange:symbol:path (e.g. ohlcv:csv:AAPL:data/AAPL.csv)"
                 .into(),
         );
     }
     let format = match parts[0].to_lowercase().as_str() {
-        "ohlcv" | "alpha-vantage" | "alphavantage" => DataFormat::Ohlcv,
+        "ohlcv" => DataFormat::Ohlcv,
         "yahoo" => DataFormat::Yahoo,
         "fx" => DataFormat::Fx,
         "future" | "futures" => DataFormat::Future,

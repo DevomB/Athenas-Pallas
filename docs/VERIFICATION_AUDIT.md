@@ -36,7 +36,7 @@ This file is the audit log (plan file is read-only). Pass 2 is required before `
 | OHLC high/low touch for bar replay fills | **PARTIAL** | Stops use bar high/low; limits still use synthetic L1 bid/ask from close |
 | `lot_size` / `tick_size` enforced at submission | **DONE** | `normalize_order` in `paper.rs` |
 | Auto `periods_per_year` | **DONE** | `runner.rs` + `interval.rs` |
-| FetchPanel + CLI interval presets | **DONE** | `intervals.rs`, `FetchPanel.tsx`, `pallas-fetch --list-intervals` |
+| Built-in data downloader | **REMOVED** | Historical downloader code and CLI are no longer part of the crate |
 | CSV schemas per asset class | **DONE** | `data/README.md` (updated: Adj Close, FX sources, bonds, futures) |
 
 ### Phase 0b - Portfolio performance

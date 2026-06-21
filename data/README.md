@@ -1,21 +1,14 @@
 # Local market data (gitignored)
 
-This folder is your workspace for downloaded history. Nothing here is committed to the repo.
+This folder is your workspace for local market-history files. Nothing here is committed to the repo.
 
-## Fetch bars
+## Add bars
 
-```bash
-cargo run -p athenas-pallas --bin pallas-fetch --features data-fetch -- \
-  --provider alpha-vantage --asset equity --symbol AAPL --days 90 \
-  -o data/AAPL_live.csv
-```
-
-Point `pallas-backtest --data` or `[backtest].data` in your TOML at a file in this directory.
-Set `ALPHA_VANTAGE_API_KEY` in your shell or in the repo-local `.env` file. `.env` is gitignored; `.env.example` is the placeholder other users can copy.
+Export or copy a CSV into this directory, then point `pallas-backtest --data` or `[backtest].data` in your TOML at that file.
 
 ## Resample offline
 
-Aggregate a finer CSV to a coarser interval without re-fetching:
+Aggregate a finer CSV to a coarser interval:
 
 ```bash
 cargo run -p athenas-pallas --bin pallas-resample -- \
@@ -26,7 +19,7 @@ cargo run -p athenas-pallas --bin pallas-resample -- \
 
 ### Crypto / generic OHLCV (`DataFormat::Ohlcv`)
 
-Used by Alpha Vantage fetch and most crypto backtests.
+Used by most crypto and generic OHLCV backtests.
 
 | Column  | Type    | Description                          |
 |---------|---------|--------------------------------------|
@@ -48,11 +41,9 @@ Set `asset_class = "crypto"` (default). For Sharpe annualization, set `bar_inter
 
 ### Equities (`DataFormat::Ohlcv`)
 
-Alpha Vantage daily export normalized by `pallas-fetch`.
-
 Use the same `ts,open,high,low,close,volume` schema as generic OHLCV.
 
-Set `asset_class = "equity"`, `exchange = "alpha-vantage"`. Optional `session_filter = "equity_rth"` filters to US regular hours if you later import intraday bars from another source.
+Set `asset_class = "equity"`. Optional `session_filter = "equity_rth"` filters to US regular hours if you import intraday bars.
 
 ### Forex (`DataFormat::Fx`)
 
@@ -66,7 +57,7 @@ L1 quote snapshots (not OHLCV). Used for spread-aware FX replay.
 
 Set `asset_class = "forex"`. Optional `session_filter = "forex_245"` for Sunday–Friday FX hours.
 
-**Free FX data (manual export):** Dukascopy Historical Data Export, TrueFX (historical tick/quote CSV), or broker exports. The built-in `pallas-fetch` path currently covers Alpha Vantage daily equity and crypto bars.
+**Free FX data (manual export):** Dukascopy Historical Data Export, TrueFX (historical tick/quote CSV), or broker exports.
 
 ### Bonds (`AssetClass::Bond`)
 
@@ -104,7 +95,7 @@ auto_periods_per_year = true
 session_filter = "none"   # or equity_rth, forex_245
 
 [instrument]
-exchange = "alpha-vantage"
+exchange = "csv"
 symbol = "BTCUSDT"
 asset_class = "crypto"
 ```

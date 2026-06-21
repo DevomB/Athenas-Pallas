@@ -3,7 +3,7 @@
 use crate::instrument::AssetClass;
 use time::OffsetDateTime;
 
-/// Map a fetch/resample interval label to periods per year (crypto-style 24/7 unless noted).
+/// Map a resample interval label to periods per year (crypto-style 24/7 unless noted).
 pub fn periods_per_year_from_interval(interval: &str) -> Option<f64> {
     match interval.trim().to_lowercase().as_str() {
         "1s" => Some(31_536_000.0),

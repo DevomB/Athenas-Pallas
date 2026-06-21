@@ -13,7 +13,7 @@ use std::path::PathBuf;
 struct Args {
     #[arg(long)]
     data: Option<PathBuf>,
-    #[arg(long, default_value = "alpha-vantage:BTCUSDT")]
+    #[arg(long, default_value = "csv:BTCUSDT")]
     instrument: String,
     #[arg(long = "initial-balance", value_parser = parse_balance)]
     initial_balance: Vec<(String, String)>,
@@ -59,7 +59,7 @@ fn parse_asset_class(s: &str) -> athenas_pallas::instrument::AssetClass {
 
 fn parse_data_format(s: &str) -> DataFormat {
     match s.to_lowercase().as_str() {
-        "ohlcv" | "alpha-vantage" | "alphavantage" => DataFormat::Ohlcv,
+        "ohlcv" => DataFormat::Ohlcv,
         "yahoo" => DataFormat::Yahoo,
         "fx" => DataFormat::Fx,
         "future" | "futures" => DataFormat::Future,

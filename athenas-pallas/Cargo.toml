@@ -9,7 +9,7 @@ repository.workspace = true
 readme = "../README.md"
 documentation = "https://docs.rs/athenas-pallas"
 homepage = "https://github.com/DevomB/Athenas-Pallas"
-keywords = ["trading", "backtest", "alphavantage", "strategy", "algo"]
+keywords = ["trading", "backtest", "strategy", "algo"]
 categories = ["asynchronous", "network-programming"]
 
 [features]
@@ -19,8 +19,7 @@ control-server = ["dep:axum", "dep:tower", "dep:hyper"]
 live-trading = ["dep:reqwest"]
 binance-live = ["binance", "live-trading", "dep:hmac", "dep:sha2", "dep:hex"]
 tracing-full = ["dep:tracing-subscriber"]
-data-fetch = ["dep:reqwest"]
-all = ["binance-live", "control-server", "tracing-full", "data-fetch"]
+all = ["binance-live", "control-server", "tracing-full"]
 
 [dependencies]
 async-trait = "0.1"
@@ -64,11 +63,6 @@ path = "src/bin/pallas-sweep.rs"
 [[bin]]
 name = "pallas-backtest"
 path = "src/bin/pallas-backtest.rs"
-
-[[bin]]
-name = "pallas-fetch"
-path = "src/bin/pallas-fetch.rs"
-required-features = ["data-fetch"]
 
 [[example]]
 name = "stress_backtest"

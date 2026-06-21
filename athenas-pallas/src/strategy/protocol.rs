@@ -199,7 +199,7 @@ mod tests {
 
     use super::*;
 
-    use crate::types::{ExchangeId, Side, Symbol};
+    use crate::types::Side;
 
     #[test]
 

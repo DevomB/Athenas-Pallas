@@ -92,7 +92,7 @@ fn parse_asset_class(s: &str) -> AssetClass {
 
 fn parse_data_format(s: &str) -> DataFormat {
     match s.to_lowercase().as_str() {
-        "ohlcv" | "alpha-vantage" | "alphavantage" => DataFormat::Ohlcv,
+        "ohlcv" => DataFormat::Ohlcv,
         "yahoo" => DataFormat::Yahoo,
         "fx" => DataFormat::Fx,
         "future" | "futures" => DataFormat::Future,

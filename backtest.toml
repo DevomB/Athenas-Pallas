@@ -1,7 +1,7 @@
-# Copy to backtest.toml and set [backtest].data to a CSV you fetched into data/
+# Copy to backtest.toml and set [backtest].data to a CSV you imported into data/
 
 [instrument]
-exchange = "alpha-vantage"
+exchange = "csv"
 symbol = "BTCUSDT"
 asset_class = "crypto"
 

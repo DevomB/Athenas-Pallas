@@ -5,7 +5,7 @@ Event-driven trading engine with one core loop for backtest, paper, and live mod
 ```mermaid
 flowchart LR
   subgraph ingest
-    CSV[CSV / pbar / Alpha Vantage fetch]
+    CSV[CSV / pbar]
     WS[Optional broker WS]
   end
   subgraph engine
@@ -29,7 +29,7 @@ flowchart LR
 
 | Layer | Crate path | Role |
 |-------|------------|------|
-| Data | `data/fetch`, `backtest/sources` | Download OHLCV; normalize CSV layouts |
+| Data | `backtest/sources` | Normalize CSV layouts |
 | Replay | `backtest/runner`, `backtest/merge` | Deterministic historical event stream and streaming k-way source merge |
 | State | `state.rs` | Balances, positions, L1/L2, fills |
 | Execution | `execution/paper.rs` | Simulated fills, fees, margin-aware cash flows |
@@ -70,7 +70,6 @@ The resolver detects CMake C++ directories, Python directories/files, and compil
 | Binary | Purpose |
 |--------|---------|
 | `pallas-backtest` | Run backtest from TOML/flags |
-| `pallas-fetch` | Download Alpha Vantage daily OHLCV |
 | `pallas-resample` | Offline bar aggregation |
 | `pallas-merge` | K-way merge CSV streams by timestamp |
 | `pallas-sweep` | Grid search over TOML parameters |

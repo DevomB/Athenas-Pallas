@@ -2,15 +2,9 @@
 
 See the [README](../README.md) for install and quickstart. This page is the longer copy-paste flow.
 
-## 1. Fetch data
+## 1. Add data
 
-```bash
-cargo run -p athenas-pallas --bin pallas-fetch --features data-fetch -- \
-  --provider alpha-vantage --asset equity --symbol AAPL --days 30 \
-  -o data/AAPL_live.csv
-```
-
-Files in `data/` are local only (gitignored). Set `ALPHA_VANTAGE_API_KEY` in your shell or repo-local `.env` before fetching.
+Files in `data/` are local only (gitignored). Export or copy your market-history CSVs there before running a backtest.
 
 ## 2. Backtest (built-in buy-and-hold)
 
@@ -18,7 +12,8 @@ Files in `data/` are local only (gitignored). Set `ALPHA_VANTAGE_API_KEY` in you
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
   --data data/AAPL_live.csv \
   --data-format ohlcv \
-  --instrument alpha-vantage:AAPL \
+  --instrument csv:AAPL \
+  --asset-class equity \
   --initial-balance USD:10000
 ```
 
@@ -27,7 +22,7 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- \
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
   --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv \
-  --instrument alpha-vantage:BTCUSDT \
+  --instrument csv:BTCUSDT \
   --initial-balance USDT:10000 \
   --strategy simple_sma \
   --output target/report.json
@@ -37,7 +32,7 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- \
 
 ```bash
 cp backtest.toml.example backtest.toml
-# edit [backtest].data to your fetched CSV
+# edit [backtest].data to your CSV
 cargo run --release -p athenas-pallas --bin pallas-backtest -- --config backtest.toml
 ```
 
@@ -46,8 +41,8 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- --config backtest
 ```bash
 # Merge two CSV streams by timestamp
 cargo run -p athenas-pallas --bin pallas-merge -- \
-  --source ohlcv:alpha-vantage:BTCUSDT:data/BTC.csv \
-  --source ohlcv:alpha-vantage:AAPL:data/AAPL.csv \
+  --source ohlcv:csv:BTCUSDT:data/BTC.csv \
+  --source ohlcv:csv:AAPL:data/AAPL.csv \
   -o data/merged.csv
 
 # Parameter grid from TOML
