@@ -13,9 +13,10 @@ instead of materializing `Event::Market(Bar)` each bar.
 ### 2. Replace Passive Order Polling Scan with Price-Indexed Resting Orders — DONE
 
 `oms/mod.rs` maintains per-instrument `BTreeMap` books (`buy_limits`, `sell_limits`, `buy_stops`,
-`sell_stops`) with `SmallVec<[OrderId; 4]>` at each price level. `OrderStore::pollable_ids` returns
-only candidates whose limit/stop could cross against the current L1 or bar high/low; paper
-`poll_instrument_into` evaluates fill rules on that subset only.
+`sell_stops`) with `SmallVec<[OrderId; 4]>` at each price level. `OrderStore::pollable_ids` keeps
+the public `Vec`-returning API, while the fill engine uses the internal `pollable_ids_into` path
+with a reusable `SmallVec<[OrderId; 16]>` candidate buffer. Paper `poll_instrument_into` evaluates
+fill rules only on candidates whose limit/stop could cross against the current L1 or bar high/low.
 
 ### 3. Cache Period Inference Without Allocating Timestamps — DONE
 
@@ -77,21 +78,21 @@ Expected impact: less hashing and cloning in fills, equity marking, and multi-in
 
 Proof: benchmark multi-instrument replay with 100 instruments and frequent fills.
 
-### 8. Replace `HashMap` With Faster Hashers Where DoS Resistance Is Irrelevant
+### 8. Replace `HashMap` With Faster Hashers Where DoS Resistance Is Irrelevant — PARTIAL
 
 Current paths: `state.rs`, `instrument/registry.rs`, `metrics.rs`
 
-For internal deterministic maps keyed by small trusted IDs, consider `rustc_hash::FxHashMap` or `hashbrown::HashMap` with a faster hasher. Keep standard `HashMap` at public or untrusted boundaries.
+`InstrumentRegistry::by_id`, `GlobalState::strategy_positions`, `OrderStore::books`, and aggregate quote collection now use `rustc_hash` fast-hash collections for trusted internal IDs. Keep standard `HashMap` at public/config/protocol boundaries such as balances, CLI parsing, and external strategy messages.
 
 Expected impact: small but measurable in state-heavy runs.
 
 Proof: benchmark strategy attribution and registry lookup hot loops.
 
-### 9. Use `SmallVec` for Tiny Event/Intent Buffers
+### 9. Use `SmallVec` for Tiny Event/Intent Buffers — DONE
 
 Current paths: `engine/sync.rs`, `execution/fills.rs`, `execution/sync_paper.rs`
 
-Most execution calls return 0 to 4 account events. `AccountEvents` is already `SmallVec<[AccountEvent; 4]>`; keep new gateway paths on that type and avoid reintroducing short-lived `Vec<AccountEvent>` buffers.
+Most execution calls return 0 to 4 account events. `AccountEvents` is `SmallVec<[AccountEvent; 4]>`; fill emission now appends order, fill, and balance events directly into that buffer without a short-lived `Vec<AccountEvent>`. Order polling also uses a small inline candidate buffer for common shallow books.
 
 Expected impact: removes heap allocation for common fills/cancels.
 
@@ -123,7 +124,7 @@ Proof: benchmark reading 1GB `.pbar`; compare standard read vs mmap.
 
 Current path: `backtest/bar.rs`
 
-CSV load still parses `Decimal` then converts to ticks one field at a time. For high-volume ingestion, add a specialized fast path for integer-like CSV fields or an explicit importer that writes the documented OHLCV CSV format. No Databento crate/importer is installed in this checkout.
+CSV load still parses `Decimal` then converts to ticks one field at a time. For high-volume ingestion, add a specialized fast path for integer-like CSV fields or a provider importer that writes the documented OHLCV CSV format. The optional Databento path already writes that cache format behind the `databento` feature.
 
 Expected impact: faster ingestion, not replay.
 
@@ -172,7 +173,7 @@ Strong resume bullets should be tied to measured outcomes:
 - "Implemented cache-friendly fixed-point OHLCV replay using contiguous `repr(C)` bars and binary sidecar caches."
 - "Reduced multi-instrument replay memory from materialized event vectors to streaming k-way merge with one pending event per source."
 - "Designed a benchmark-backed order-trigger index reducing passive fill checks from O(bars * orders) to O(log orders + fills)."
-- "Kept market-data ingestion provider-neutral by requiring local OHLCV/Yahoo/FX/futures CSV or pbar inputs."
+- "Kept the replay core provider-neutral by normalizing vendor data into local OHLCV/Yahoo/FX/futures CSV or pbar inputs before backtesting."
 
 ## Verification Plan
 

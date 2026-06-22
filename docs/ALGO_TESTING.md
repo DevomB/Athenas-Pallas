@@ -6,6 +6,23 @@ See the [README](../README.md) for install and quickstart. This page is the long
 
 Files in `data/` are local only (gitignored). Export or copy your market-history CSVs there before running a backtest.
 
+Optional Databento OHLCV cache/export:
+
+```bash
+cargo run --release -p athenas-pallas --features databento --bin pallas-backtest -- \
+  --provider databento \
+  --dataset EQUS.MINI \
+  --symbol AAPL \
+  --schema ohlcv-1d \
+  --start 01-01-2025 \
+  --end 02-01-2025 \
+  --instrument databento:AAPL \
+  --initial-balance USD:10000 \
+  --yes
+```
+
+Set `DATABENTO_API_KEY` before fetching uncached data. The provider path writes a CSV cache under `data/databento/`, then uses the same backtest replay path as local files.
+
 ## 2. Backtest (built-in buy-and-hold)
 
 ```bash

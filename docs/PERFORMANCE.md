@@ -8,7 +8,7 @@ This document explains how the backtest hot path is optimized and how to reprodu
 - Cache-friendly OHLCV storage via fixed-point ticks in a contiguous `Vec<Bar>`.
 - Dense instrument indices: positions and L1 state live in `Vec` rows, not per-tick `HashMap` lookups.
 - Streaming I/O for CSV load, preview, and multi-source merge paths.
-- Preallocated reusable buffers in replay loops.
+- Preallocated reusable buffers in replay loops, execution event emission, and order-trigger candidate collection.
 
 ## `repr(C) Bar` Layout
 
@@ -29,6 +29,8 @@ When `Strategy::uses_tick_replay()` is true and data is OHLCV:
 1. `BarSeries::from_csv_path_or_pbar` loads a binary `.pbar` cache or streams CSV through `csv::Reader<BufReader<File>>`.
 2. The replay loop calls `apply_bar`, strategy dispatch, risk checks, paper fills, and lifecycle hooks.
 3. Intent buffers are reused with `Vec::with_capacity(4)`.
+4. Paper fill events stay in `SmallVec<[AccountEvent; 4]>`; balance updates are appended directly without a temporary `Vec`.
+5. Resting-order polling uses per-instrument price indices and a small inline candidate buffer before running exact fill rules.
 
 For multi-instrument backtests, `merge_sources_iter` performs a streaming k-way merge over a `BinaryHeap`, holding only one pending event per source instead of materializing the entire merged event stream.
 
@@ -56,7 +58,7 @@ Use the Criterion bench above for repeatable numbers. For peak RSS on a long CSV
 
 - i64 tick math through fills and fees (partial: `instrument::ticks` fast path exists).
 - Optional mmap-backed `.pbar` reads if benchmark-backed.
-- Sorted resting-order index improvements beyond current BTreeMap price levels.
+- Benchmarked alternatives to the current `BTreeMap` resting-order levels if dense order books make it worthwhile.
 
 ## Scope
 

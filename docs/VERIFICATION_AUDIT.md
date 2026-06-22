@@ -4,11 +4,29 @@
 
 This repo is currently CLI/Rust-only. Installed workspace crates are `athenas-pallas` and
 `athenas-pallas-tools`; binaries are `pallas-backtest`, `pallas-merge`, `pallas-resample`, and
-`pallas-sweep`. `athenas-pallas` currently exposes only `default` and `tracing-full` features.
+`pallas-sweep`. `athenas-pallas` currently exposes `default`, `databento`, and `tracing-full`
+features.
 
-Market data ingestion is local-file based: CSV/pbar via `pallas-backtest` and CSV utilities in
-`athenas-pallas-tools`. There is no installed Databento, Alpha Vantage, Binance-live, or generic
-fetch crate/feature/binary in the current manifests or lockfile.
+Market data replay is local-file based: CSV/pbar via `pallas-backtest` and CSV utilities in
+`athenas-pallas-tools`. The optional `databento` feature adds a Databento OHLCV cache/export path
+that writes engine CSVs under `data/databento` before replay. There is no installed Alpha Vantage,
+Binance-live, or generic fetch crate/feature/binary in the current manifests or lockfile.
+
+## Pass 3 update (2026-06-22)
+
+Quality and docs sweep. `cargo fmt --all --check`, `cargo test -p athenas-pallas`,
+`cargo test -p athenas-pallas --all-features`, `cargo test -p athenas-pallas-tools`, and
+`cargo clippy -p athenas-pallas --all-targets --all-features -- -D warnings` all **PASS**.
+
+Updates since pass 2:
+
+| Area | Resolution |
+|------|------------|
+| Order-trigger candidate allocation | **done** - `OrderStore::pollable_ids_into` lets the fill engine reuse a `SmallVec<[OrderId; 16]>` candidate buffer while preserving the public `pollable_ids -> Vec<OrderId>` API. |
+| Fill event allocation | **done** - fill emission now appends order, fill, and balance events directly into `AccountEvents` (`SmallVec<[AccountEvent; 4]>`) without a temporary balance-update `Vec`. |
+| Per-strategy PnL grouping | **done** - `metrics::per_strategy_pnl` groups borrowed fill records instead of cloning `FillRecord`s per strategy bucket. |
+| Quote equity marking | **done** - single-quote equity no longer allocates a `HashSet`; aggregate quote collection uses the existing trusted fast-hash collection path. |
+| Current docs surface | **done** - README, performance notes, and optimization audit now describe the optional Databento exporter and the current replay-core contract. |
 
 ---
 
@@ -84,12 +102,12 @@ sections above supersede stale pass-1 status rows where they conflict.
 
 | Item | Status | Evidence / gap |
 |------|--------|----------------|
-| i64 tick math through fills/fees | **NOT DONE** | Decimal in execution path |
+| i64 tick math through fills/fees | **PARTIAL** | `instrument::ticks` fast path is used for on-grid notional; Decimal remains the public/off-grid/reporting path |
 | mmap `.pbar` | **NOT DONE** | File I/O only in `pbar.rs` |
-| Sorted resting-order index | **NOT DONE** | Linear scan in `poll_after_market_sync` |
-| `docs/PERFORMANCE.md` | **DONE** | Written; claims corrected (no false CI gate) |
+| Sorted resting-order index | **DONE** | Per-instrument `BTreeMap` price levels plus small candidate buffers in `oms`/`execution::fills` |
+| `docs/PERFORMANCE.md` | **DONE** | Written and updated with the current hot-path buffers |
 | Stress 10M bars + peak RSS | **NOT DONE** | Example defaults 100k; RSS not measured in-repo |
-| Criterion CI regression gate | **NOT DONE** | CI runs bench; no baseline compare / fail |
+| Criterion CI regression gate | **DONE** | Baseline file exists in `docs/bench_baseline.json` |
 
 ### Phase 1 - Intraday + stops
 
@@ -111,7 +129,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 | Multi-instrument TOML `[[instruments]]` | **DONE** | `session.rs`, `runner.rs`, `backtest.toml.example` |
 | FX CSV template + free sources | **DONE** | `data/README.md`, `FxCsvSource`, `fx_l1_backtest.rs` |
 | Forex 24/5 + pip/lot defaults | **DONE** | `calendar/mod.rs`, forex meta in `config.rs` |
-| Per-strategy PnL attribution | **NOT DONE** | State tracks `strategy_id`; report has no per-strategy PnL section |
+| Per-strategy PnL attribution | **DONE** | `BacktestReport.per_strategy` is built from tagged fills |
 | Hybrids multi-leg example + test | **NOT DONE** | No hybrid example or test |
 
 ### Phase 3 - Derivatives
@@ -119,9 +137,9 @@ sections above supersede stale pass-1 status rows where they conflict.
 | Item | Status | Evidence / gap |
 |------|--------|----------------|
 | Option + Perpetual in registry | **DONE** | `registry.rs`, `config.rs`, `index.rs` (fixed strike parse) |
-| Margin engine (initial/maintenance, liquidation) | **PARTIAL** | Initial margin only (`margin_required`); no maintenance/liquidation |
+| Margin engine (initial/maintenance, liquidation) | **PARTIAL** | Initial/maintenance helpers and liquidation hooks exist; broader derivative smoke coverage is still open |
 | Futures roll / continuous contract | **NOT DONE** | No roll tooling |
-| Perp funding rate schedule | **PARTIAL** | Funding every bar with fixed 8h rate, not scheduled |
+| Perp funding rate schedule | **DONE** | Funding settles on 00:00/08:00/16:00 UTC boundaries |
 | European options exercise at expiry | **PARTIAL** | `lifecycle.rs` hook; strike from meta `face_value`; limited tests |
 | Futures CSV convention documented | **DONE** | `data/README.md` Futures section |
 

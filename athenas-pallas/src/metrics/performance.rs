@@ -288,22 +288,19 @@ pub struct StrategyPnlRow {
 /// deterministic output. Returns empty when no fills carry an attribution.
 pub fn per_strategy_pnl(fills: &[FillRecord]) -> Vec<StrategyPnlRow> {
     use std::collections::BTreeMap;
-    let mut by_strategy: BTreeMap<String, Vec<FillRecord>> = BTreeMap::new();
+    let mut by_strategy: BTreeMap<&StrategyId, Vec<&FillRecord>> = BTreeMap::new();
     for fill in fills {
         if let Some(sid) = &fill.strategy_id {
-            by_strategy
-                .entry(sid.to_string())
-                .or_default()
-                .push(fill.clone());
+            by_strategy.entry(sid).or_default().push(fill);
         }
     }
     by_strategy
         .into_iter()
         .map(|(strategy_id, group)| {
-            let ledger = trade_ledger_from_fills(&group);
+            let ledger = trade_ledger_from_fill_iter(group);
             let realized = ledger.gross_profit - ledger.gross_loss;
             StrategyPnlRow {
-                strategy_id,
+                strategy_id: strategy_id.to_string(),
                 closed_trades: ledger.closed_trades,
                 win_rate: ledger.win_rate,
                 profit_factor: ledger.profit_factor,
@@ -315,6 +312,10 @@ pub fn per_strategy_pnl(fills: &[FillRecord]) -> Vec<StrategyPnlRow> {
 
 /// Build round-trip stats from chronological fills (FIFO position tracking).
 pub fn trade_ledger_from_fills(fills: &[FillRecord]) -> TradeLedger {
+    trade_ledger_from_fill_iter(fills.iter())
+}
+
+fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecord>) -> TradeLedger {
     let mut position = Decimal::ZERO;
     let mut entry_price = Decimal::ZERO;
     let mut gross_profit = Decimal::ZERO;

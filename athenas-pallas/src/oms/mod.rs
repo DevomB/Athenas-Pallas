@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 
 type Level = SmallVec<[OrderId; 4]>;
+pub(crate) type OrderIdBuffer = SmallVec<[OrderId; 16]>;
 
 /// Price-sorted resting-order indices for one instrument.
 #[derive(Clone, Debug, Default)]
@@ -93,7 +94,7 @@ impl InstrumentBooks {
         ask: Option<Decimal>,
         high: Option<Decimal>,
         low: Option<Decimal>,
-        out: &mut Vec<OrderId>,
+        out: &mut OrderIdBuffer,
     ) {
         if let Some(ask) = ask {
             for (_, ids) in self.buy_limits.range(ask..) {
@@ -194,9 +195,24 @@ impl OrderStore {
         let Some(book) = self.books.get(instrument) else {
             return Vec::new();
         };
-        let mut out = Vec::new();
+        let mut out = OrderIdBuffer::new();
         book.pollable_ids(bid, ask, high, low, &mut out);
-        out
+        out.into_vec()
+    }
+
+    pub(crate) fn pollable_ids_into(
+        &self,
+        instrument: &InstrumentId,
+        bid: Option<Decimal>,
+        ask: Option<Decimal>,
+        high: Option<Decimal>,
+        low: Option<Decimal>,
+        out: &mut OrderIdBuffer,
+    ) {
+        out.clear();
+        if let Some(book) = self.books.get(instrument) {
+            book.pollable_ids(bid, ask, high, low, out);
+        }
     }
 
     /// Iterate the working orders resting on one instrument (clones the matching orders).

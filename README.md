@@ -15,8 +15,8 @@ Current installed surface:
 
 - Workspace crates: `athenas-pallas` and `athenas-pallas-tools`
 - Rust binaries: `pallas-backtest`, `pallas-merge`, `pallas-resample`, and `pallas-sweep`
-- Cargo features on `athenas-pallas`: `default` and `tracing-full`
-- Market data ingestion: local CSV/pbar files only. There is no installed Databento, Alpha Vantage, Binance-live, or generic fetch package in this checkout.
+- Cargo features on `athenas-pallas`: `default`, `databento`, and `tracing-full`
+- Market data ingestion: local CSV/pbar files by default, plus an optional Databento OHLCV cache/export path behind `--features databento`. There is no installed Alpha Vantage, Binance-live, or generic fetch package in this checkout.
 
 ## Install
 
@@ -91,7 +91,22 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_
 
 Copy [`backtest.toml.example`](backtest.toml.example) to `backtest.toml` and point `[backtest].data` at your file.
 
-This repo does not currently install a provider client or downloader. If you use a vendor such as Databento, export data outside the engine and save it as one of the documented CSV layouts before running `pallas-backtest`.
+The core backtest path remains provider-neutral: `pallas-backtest` replays documented local CSV/pbar files. With the optional `databento` feature, the CLI can fetch Databento OHLCV data into `data/databento/*.csv` and then run the same CSV replay path:
+
+```bash
+cargo run --release -p athenas-pallas --features databento --bin pallas-backtest -- \
+  --provider databento \
+  --dataset EQUS.MINI \
+  --symbol AAPL \
+  --schema ohlcv-1d \
+  --start 01-01-2025 \
+  --end 02-01-2025 \
+  --instrument databento:AAPL \
+  --initial-balance USD:10000 \
+  --yes
+```
+
+Set `DATABENTO_API_KEY` in the repo-root `.env` before fetching uncached data. Use `--estimate-only` to check vendor cost without downloading.
 
 ## Project Layout
 

@@ -241,15 +241,15 @@ impl FillEngine {
     }
 
     /// Append balance adjustment events after a fill (quote spent/received, fee).
-    fn balance_updates_after_fill(
+    fn push_balance_updates_after_fill(
         state: &GlobalState,
         order: &OpenOrder,
         meta: &InstrumentMeta,
         price: Decimal,
         qty: Decimal,
         fee: Decimal,
-    ) -> Vec<AccountEvent> {
-        let mut evs = Vec::new();
+        evs: &mut AccountEvents,
+    ) {
         let base_free = *state.balances.get(&meta.base).unwrap_or(&Decimal::ZERO);
         let quote_free = *state.balances.get(&meta.quote).unwrap_or(&Decimal::ZERO);
         let cash = Self::quote_cash_flow(meta, order.side, price, qty);
@@ -265,7 +265,6 @@ impl FillEngine {
             asset: meta.quote.clone(),
             free: new_quote,
         });
-        evs
     }
 
     fn crossing_limit(
@@ -309,9 +308,7 @@ impl FillEngine {
             fee_asset: meta.quote.clone(),
             strategy_id: filled.strategy_id.clone(),
         });
-        evs.extend(Self::balance_updates_after_fill(
-            state, &filled, meta, px, qty, fee,
-        ));
+        Self::push_balance_updates_after_fill(state, &filled, meta, px, qty, fee, &mut evs);
         Ok(evs)
     }
 
@@ -562,13 +559,8 @@ impl FillEngine {
     /// Sync passive limit fills after market data, scanning the whole book.
     pub(crate) fn poll_after_market_sync(&self, state: &GlobalState) -> Result<AccountEvents> {
         let mut out = AccountEvents::new();
-        for instrument in state
-            .open_orders
-            .instruments_with_orders()
-            .cloned()
-            .collect::<Vec<_>>()
-        {
-            self.poll_instrument_into(state, &instrument, &mut out)?;
+        for instrument in state.open_orders.instruments_with_orders() {
+            self.poll_instrument_into(state, instrument, &mut out)?;
         }
         Ok(out)
     }
@@ -598,11 +590,12 @@ impl FillEngine {
             Some((h, l)) => (Some(h), Some(l)),
             None => (None, None),
         };
-        for id in state
+        let mut candidate_ids = crate::oms::OrderIdBuffer::new();
+        state
             .open_orders
-            .pollable_ids(instrument, bid, ask, high, low)
-        {
-            let Some(o) = state.open_orders.get(&id) else {
+            .pollable_ids_into(instrument, bid, ask, high, low, &mut candidate_ids);
+        for id in &candidate_ids {
+            let Some(o) = state.open_orders.get(id) else {
                 continue;
             };
             self.try_fill_resting(state, o, out);

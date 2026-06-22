@@ -310,7 +310,7 @@ async fn fetch_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<()> {
             "malformed databento data: failed decoding OHLCV row: {err}"
         ))
     })? {
-        write_bar(&mut writer, &bar)?;
+        write_bar(&mut writer, bar)?;
         rows += 1;
     }
     if rows == 0 {

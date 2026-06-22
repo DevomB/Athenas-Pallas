@@ -8,7 +8,7 @@ use crate::events::{AccountEvent, BookL2Snapshot, FillRecord, MarketEvent};
 use crate::oms::OrderStore;
 use crate::types::{Asset, InstrumentId, OpenOrder, Side, StrategyId};
 use rust_decimal::Decimal;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 use time::{Date, OffsetDateTime};
 
@@ -119,8 +119,7 @@ impl GlobalState {
 
     /// Portfolio mark-to-market in one quote currency (avoids double-counting shared cash).
     pub fn portfolio_equity_for_quote(&self, quote: &Asset) -> Decimal {
-        use std::collections::HashSet;
-        let mut quotes_seen = HashSet::new();
+        let mut quote_cash_added = false;
         let mut total = Decimal::ZERO;
         for ix in 0..self.registry.len() {
             let Some(meta) = self.registry.meta(InstrumentIndex(ix)) else {
@@ -129,8 +128,9 @@ impl GlobalState {
             if meta.quote != *quote {
                 continue;
             }
-            if quotes_seen.insert(meta.quote.clone()) {
+            if !quote_cash_added {
                 total += self.balances.get(quote).copied().unwrap_or(Decimal::ZERO);
+                quote_cash_added = true;
             }
             let mid = self.mid_or_last_ix(ix).unwrap_or(Decimal::ZERO);
             let base = self
@@ -140,7 +140,7 @@ impl GlobalState {
                 .unwrap_or(Decimal::ZERO);
             total += Self::position_exposure(meta, base, mid);
         }
-        if quotes_seen.is_empty() {
+        if !quote_cash_added {
             total += self.balances.get(quote).copied().unwrap_or(Decimal::ZERO);
         }
         total
@@ -148,8 +148,7 @@ impl GlobalState {
 
     /// Total portfolio equity across all registered quote currencies.
     pub fn portfolio_equity(&self) -> Decimal {
-        use std::collections::HashSet;
-        let mut quotes = HashSet::new();
+        let mut quotes = FxHashSet::default();
         for ix in 0..self.registry.len() {
             if let Some(meta) = self.registry.meta(InstrumentIndex(ix)) {
                 quotes.insert(meta.quote.clone());
