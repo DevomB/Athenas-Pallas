@@ -157,6 +157,31 @@ impl BarSeries {
         self.get(i)
             .map(|b| ticks_to_decimal(b.close_ticks, self.tick_size))
     }
+
+    /// Infer periods-per-year from median bar spacing, walking `ts_unix_nanos` directly.
+    ///
+    /// Avoids the `Vec<OffsetDateTime>` (and per-bar `OffsetDateTime` conversions) that the old
+    /// `resolve_periods_per_year` path allocated at startup. Deltas are computed in integer
+    /// seconds; only a `Vec<i64>` of spacings is needed for the median.
+    pub fn infer_periods_per_year(&self, class: crate::instrument::AssetClass) -> f64 {
+        use super::interval::{default_periods_per_year, infer_periods_per_year_from_spacing};
+        if self.bars.len() < 2 {
+            return default_periods_per_year(class);
+        }
+        let mut deltas: Vec<i64> = Vec::with_capacity(self.bars.len() - 1);
+        for w in self.bars.windows(2) {
+            let secs = (w[1].ts_unix_nanos - w[0].ts_unix_nanos) / 1_000_000_000;
+            if secs > 0 {
+                deltas.push(secs);
+            }
+        }
+        if deltas.is_empty() {
+            return default_periods_per_year(class);
+        }
+        deltas.sort_unstable();
+        let median = deltas[deltas.len() / 2] as f64;
+        infer_periods_per_year_from_spacing(median, class)
+    }
 }
 
 fn sidecar_is_fresh(csv_path: &Path, sidecar_path: &Path) -> bool {
@@ -173,17 +198,16 @@ fn sidecar_is_fresh(csv_path: &Path, sidecar_path: &Path) -> bool {
 pub struct BarSeriesSource {
     series: BarSeries,
     idx: usize,
-    exchange: ExchangeId,
-    symbol: Symbol,
+    instrument: InstrumentId,
 }
 
 impl BarSeriesSource {
     pub fn new(series: BarSeries, exchange: ExchangeId, symbol: Symbol) -> Self {
+        let instrument = InstrumentId::new(exchange.to_string(), symbol.to_string());
         Self {
             series,
             idx: 0,
-            exchange,
-            symbol,
+            instrument,
         }
     }
 
@@ -192,7 +216,25 @@ impl BarSeriesSource {
     }
 
     pub fn instrument_id(&self) -> InstrumentId {
-        InstrumentId::new(self.exchange.to_string(), self.symbol.to_string())
+        self.instrument.clone()
+    }
+
+    /// Borrowed [`ReplayEvent`] for the zero-allocation fast path (no per-bar `InstrumentId` clone).
+    pub fn bar_to_replay_event<'a>(
+        &'a self,
+        bar: &Bar,
+        ts: OffsetDateTime,
+    ) -> crate::events::ReplayEvent<'a> {
+        let tick = self.series.tick_size;
+        crate::events::ReplayEvent::Bar {
+            instrument: &self.instrument,
+            ts,
+            open: bar.open_decimal(tick),
+            high: bar.high_decimal(tick),
+            low: bar.low_decimal(tick),
+            close: bar.close_decimal(tick),
+            volume: bar.volume_decimal(tick),
+        }
     }
 
     pub fn rewind(&mut self) {

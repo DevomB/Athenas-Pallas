@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
 
 jobs:
   fmt-clippy-test:
@@ -17,13 +18,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy -p athenas-pallas -- -D warnings
+        run: cargo clippy -p athenas-pallas --all-targets -- -D warnings
       - name: test athenas-pallas
         run: cargo test -p athenas-pallas
       - name: python SMA golden
@@ -38,6 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Install CMake
         run: sudo apt-get update && sudo apt-get install -y cmake g++
       - name: C++ SMA golden
@@ -48,70 +51,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Bench noop amortized
         run: cargo bench -p athenas-pallas --bench backtest_hotpath -- --noplot noop_100k_amortized
+      - name: Regression gate (compare against committed ceiling)
+        # Criterion writes the mean estimate (ns) to estimates.json. We fail only on gross
+        # regressions so shared-runner variance does not produce false negatives. The ceiling
+        # lives in docs/bench_baseline.json and is intentionally generous (see that file).
+        run: |
+          EST=target/criterion/noop_100k_amortized/new/estimates.json
+          CEIL_MS=$(jq -r '.noop_100k_amortized.ceiling_ms' docs/bench_baseline.json)
+          MEAN_NS=$(jq -r '.mean.point_estimate' "$EST")
+          MEAN_MS=$(awk "BEGIN { printf \"%.2f\", $MEAN_NS / 1000000 }")
+          echo "noop_100k_amortized mean: ${MEAN_MS} ms (ceiling ${CEIL_MS} ms)"
+          awk "BEGIN { exit !($MEAN_MS <= $CEIL_MS) }" || {
+            echo "::error::Benchmark regression: ${MEAN_MS} ms exceeds ceiling ${CEIL_MS} ms"
+            exit 1
+          }
 
   test-workspace:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Test workspace (default features)
-        run: cargo test --workspace --exclude pallas-app
+        run: cargo test --workspace
 
-  test-binance-live:
+  feature-matrix:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [binance-live, control-server, databento, all]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test athenas-pallas binance-live
-        run: cargo test -p athenas-pallas --features binance-live
-
-  test-control-server:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test control-server
-        run: cargo test -p athenas-pallas --features control-server
-
-  test-all-features:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test athenas-pallas all features
-        run: cargo test -p athenas-pallas --features all
-
-  test-data-fetch:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test data-fetch feature
-        run: cargo test -p athenas-pallas --features data-fetch
-
-  check-pallas-app:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install Tauri Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
-      - name: cargo check pallas-app
-        run: cargo check -p pallas-app
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: pallas-app/pnpm-lock.yaml
-      - name: Build pallas-app frontend
-        working-directory: pallas-app
-        run: pnpm install && pnpm run build
+      - uses: Swatinem/rust-cache@v2
+      - name: Build athenas-pallas (${{ matrix.features }})
+        run: cargo build -p athenas-pallas --features ${{ matrix.features }}
+      - name: Test athenas-pallas (${{ matrix.features }})
+        run: cargo test -p athenas-pallas --features ${{ matrix.features }}

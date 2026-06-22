@@ -8,6 +8,7 @@ use crate::events::{AccountEvent, BookL2Snapshot, FillRecord, MarketEvent};
 use crate::oms::OrderStore;
 use crate::types::{Asset, InstrumentId, OpenOrder, Side, StrategyId};
 use rust_decimal::Decimal;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use time::{Date, OffsetDateTime};
 
@@ -29,7 +30,7 @@ pub struct GlobalState {
     /// Attributed net base per `(instrument_row, strategy_id)` when fills carry a [`StrategyId`].
     ///
     /// Sums over strategies may differ from [`Self::positions`] if some fills are untagged or cross-strategy hedges.
-    pub strategy_positions: HashMap<(usize, StrategyId), Decimal>,
+    pub strategy_positions: FxHashMap<(usize, StrategyId), Decimal>,
     /// Latest shallow L2 snapshot per row (if subscribed).
     pub l2: Vec<Option<BookL2Snapshot>>,
     /// Mark-to-market equity anchor for UTC calendar daily loss (quote asset must match risk rule).
@@ -67,7 +68,7 @@ impl GlobalState {
             open_orders: OrderStore::new(),
             balances: initial_balances,
             positions: vec![Decimal::ZERO; n],
-            strategy_positions: HashMap::new(),
+            strategy_positions: FxHashMap::default(),
             l2: vec![None; n],
             risk_day_anchor: None,
             daily_risk_quote: None,
@@ -386,6 +387,7 @@ impl GlobalState {
                         qty: qty.to_string(),
                         price: price.to_string(),
                         fee: fee.to_string(),
+                        strategy_id: strategy_id.clone(),
                     });
                 }
             }

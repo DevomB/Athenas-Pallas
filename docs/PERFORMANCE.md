@@ -44,7 +44,7 @@ Run Criterion:
 cargo bench -p athenas-pallas --bench backtest_hotpath
 ```
 
-Baseline in `docs/benchmarks.txt`: roughly 0.43 microseconds/bar amortized for a noop strategy on 100k bars.
+Baseline in `docs/benchmarks.txt`: sub-microsecond/bar amortized for a noop strategy on 100k bars (roughly 0.43–0.60 us/bar depending on host). Re-run on the target host before quoting absolute numbers; use the committed Criterion baseline for regression comparison.
 
 ## Stress Run
 

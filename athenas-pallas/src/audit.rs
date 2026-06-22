@@ -111,15 +111,7 @@ impl From<&Event> for EngineAuditEventKind {
 }
 
 fn event_ts_unix_ns(ev: &Event) -> Option<i128> {
-    use crate::events::MarketEvent;
-    match ev {
-        Event::Market(MarketEvent::Trade { ts, .. }) => Some(ts.unix_timestamp_nanos()),
-        Event::Market(MarketEvent::BookL1 { ts, .. }) => Some(ts.unix_timestamp_nanos()),
-        Event::Market(MarketEvent::BookL2Snapshot(s)) => Some(s.ts.unix_timestamp_nanos()),
-        Event::Market(MarketEvent::Bar { ts, .. }) => Some(ts.unix_timestamp_nanos()),
-        Event::Timer(t) => Some(t.ts.unix_timestamp_nanos()),
-        _ => None,
-    }
+    ev.timestamp_unix_nanos()
 }
 
 /// Best-effort send: lagging subscribers are dropped by `broadcast` (no engine blocking).

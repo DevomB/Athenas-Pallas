@@ -1,3 +1,31 @@
+# Verification audit
+
+## Pass 2 update (2026-06-21)
+
+Optimization + correctness sweep. `cargo test -p athenas-pallas` and
+`cargo clippy -p athenas-pallas --all-targets -- -D warnings` both **PASS**.
+
+Gaps closed since pass 1:
+
+| Pass-1 gap | Pass-2 resolution |
+|------------|-------------------|
+| Phase 0b: i64 tick math through fills/fees | **partial** - `instrument::ticks` (`PriceTicks`/`QtyLots`) with tests; paper `notional()` uses the integer fast path when price/qty are on-grid. Full Decimal pipeline retained for off-grid and reporting. |
+| Phase 0b: sorted/indexed resting orders | **done** - per-instrument `BTreeMap` price indices (`buy_limits`, `sell_limits`, `buy_stops`, `sell_stops`) with `OrderStore::pollable_ids` so passive fill checks visit only price levels touched by L1/bar high-low (`O(log m + k)`). |
+| Phase 0b: Criterion CI regression gate | **done** - CI compares `noop_100k_amortized` mean against a committed ceiling in `docs/bench_baseline.json`. |
+| Phase 1: equity holidays | **done** - NYSE fixed/floating holidays + observance + Good Friday in `calendar/mod.rs`, wired into `EquityRth`. |
+| Phase 1: position sizer (% equity) | **done** - `strategy::sizing::position_size_pct_equity` + `StrategyContext::size_pct_equity`, mirrored in Python/C++ SDKs. |
+| Phase 2: per-strategy PnL in report | **done** - `FillRecord.strategy_id` + `metrics::per_strategy_pnl` -> `BacktestReport.per_strategy`. |
+| Phase 3: maintenance margin + liquidation | **done** - `maintenance_margin_required` + mid-price liquidation of underwater leveraged derivatives in `lifecycle.rs`. |
+| Phase 3: scheduled perp funding | **done** - funding settles only on 00:00/08:00/16:00 UTC boundaries, not every bar. |
+| Hot loop per-bar allocation | **done** - `ReplayEvent<'a>` + `on_replay_event` + `dispatch_replay_bar_sync` remove the per-bar `Event` alloc and `InstrumentId` clone. |
+| Streaming metrics / startup Vec alloc | **done** - O(1) `RollingMetrics` summary when the curve is off; `BarSeries::infer_periods_per_year`. |
+
+Still open (deferred, not regressions): mmap `.pbar`; 10M-bar stress + peak RSS;
+futures roll / continuous contracts; bond integration backtest + yield/duration;
+hybrid convertible example; SQLite result persistence; pass-3 zero-finding audit.
+
+---
+
 # Verification audit - pass 1
 
 **Date:** 2026-06-15  

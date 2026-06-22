@@ -33,6 +33,14 @@ use crate::types::{OrderId, Side};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 
+/// Inline buffer for synchronous gateway results.
+///
+/// Most order placements and passive polls emit 0–4 [`crate::events::AccountEvent`]s
+/// (`OrderUpdate` + `Fill` + two `Balance` updates), so a `SmallVec` keeps them on the stack and
+/// avoids a heap allocation per intent on the backtest hot path. The async [`ExecutionGateway`]
+/// trait keeps returning `Vec` (live path, not latency-critical).
+pub type AccountEvents = smallvec::SmallVec<[crate::events::AccountEvent; 4]>;
+
 /// Async venue bridge invoked by [`crate::Engine`].
 #[async_trait]
 pub trait ExecutionGateway: Send + Sync {

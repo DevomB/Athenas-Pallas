@@ -3,7 +3,7 @@
 use crate::dispatch_event_sync;
 use crate::engine::dispatch_event;
 use crate::error::Result;
-use crate::events::{Event, MarketEvent};
+use crate::events::Event;
 use crate::execution::ExecutionGateway;
 use crate::metrics::{summarize, PerformanceSummary};
 use crate::risk::RiskPipeline;
@@ -38,14 +38,7 @@ pub struct RunReport {
 }
 
 fn equity_ts(ev: &Event) -> OffsetDateTime {
-    match ev {
-        Event::Market(MarketEvent::Trade { ts, .. }) => *ts,
-        Event::Market(MarketEvent::BookL1 { ts, .. }) => *ts,
-        Event::Market(MarketEvent::BookL2Snapshot(s)) => s.ts,
-        Event::Market(MarketEvent::Bar { ts, .. }) => *ts,
-        Event::Timer(t) => t.ts,
-        _ => OffsetDateTime::now_utc(),
-    }
+    ev.timestamp_or_now()
 }
 
 /// Run many scenarios concurrently with a bounded worker pool.
@@ -196,7 +189,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::OrderIntent;
+    use crate::events::{MarketEvent, OrderIntent};
     use crate::execution::{PaperConfig, SimGateway};
     use crate::instrument::InstrumentRegistry;
     use crate::risk::PauseCheck;
@@ -262,11 +255,11 @@ mod tests {
             },
         ];
         let build = Arc::new(move |_: &Scenario| (mk_state(&inst_for_build), Noop));
-        let risk = Arc::new(RiskPipeline::new(vec![Box::new(PauseCheck::default())]));
+        let risk = Arc::new(RiskPipeline::new(vec![Box::new(PauseCheck)]));
         let exec = Arc::new(SimGateway::new(PaperConfig::default()));
         let reports =
             run_scenarios_parallel(scenarios, 2, build, risk, exec, inst.clone(), 252.0).await;
         assert_eq!(reports.len(), 3);
-        assert!(reports.iter().all(|r| r.summary.equity.len() >= 1));
+        assert!(reports.iter().all(|r| !r.summary.equity.is_empty()));
     }
 }

@@ -8,14 +8,8 @@ use crate::events::Event;
 use super::HistoricalSource;
 
 fn event_ts(ev: &Event) -> time::OffsetDateTime {
-    match ev {
-        Event::Market(crate::events::MarketEvent::Trade { ts, .. }) => *ts,
-        Event::Market(crate::events::MarketEvent::BookL1 { ts, .. }) => *ts,
-        Event::Market(crate::events::MarketEvent::Bar { ts, .. }) => *ts,
-        Event::Market(crate::events::MarketEvent::BookL2Snapshot(s)) => s.ts,
-        Event::Timer(t) => t.ts,
-        _ => time::OffsetDateTime::UNIX_EPOCH,
-    }
+    // Non-timestamped events sort to the front of the merge rather than reading wall-clock time.
+    ev.timestamp().unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
 }
 
 struct HeapItem {

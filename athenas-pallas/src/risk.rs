@@ -258,7 +258,7 @@ mod tests {
         bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
         let mut st = GlobalState::new(InstrumentRegistry::from_instruments(inst), bal);
         st.paused = true;
-        let pause = PauseCheck::default();
+        let pause = PauseCheck;
         let mut intent = OrderIntent {
             instrument: i.clone(),
             side: Side::Buy,
@@ -287,7 +287,7 @@ mod tests {
         bal.insert(Asset("USDT".into()), Decimal::from(10_000u64));
         let mut st = GlobalState::new(InstrumentRegistry::from_instruments(inst), bal);
         st.trading_state = crate::types::TradingState::Disabled;
-        let gate = TradingDisabledCheck::default();
+        let gate = TradingDisabledCheck;
         let mut intent = OrderIntent {
             instrument: i.clone(),
             side: Side::Buy,

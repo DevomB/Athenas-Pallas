@@ -385,14 +385,7 @@ where
 }
 
 fn event_timestamp(ev: &Event) -> time::OffsetDateTime {
-    match ev {
-        Event::Market(crate::events::MarketEvent::Trade { ts, .. }) => *ts,
-        Event::Market(crate::events::MarketEvent::BookL1 { ts, .. }) => *ts,
-        Event::Market(crate::events::MarketEvent::BookL2Snapshot(s)) => s.ts,
-        Event::Market(crate::events::MarketEvent::Bar { ts, .. }) => *ts,
-        Event::Timer(t) => t.ts,
-        _ => time::OffsetDateTime::now_utc(),
-    }
+    ev.timestamp_or_now()
 }
 
 /// Engine retained after shutdown.

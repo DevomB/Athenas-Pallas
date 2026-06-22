@@ -194,9 +194,7 @@ pub fn intents_to_orders(intents: Vec<IntentJson>) -> crate::Result<Vec<OrderInt
 }
 
 #[cfg(test)]
-
 mod tests {
-
     use super::*;
 
     use crate::types::Side;

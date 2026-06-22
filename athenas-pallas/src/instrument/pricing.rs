@@ -6,17 +6,37 @@ use rust_decimal::Decimal;
 use super::kind::OptionKind;
 use super::registry::{AssetClass, InstrumentMeta};
 
-/// Initial margin required to open or hold `qty` at `price`.
-pub fn margin_required(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
-    let notional = match meta.asset_class {
+/// Maintenance margin is modeled as this fraction of initial margin when not separately configured.
+///
+/// Exchanges typically set maintenance below initial (e.g. ~50–60%); 0.5 is a conservative default
+/// used for the replay liquidation check.
+pub fn maintenance_margin_fraction() -> Decimal {
+    Decimal::new(5, 1) // 0.5
+}
+
+/// Notional exposure of `qty` at `price` (contract-multiplier aware for derivatives).
+pub fn position_notional(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
+    match meta.asset_class {
         AssetClass::Future | AssetClass::Perpetual | AssetClass::Option => {
             let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
             price * qty.abs() * mult
         }
         _ => price * qty.abs(),
-    };
+    }
+}
+
+/// Initial margin required to open or hold `qty` at `price`.
+pub fn margin_required(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
     let rate = meta.margin_initial_rate.unwrap_or(Decimal::ONE);
-    notional * rate
+    position_notional(meta, price, qty) * rate
+}
+
+/// Maintenance margin required to keep `qty` open at `price`.
+///
+/// Returns [`MAINTENANCE_MARGIN_FRACTION`] of the initial requirement. A position whose
+/// mark-to-market equity falls below this is eligible for liquidation during replay.
+pub fn maintenance_margin_required(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
+    margin_required(meta, price, qty) * maintenance_margin_fraction()
 }
 
 /// Cash coupon payment per period for a bond.
@@ -64,6 +84,20 @@ mod tests {
         );
         let req = margin_required(&meta, Decimal::from(50_000u64), Decimal::ONE);
         assert_eq!(req, Decimal::from(5_000u64));
+    }
+
+    #[test]
+    fn maintenance_is_half_of_initial() {
+        let meta = InstrumentMeta::perpetual(
+            Asset::new("BTC"),
+            Asset::new("USDT"),
+            Some(Decimal::ONE),
+            Some(Decimal::new(1, 1)),
+        );
+        let initial = margin_required(&meta, Decimal::from(50_000u64), Decimal::ONE);
+        let maint = maintenance_margin_required(&meta, Decimal::from(50_000u64), Decimal::ONE);
+        assert_eq!(maint, initial * Decimal::new(5, 1));
+        assert_eq!(maint, Decimal::from(2_500u64));
     }
 
     #[test]

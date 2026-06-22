@@ -48,6 +48,14 @@ run(on_event, on_init=on_init)
         lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
         self.assertEqual(json.loads(lines[0]), {"msg": "ready"})
 
+    def test_position_size_pct_equity(self) -> None:
+        sys.path.insert(0, str(SDK))
+        from pallas_strategy import position_size_pct_equity
+
+        self.assertAlmostEqual(position_size_pct_equity(10_000.0, 100.0, 0.1), 10.0)
+        self.assertEqual(position_size_pct_equity(10_000.0, 0.0, 0.1), 0.0)
+        self.assertEqual(position_size_pct_equity(10_000.0, 100.0, 0.0), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

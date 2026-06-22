@@ -4,69 +4,28 @@ This is a backlog of performance work that would make the engine stronger techni
 
 ## Highest Impact
 
-### 1. Store Bar Replay Events as Borrowed Views
+### 1. Store Bar Replay Events as Borrowed Views — DONE
 
-Current path: `backtest/bar.rs`, `backtest/runner.rs`, `engine.rs`
+Implemented as `ReplayEvent<'a>` in `events.rs`, `Strategy::on_replay_event`, and
+`dispatch_replay_bar_sync`. The tick-replay loop calls `BarSeriesSource::bar_to_replay_event`
+instead of materializing `Event::Market(Bar)` each bar.
 
-The optimized OHLCV path still builds a full `Event::Market(MarketEvent::Bar)` for strategy dispatch. For built-in Rust strategies, add a borrowed replay event such as:
+### 2. Replace Passive Order Polling Scan with Price-Indexed Resting Orders — DONE
 
-```rust
-enum ReplayEvent<'a> {
-    Bar { instrument_ix: usize, bar: &'a Bar, ts: OffsetDateTime },
-    Event(&'a Event),
-}
-```
+`oms/mod.rs` maintains per-instrument `BTreeMap` books (`buy_limits`, `sell_limits`, `buy_stops`,
+`sell_stops`) with `SmallVec<[OrderId; 4]>` at each price level. `OrderStore::pollable_ids` returns
+only candidates whose limit/stop could cross against the current L1 or bar high/low; paper
+`poll_instrument_into` evaluates fill rules on that subset only.
 
-Then add a `Strategy::on_replay_event` fast path with a default adapter. External strategies can keep the JSON event path.
+### 3. Cache Period Inference Without Allocating Timestamps — DONE
 
-Expected impact: lower allocation/string/id cloning pressure in the hottest loop. Complexity stays O(n), but constant factors improve.
+`BarSeries::infer_periods_per_year` walks bar timestamps in place; `resolve_periods_per_year`
+calls it instead of building a `Vec<OffsetDateTime>`.
 
-Proof: compare Criterion `noop_100k_amortized` and `buy_and_hold_100k` before/after.
+### 4. Make Equity Curve Optional Mean "No Summary Allocation" — DONE
 
-### 2. Replace Passive Order Polling Scan with Price-Indexed Resting Orders
-
-Current path: `execution/paper.rs`
-
-`poll_after_market_sync` scans every open order after each market event. That is O(bars * open_orders). For many resting limits/stops, replace the scan with per-instrument order books:
-
-- buy limits keyed by descending limit price
-- sell limits keyed by ascending limit price
-- buy stops keyed by ascending stop price
-- sell stops keyed by descending stop price
-
-Use `BTreeMap<PriceKey, SmallVec<[OrderId; 4]>>` or a custom sorted `Vec` if order count is usually small. On each bar, only visit price levels touched by high/low or bid/ask.
-
-Expected impact: turns repeated full scans into O(log m + k) where `k` is triggered orders.
-
-Proof: add a benchmark with 10k bars and 1k resting orders where only a small fraction fills.
-
-### 3. Cache Period Inference Without Allocating Timestamps
-
-Current path: `backtest/runner.rs`
-
-`resolve_periods_per_year` builds a `Vec<OffsetDateTime>` from `BarSeries`, then calls `infer_periods_per_year_from_timestamps`. Add `BarSeries::infer_periods_per_year(asset_class)` that walks bars directly and tracks deltas without allocating.
-
-Expected impact: removes an O(n) allocation before each run. Complexity remains O(n), but startup memory drops.
-
-Proof: benchmark backtest startup on 1m+ bar CSV/pbar with `auto_periods_per_year = true`.
-
-### 4. Make Equity Curve Optional Mean "No Summary Allocation"
-
-Current path: `backtest/runner.rs`, `metrics.rs`
-
-When `record_equity_curve = false`, the runner still passes an empty curve into summary logic and loses some metrics. Add a streaming `RunMetrics` that records:
-
-- first equity
-- last equity
-- Welford return stats
-- downside Welford stats
-- max drawdown
-
-Then summary can be produced without storing `Vec<EquityPoint>` unless the user explicitly wants the curve.
-
-Expected impact: O(1) memory for large sweeps that do not need chart data.
-
-Proof: benchmark 1m bars with `record_equity_curve` true vs false and report peak RSS.
+`RollingMetrics::streaming_summary` produces a full `PerformanceSummary` from O(1) streamed state
+when `record_equity_curve = false`; `finalize_report` in `runner.rs` selects curve vs streaming path.
 
 ### 5. Avoid Async Engine Snapshot Clones
 
@@ -86,23 +45,27 @@ Proof: use existing `snapshot_clone` Criterion bench and add async dispatch benc
 
 ## Medium Impact
 
-### 6. Deduplicate Timestamp Extraction
+### 6. Deduplicate Timestamp Extraction — DONE
 
-Current paths: `engine.rs`, `backtest/runner.rs`, `backtest/merge.rs`, `backtest/batch.rs`, `audit.rs`
+Current paths: `engine.rs`, `backtest/runner.rs`, `backtest/merge.rs`, `backtest/batch.rs`, `audit.rs`, `system.rs`
 
-There are several local `event_ts`/`event_time` helpers with different fallback behavior. Move this into `events.rs`:
+Five local `event_ts`/`event_time`/`event_timestamp`/`equity_ts`/`event_ts_unix_ns` helpers with
+divergent fallback behavior were consolidated into `events.rs`:
 
 ```rust
 impl Event {
     pub fn timestamp(&self) -> Option<OffsetDateTime> { ... }
+    pub fn timestamp_or_now(&self) -> OffsetDateTime { ... }
+    pub fn timestamp_unix_nanos(&self) -> Option<i128> { ... }
 }
 ```
 
-Use `Option` so non-timestamp account/control events do not call `now_utc()` in replay paths.
+The `Option`-returning form means account/control events no longer trigger `now_utc()` in replay
+paths; callers opt into the wall-clock fallback explicitly via `timestamp_or_now`. The k-way merge
+keeps its `UNIX_EPOCH` ordering fallback. Behavior is unchanged; the duplication and accidental
+wall-clock reads are gone.
 
-Expected impact: small hot-path cleanup and fewer accidental wall-clock reads.
-
-Proof: targeted unit tests plus Criterion `session_overhead_100k`.
+Proof: existing replay/merge/audit tests stay green; benchmark with Criterion `session_overhead_100k`.
 
 ### 7. Intern or Densify Asset and Instrument IDs
 

@@ -2,6 +2,7 @@
 
 use crate::instrument::asset::Asset;
 use crate::instrument::index::InstrumentIndex;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
 /// Broad asset class for sizing and risk defaults.
@@ -226,7 +227,8 @@ impl LegacyInstrumentId {
 pub struct InstrumentRegistry {
     ids: Vec<LegacyInstrumentId>,
     metas: Vec<InstrumentMeta>,
-    by_id: HashMap<LegacyInstrumentId, InstrumentIndex>,
+    // Internal, trusted, small-key map: a faster non-DoS-resistant hasher is fine here.
+    by_id: FxHashMap<LegacyInstrumentId, InstrumentIndex>,
 }
 
 impl InstrumentRegistry {
@@ -236,7 +238,7 @@ impl InstrumentRegistry {
         pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
         let mut ids = Vec::with_capacity(pairs.len());
         let mut metas = Vec::with_capacity(pairs.len());
-        let mut by_id = HashMap::with_capacity(pairs.len());
+        let mut by_id = FxHashMap::with_capacity_and_hasher(pairs.len(), rustc_hash::FxBuildHasher);
         for (i, (id, meta)) in pairs.into_iter().enumerate() {
             let ix = InstrumentIndex(i);
             by_id.insert(id.clone(), ix);

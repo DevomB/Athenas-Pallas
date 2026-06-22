@@ -169,6 +169,9 @@ pub struct FillRecord {
     pub price: String,
     /// Fee paid.
     pub fee: String,
+    /// Sub-strategy attribution when the originating order carried a [`StrategyId`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strategy_id: Option<StrategyId>,
 }
 
 /// Unified engine input.
@@ -195,6 +198,102 @@ impl Event {
             Event::Account(AccountEvent::OrderUpdate { instrument, .. }) => Some(instrument),
             Event::Account(AccountEvent::Fill { instrument, .. }) => Some(instrument),
             _ => None,
+        }
+    }
+
+    /// Timestamp carried by market and timer events.
+    ///
+    /// Returns `None` for account and control events, which have no intrinsic event time.
+    /// Replay paths use this to avoid accidental wall-clock (`now_utc`) reads.
+    pub fn timestamp(&self) -> Option<OffsetDateTime> {
+        match self {
+            Event::Market(MarketEvent::Trade { ts, .. }) => Some(*ts),
+            Event::Market(MarketEvent::BookL1 { ts, .. }) => Some(*ts),
+            Event::Market(MarketEvent::BookL2Snapshot(s)) => Some(s.ts),
+            Event::Market(MarketEvent::Bar { ts, .. }) => Some(*ts),
+            Event::Timer(t) => Some(t.ts),
+            _ => None,
+        }
+    }
+
+    /// [`Event::timestamp`], falling back to wall-clock `now` for events without an intrinsic time.
+    ///
+    /// Prefer [`Event::timestamp`] in deterministic replay paths; use this only where a concrete
+    /// timestamp is required for live/async ingestion.
+    pub fn timestamp_or_now(&self) -> OffsetDateTime {
+        self.timestamp().unwrap_or_else(OffsetDateTime::now_utc)
+    }
+
+    /// [`Event::timestamp`] as Unix nanoseconds (for compact audit records).
+    pub fn timestamp_unix_nanos(&self) -> Option<i128> {
+        self.timestamp().map(|ts| ts.unix_timestamp_nanos())
+    }
+}
+
+/// Borrowed market event for the zero-allocation tick-replay fast path.
+///
+/// Unlike [`Event`], the bar variant borrows its [`InstrumentId`] from the data source rather than
+/// cloning it per bar (and skips the owning `Event`/`MarketEvent` enum allocation in the hottest
+/// loop). Strategies opt in by overriding [`crate::strategy::Strategy::on_replay_event`]; the
+/// default implementation materializes an owned [`Event`] via [`ReplayEvent::to_event`] and
+/// forwards to `on_event`, so existing strategies keep working unchanged.
+#[derive(Clone, Debug)]
+pub enum ReplayEvent<'a> {
+    /// OHLCV bar with the instrument borrowed from the source.
+    Bar {
+        /// Instrument (borrowed).
+        instrument: &'a InstrumentId,
+        /// Bar close time.
+        ts: OffsetDateTime,
+        /// Open.
+        open: Decimal,
+        /// High.
+        high: Decimal,
+        /// Low.
+        low: Decimal,
+        /// Close.
+        close: Decimal,
+        /// Volume.
+        volume: Decimal,
+    },
+}
+
+impl ReplayEvent<'_> {
+    /// Event timestamp.
+    pub fn timestamp(&self) -> OffsetDateTime {
+        match self {
+            ReplayEvent::Bar { ts, .. } => *ts,
+        }
+    }
+
+    /// Borrowed instrument.
+    pub fn instrument(&self) -> &InstrumentId {
+        match self {
+            ReplayEvent::Bar { instrument, .. } => instrument,
+        }
+    }
+
+    /// Materialize an owned [`Event`] (clones the instrument). Used by the default
+    /// [`crate::strategy::Strategy::on_replay_event`] bridge.
+    pub fn to_event(&self) -> Event {
+        match self {
+            ReplayEvent::Bar {
+                instrument,
+                ts,
+                open,
+                high,
+                low,
+                close,
+                volume,
+            } => Event::Market(MarketEvent::Bar {
+                instrument: (*instrument).clone(),
+                ts: *ts,
+                open: *open,
+                high: *high,
+                low: *low,
+                close: *close,
+                volume: *volume,
+            }),
         }
     }
 }

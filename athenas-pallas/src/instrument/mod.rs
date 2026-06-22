@@ -7,6 +7,7 @@ mod index;
 mod kind;
 pub mod pricing;
 mod registry;
+pub mod ticks;
 
 pub use asset::{Asset, ExchangeId, Symbol};
 pub use config::{
@@ -24,3 +25,4 @@ pub use pricing::{
     should_exercise_european,
 };
 pub use registry::{AssetClass, InstrumentMeta, InstrumentRegistry, LegacyInstrumentId};
+pub use ticks::{notional_decimal, notional_steps, PriceTicks, QtyLots};

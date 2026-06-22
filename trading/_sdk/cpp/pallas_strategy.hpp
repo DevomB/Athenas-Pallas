@@ -124,6 +124,15 @@ class RollingSma {
     double total_ = 0.0;
 };
 
+// Base qty for `pct` of mark-to-market equity at `mid` (spot-style). Returns 0 for non-positive mid.
+inline double position_size_pct_equity(double equity, double mid, double pct = 0.1) {
+    if (mid <= 0.0) {
+        return 0.0;
+    }
+    double qty = (equity * pct) / mid;
+    return qty > 0.0 ? qty : 0.0;
+}
+
 using EventHandler = std::function<std::vector<Intent>(const Ctx&, const json&)>;
 
 inline void run(EventHandler on_event, const std::function<void(const json&)>& on_init = nullptr) {

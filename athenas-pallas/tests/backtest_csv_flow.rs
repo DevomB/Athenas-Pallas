@@ -35,7 +35,7 @@ fn csv_replay_buy_and_hold() {
     let mut state = GlobalState::new(registry, balances);
     let qty = Decimal::from_f64(0.01).unwrap_or(Decimal::ZERO);
     let mut strategy = BuyAndHold::new(instrument.clone(), qty);
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
+    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
     let exec = SyncPaperGateway::new(PaperConfig::default());
 
     let mut src = CsvBarSource::from_path(

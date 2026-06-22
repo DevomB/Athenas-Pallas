@@ -66,6 +66,7 @@ mod tests {
             win_rate: 0.5,
             profit_factor: 2.0,
             closed_trades: 1,
+            per_strategy: vec![],
         };
         append_results_jsonl(&ledger, &report).unwrap();
         append_results_jsonl(&ledger, &report).unwrap();

@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use super::{ExecutionGateway, PaperConfig, PaperGateway, SyncExecutionGateway};
+use super::{AccountEvents, ExecutionGateway, PaperConfig, PaperGateway, SyncExecutionGateway};
 use crate::error::Result;
 use crate::events::{AccountEvent, OrderIntent};
 use crate::state::GlobalState;
@@ -36,7 +36,9 @@ impl ExecutionGateway for SimGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.inner.place_limit_sync(state, intent)
+        self.inner
+            .place_limit_sync(state, intent)
+            .map(|e| e.into_vec())
     }
 
     async fn place_market(
@@ -44,7 +46,9 @@ impl ExecutionGateway for SimGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.inner.place_market_sync(state, intent)
+        self.inner
+            .place_market_sync(state, intent)
+            .map(|e| e.into_vec())
     }
 
     async fn place_stop_market(
@@ -52,7 +56,9 @@ impl ExecutionGateway for SimGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.inner.place_stop_market_sync(state, intent)
+        self.inner
+            .place_stop_market_sync(state, intent)
+            .map(|e| e.into_vec())
     }
 
     async fn place_stop_limit(
@@ -60,28 +66,34 @@ impl ExecutionGateway for SimGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.inner.place_stop_limit_sync(state, intent)
+        self.inner
+            .place_stop_limit_sync(state, intent)
+            .map(|e| e.into_vec())
     }
 
     async fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
-        self.inner.cancel_sync(state, order_id)
+        self.inner
+            .cancel_sync(state, order_id)
+            .map(|e| e.into_vec())
     }
 
     async fn cancel_all(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.inner.cancel_all_sync(state)
+        self.inner.cancel_all_sync(state).map(|e| e.into_vec())
     }
 
     async fn poll_after_market(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.inner.poll_after_market_sync(state)
+        self.inner
+            .poll_after_market_sync(state)
+            .map(|e| e.into_vec())
     }
 }
 
 impl SyncExecutionGateway for SimGateway {
-    fn place_limit(&self, state: &GlobalState, intent: &OrderIntent) -> Result<Vec<AccountEvent>> {
+    fn place_limit(&self, state: &GlobalState, intent: &OrderIntent) -> Result<AccountEvents> {
         self.inner.place_limit_sync(state, intent)
     }
 
-    fn place_market(&self, state: &GlobalState, intent: &OrderIntent) -> Result<Vec<AccountEvent>> {
+    fn place_market(&self, state: &GlobalState, intent: &OrderIntent) -> Result<AccountEvents> {
         self.inner.place_market_sync(state, intent)
     }
 
@@ -89,27 +101,32 @@ impl SyncExecutionGateway for SimGateway {
         &self,
         state: &GlobalState,
         intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
+    ) -> Result<AccountEvents> {
         self.inner.place_stop_market_sync(state, intent)
     }
 
-    fn place_stop_limit(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
+    fn place_stop_limit(&self, state: &GlobalState, intent: &OrderIntent) -> Result<AccountEvents> {
         self.inner.place_stop_limit_sync(state, intent)
     }
 
-    fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
+    fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<AccountEvents> {
         self.inner.cancel_sync(state, order_id)
     }
 
-    fn cancel_all(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
+    fn cancel_all(&self, state: &GlobalState) -> Result<AccountEvents> {
         self.inner.cancel_all_sync(state)
     }
 
-    fn poll_after_market(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
+    fn poll_after_market(&self, state: &GlobalState) -> Result<AccountEvents> {
         self.inner.poll_after_market_sync(state)
+    }
+
+    fn poll_after_market_instrument(
+        &self,
+        state: &GlobalState,
+        instrument: &crate::types::InstrumentId,
+    ) -> Result<AccountEvents> {
+        self.inner
+            .poll_after_market_instrument_sync(state, instrument)
     }
 }

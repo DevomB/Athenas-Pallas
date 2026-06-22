@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = GlobalState::new(registry, balances);
     let qty = Decimal::from_f64(0.01).unwrap_or(Decimal::ZERO);
     let mut strategy = BuyAndHold::new(instrument.clone(), qty);
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
+    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
     let exec = SimGateway::new(PaperConfig::default());
 
     let csv = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data/BTCUSDT_1d.csv");

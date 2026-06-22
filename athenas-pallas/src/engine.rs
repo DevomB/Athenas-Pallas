@@ -340,7 +340,10 @@ where
     match &ev {
         Event::Market(m) => {
             state.apply_market(m);
-            let passive = exec.poll_after_market(state)?;
+            let passive = match ev.instrument() {
+                Some(inst) => exec.poll_after_market_instrument(state, inst)?,
+                None => exec.poll_after_market(state)?,
+            };
             for a in passive {
                 state.apply_account(&a);
             }
@@ -409,7 +412,10 @@ where
 {
     match &ev {
         Event::Market(_) => {
-            let passive = exec.poll_after_market(state)?;
+            let passive = match ev.instrument() {
+                Some(inst) => exec.poll_after_market_instrument(state, inst)?,
+                None => exec.poll_after_market(state)?,
+            };
             for a in passive {
                 state.apply_account(&a);
             }
@@ -429,6 +435,54 @@ where
     intents.clear();
     strategy.on_event(&ctx, &ev, intents);
 
+    process_intents_sync(state, risk, exec, intents);
+    Ok(())
+}
+
+/// Zero-allocation tick-replay dispatch using a borrowed [`ReplayEvent`].
+///
+/// Mirrors the `Event::Market` branch of [`dispatch_replay_sync`] (passive poll, anchor refresh,
+/// strategy hook, intent execution) but never materializes an owned `Event` for the strategy.
+/// The caller is responsible for having already applied the bar to `state` (e.g. via
+/// [`GlobalState::apply_bar`]).
+pub fn dispatch_replay_bar_sync<S>(
+    state: &mut GlobalState,
+    strategy: &mut S,
+    risk: &crate::risk::BacktestChecks,
+    exec: &impl SyncExecutionGateway,
+    ev: &crate::events::ReplayEvent<'_>,
+    intents: &mut Vec<OrderIntent>,
+) -> Result<()>
+where
+    S: Strategy,
+{
+    let passive = exec.poll_after_market_instrument(state, ev.instrument())?;
+    for a in passive {
+        state.apply_account(&a);
+    }
+
+    let now = ev.timestamp();
+    state.refresh_daily_risk_anchor(now);
+
+    if state.paused || state.trading_state == TradingState::Disabled {
+        return Ok(());
+    }
+
+    let ctx = StrategyContext { now, state };
+    intents.clear();
+    strategy.on_replay_event(&ctx, ev, intents);
+
+    process_intents_sync(state, risk, exec, intents);
+    Ok(())
+}
+
+/// Validate and execute the buffered intents against the sync gateway, applying resulting events.
+fn process_intents_sync(
+    state: &mut GlobalState,
+    risk: &crate::risk::BacktestChecks,
+    exec: &impl SyncExecutionGateway,
+    intents: &mut Vec<OrderIntent>,
+) {
     for intent in intents.drain(..) {
         if let Err(e) = risk.validate(state, &intent) {
             warn!(target: "athenas_pallas::engine", "risk: {e}");
@@ -443,8 +497,6 @@ where
             Err(e) => error!(target: "athenas_pallas::engine", "execution: {e}"),
         }
     }
-
-    Ok(())
 }
 
 fn apply_control_sync<E: SyncExecutionGateway>(
@@ -528,7 +580,7 @@ fn dispatch_intent_sync<E: SyncExecutionGateway>(
     exec: &E,
     state: &GlobalState,
     intent: &OrderIntent,
-) -> Result<Vec<crate::events::AccountEvent>> {
+) -> Result<crate::execution::AccountEvents> {
     match intent.order_type {
         OrderType::Limit => exec.place_limit(state, intent),
         OrderType::Market => exec.place_market(state, intent),
@@ -652,14 +704,7 @@ where
 }
 
 fn event_time(ev: &Event) -> OffsetDateTime {
-    match ev {
-        Event::Market(crate::events::MarketEvent::Trade { ts, .. }) => *ts,
-        Event::Market(crate::events::MarketEvent::BookL1 { ts, .. }) => *ts,
-        Event::Market(crate::events::MarketEvent::BookL2Snapshot(s)) => s.ts,
-        Event::Market(crate::events::MarketEvent::Bar { ts, .. }) => *ts,
-        Event::Timer(t) => t.ts,
-        _ => OffsetDateTime::now_utc(),
-    }
+    ev.timestamp_or_now()
 }
 
 async fn apply_control<E: ExecutionGateway>(

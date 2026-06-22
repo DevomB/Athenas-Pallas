@@ -19,21 +19,21 @@ impl Strategy for OneShot {
         if self.fired {
             return;
         }
-        if matches!(event, Event::Market(MarketEvent::BookL1 { .. })) {
-            if ctx.state.mid_or_last(&self.inst).is_some() {
-                self.fired = true;
-                out.push(OrderIntent {
-                    instrument: self.inst.clone(),
-                    side: Side::Buy,
-                    order_type: OrderType::Market,
-                    price: None,
-                    stop_price: None,
-                    qty: Decimal::new(1, 3),
-                    client_order_id: None,
-                    source: OrderIntentSource::User,
-                    strategy_id: None,
-                });
-            }
+        if matches!(event, Event::Market(MarketEvent::BookL1 { .. }))
+            && ctx.state.mid_or_last(&self.inst).is_some()
+        {
+            self.fired = true;
+            out.push(OrderIntent {
+                instrument: self.inst.clone(),
+                side: Side::Buy,
+                order_type: OrderType::Market,
+                price: None,
+                stop_price: None,
+                qty: Decimal::new(1, 3),
+                client_order_id: None,
+                source: OrderIntentSource::User,
+                strategy_id: None,
+            });
         }
     }
 }
@@ -56,7 +56,7 @@ async fn paper_market_updates_balances() {
         inst: inst.clone(),
         fired: false,
     };
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
+    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
     let exec = PaperGateway::new(PaperConfig::default());
 
     let ts = OffsetDateTime::now_utc();

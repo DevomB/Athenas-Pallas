@@ -24,10 +24,12 @@ fn cancel_flag_stops_large_run() {
         cancel_worker.store(true, std::sync::atomic::Ordering::Relaxed);
     });
 
-    let mut cfg = BacktestConfig::default();
-    cfg.data_path = PathBuf::from(&tmp);
-    cfg.data_format = DataFormat::Ohlcv;
-    cfg.record_equity_curve = false;
+    let cfg = BacktestConfig {
+        data_path: PathBuf::from(&tmp),
+        data_format: DataFormat::Ohlcv,
+        record_equity_curve: false,
+        ..BacktestConfig::default()
+    };
 
     let started = std::time::Instant::now();
     let err = run_backtest_with_cancel(&cfg, Some(cancel)).unwrap_err();

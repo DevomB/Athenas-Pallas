@@ -46,7 +46,7 @@ fn bench_noop(c: &mut Criterion) {
     c.bench_function("noop_100k_bars", |b| {
         b.iter(|| {
             let (mut state, mut src, exec) = setup_noop_replay(100_000);
-            let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
+            let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
             replay_noop_loop(black_box(&mut state), &mut src, &exec, &risk);
         });
     });
@@ -139,10 +139,8 @@ fn bench_equity_curve_toggle(c: &mut Criterion) {
                             &mut intents,
                         )
                         .unwrap();
-                        if record {
-                            if state.mark_to_market_equity_ix(0).is_some() {
-                                samples += 1;
-                            }
+                        if record && state.mark_to_market_equity_ix(0).is_some() {
+                            samples += 1;
                         }
                     }
                     black_box(samples);
@@ -168,10 +166,12 @@ fn bench_session_overhead(c: &mut Criterion) {
             .unwrap();
         }
     }
-    let mut cfg = BacktestConfig::default();
-    cfg.data_path = tmp;
-    cfg.data_format = DataFormat::Ohlcv;
-    cfg.record_equity_curve = false;
+    let cfg = BacktestConfig {
+        data_path: tmp,
+        data_format: DataFormat::Ohlcv,
+        record_equity_curve: false,
+        ..BacktestConfig::default()
+    };
 
     c.bench_function("session_overhead_100k", |b| {
         b.iter(|| {

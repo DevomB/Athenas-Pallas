@@ -17,9 +17,27 @@
   equity_curve/10k false: ~3.31 ms
   session_overhead_100k: ~53.1 ms
 
-command: cargo bench -p athenas-pallas --bench backtest_hotpath
+2026-06-21 after borrowed replay events, instrument-scoped order poll,
+streaming metrics, FxHashMap, and SmallVec fill buffers (different host;
+numbers are not comparable to the 2026-06-17 row above):
+  noop_100k_bars:         ~60.1 ms median  (0.60 us/bar)
+  noop_100k_amortized:    ~58.3 ms median  (0.58 us/bar)
+  snapshot_clone:         ~2.45 us
+  buy_and_hold_100k:      ~70.4 ms median
+  equity_curve/10k true:  ~18.9 ms
+  equity_curve/10k false: ~12.8 ms   (streaming summary, no Vec<EquityPoint>)
+
+2026-06-21 pass 2 after price-indexed resting orders (BTreeMap per side/price),
+PriceTicks notional fast path in paper fees, and OMS pollable_ids:
+  noop_100k_amortized:    ~158 ms median  (1.58 us/bar on this run; host-contended)
+
+command: cargo bench -p athenas-pallas --bench backtest_hotpath -- --noplot
 
 Notes:
-  - session_overhead_100k now reuses a fresh CSV sidecar .pbar cache when available.
-  - session API remains a thin delegate around the backtest runner.
+  - Per-bar cost is host-dependent; absolute numbers above are from a contended
+    laptop. Use the committed Criterion baseline for regression comparison, not
+    the raw millisecond figures, and re-run on the target host before quoting.
+  - equity_curve/false now exercises the O(1)-memory streaming RollingMetrics
+    path (no full equity curve materialized).
+  - session_overhead_100k reuses a fresh CSV sidecar .pbar cache when available.
   - 90-bar noop debug integration tests remain sub-millisecond.

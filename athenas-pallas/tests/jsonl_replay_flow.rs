@@ -40,7 +40,7 @@ async fn jsonl_replay_yields_ten_events() {
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
     let state = GlobalState::new(InstrumentRegistry::from_instruments(instruments), balances);
     let strategy = NoopStrategy;
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
+    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
     let exec = SimGateway::new(PaperConfig::default());
     let final_state = EngineBuilder::run_batch(state, strategy, &risk, &exec, events)
         .await

@@ -89,14 +89,24 @@ pub struct TradeLedger {
 }
 
 /// O(1) rolling drawdown and Welford return stats during replay.
+///
+/// Tracks enough state (first/last equity, full-sample and downside Welford accumulators, and
+/// running max drawdown) to produce a complete [`PerformanceSummary`] via
+/// [`RollingMetrics::streaming_summary`] without ever materializing a `Vec<EquityPoint>`. This is
+/// what makes `record_equity_curve = false` runs use O(1) memory while keeping full metrics.
 #[derive(Clone, Debug, Default)]
 pub struct RollingMetrics {
     peak: Decimal,
     max_drawdown: f64,
     prev: Option<Decimal>,
+    first: Option<Decimal>,
+    last: Decimal,
     n_returns: usize,
     mean: f64,
     m2: f64,
+    dn_count: usize,
+    dn_mean: f64,
+    dn_m2: f64,
 }
 
 impl RollingMetrics {
@@ -108,6 +118,10 @@ impl RollingMetrics {
     /// Record one equity sample.
     pub fn record(&mut self, equity: Decimal, _periods_per_year: f64) {
         let e = equity.to_f64().unwrap_or(0.0);
+        if self.first.is_none() {
+            self.first = Some(equity);
+        }
+        self.last = equity;
         if equity > self.peak {
             self.peak = equity;
         }
@@ -127,6 +141,13 @@ impl RollingMetrics {
                 self.mean += delta / self.n_returns as f64;
                 let delta2 = r - self.mean;
                 self.m2 += delta * delta2;
+                if r < 0.0 {
+                    self.dn_count += 1;
+                    let d = r - self.dn_mean;
+                    self.dn_mean += d / self.dn_count as f64;
+                    let d2 = r - self.dn_mean;
+                    self.dn_m2 += d * d2;
+                }
             }
         }
         self.prev = Some(equity);
@@ -139,14 +160,67 @@ impl RollingMetrics {
 
     /// Annualized Sharpe from Welford stats.
     pub fn sharpe(&self, periods_per_year: f64) -> f64 {
+        self.sharpe_excess(periods_per_year, 0.0)
+    }
+
+    fn sharpe_excess(&self, periods_per_year: f64, rf_per_period: f64) -> f64 {
         if self.n_returns < 2 {
             return 0.0;
         }
         let var = self.m2 / (self.n_returns - 1) as f64;
-        if var <= 0.0 {
+        let s = var.sqrt();
+        if s < 1e-12 {
             return 0.0;
         }
-        self.mean / var.sqrt() * periods_per_year.sqrt()
+        (self.mean - rf_per_period) / s * periods_per_year.sqrt()
+    }
+
+    fn sortino_excess(&self, periods_per_year: f64, rf_per_period: f64) -> f64 {
+        if self.dn_count < 2 {
+            return 0.0;
+        }
+        let ds = (self.dn_m2 / (self.dn_count - 1) as f64).sqrt();
+        if ds < 1e-12 {
+            return 0.0;
+        }
+        (self.mean - rf_per_period) / ds * periods_per_year.sqrt()
+    }
+
+    /// Build a full [`PerformanceSummary`] from streamed stats without an equity curve.
+    ///
+    /// `returns` and `equity` are left empty; all scalar metrics match the curve-based
+    /// [`summarize_with_fills_and_rf`] within floating-point tolerance.
+    pub fn streaming_summary(
+        &self,
+        periods_per_year: f64,
+        fills: &[FillRecord],
+        risk_free_annual: f64,
+    ) -> PerformanceSummary {
+        let ledger = trade_ledger_from_fills(fills);
+        let first = self.first.unwrap_or(Decimal::ZERO);
+        let pnl = self.last - first;
+        let pnl_pct = if first.is_zero() {
+            Decimal::ZERO
+        } else {
+            pnl / first
+        };
+        let rf_per_period = if periods_per_year > 0.0 {
+            risk_free_annual / periods_per_year
+        } else {
+            0.0
+        };
+        PerformanceSummary {
+            pnl,
+            pnl_pct,
+            max_drawdown: self.max_drawdown,
+            sharpe: self.sharpe_excess(periods_per_year, rf_per_period),
+            sortino: self.sortino_excess(periods_per_year, rf_per_period),
+            returns: Vec::new(),
+            equity: Vec::new(),
+            win_rate: ledger.win_rate,
+            profit_factor: ledger.profit_factor,
+            closed_trades: ledger.closed_trades,
+        }
     }
 }
 
@@ -227,6 +301,52 @@ pub fn summarize_with_fills_and_rf(
         profit_factor: ledger.profit_factor,
         closed_trades: ledger.closed_trades,
     }
+}
+
+/// Realized round-trip PnL attributed to one sub-strategy, for the backtest report.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct StrategyPnlRow {
+    /// Sub-strategy label (from `OrderIntent::strategy_id`).
+    pub strategy_id: String,
+    /// Closed round-trip count for this strategy.
+    pub closed_trades: usize,
+    /// Fraction of closed round-trips with positive PnL.
+    pub win_rate: f64,
+    /// Gross profit / gross loss for this strategy.
+    pub profit_factor: f64,
+    /// Realized PnL (gross profit minus gross loss), as a decimal string.
+    pub realized_pnl: String,
+}
+
+/// Per-strategy realized PnL from tagged fills (FIFO ledger run per [`StrategyId`]).
+///
+/// Untagged fills (no `strategy_id`) are excluded. Rows are sorted by `strategy_id` for
+/// deterministic output. Returns empty when no fills carry an attribution.
+pub fn per_strategy_pnl(fills: &[FillRecord]) -> Vec<StrategyPnlRow> {
+    use std::collections::BTreeMap;
+    let mut by_strategy: BTreeMap<String, Vec<FillRecord>> = BTreeMap::new();
+    for fill in fills {
+        if let Some(sid) = &fill.strategy_id {
+            by_strategy
+                .entry(sid.to_string())
+                .or_default()
+                .push(fill.clone());
+        }
+    }
+    by_strategy
+        .into_iter()
+        .map(|(strategy_id, group)| {
+            let ledger = trade_ledger_from_fills(&group);
+            let realized = ledger.gross_profit - ledger.gross_loss;
+            StrategyPnlRow {
+                strategy_id,
+                closed_trades: ledger.closed_trades,
+                win_rate: ledger.win_rate,
+                profit_factor: ledger.profit_factor,
+                realized_pnl: realized.to_string(),
+            }
+        })
+        .collect()
 }
 
 /// Build round-trip stats from chronological fills (FIFO position tracking).

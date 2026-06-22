@@ -1,8 +1,13 @@
 # Athena's Pallas
 
+[![CI](https://github.com/DevomB/Athenas-Pallas/actions/workflows/ci.yml/badge.svg)](https://github.com/DevomB/Athenas-Pallas/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/athenas-pallas.svg)](https://crates.io/crates/athenas-pallas)
+[![docs.rs](https://img.shields.io/docsrs/athenas-pallas)](https://docs.rs/athenas-pallas)
+[![license](https://img.shields.io/crates/l/athenas-pallas.svg)](#license)
+
 Event-driven algorithmic trading in Rust: **backtest**, **paper**, and **live** share one engine. Swap data sources and execution backends; keep your strategy and risk logic.
 
-- Sync CSV replay hot path (~0.43 microseconds/bar amortized; see [benchmarks](docs/benchmarks.txt))
+- Sync CSV replay hot path (sub-microsecond/bar amortized for a noop strategy; ~0.43–0.60 us/bar depending on host — see [benchmarks](docs/benchmarks.txt))
 - Python and C++ strategies over newline JSON ([protocol](trading/protocol.md))
 - Local CSV, pbar, and strategy-driven backtest workflows
 

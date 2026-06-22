@@ -1,0 +1,6 @@
+{
+  "_comment": "Committed regression ceilings (milliseconds) for the CI bench-regression gate. These are deliberately generous (~3-4x a typical local run) so shared GitHub runner variance does not cause false failures, while still catching gross (multi-x) regressions. Update only when an intentional perf change shifts the floor. See docs/benchmarks.txt for representative per-host medians.",
+  "noop_100k_amortized": {
+    "ceiling_ms": 250
+  }
+}

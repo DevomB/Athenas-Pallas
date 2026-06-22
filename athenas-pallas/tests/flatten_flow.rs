@@ -37,7 +37,7 @@ async fn flatten_closes_position_when_paused() {
     state.paused = true;
 
     let mut strat = Quiet;
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck::default())]);
+    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
     let exec = PaperGateway::new(PaperConfig::default());
 
     let ts = OffsetDateTime::now_utc();

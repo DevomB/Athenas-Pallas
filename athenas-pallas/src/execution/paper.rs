@@ -2,16 +2,18 @@
 
 use std::sync::Arc;
 
-use super::{apply_slippage, ExecutionGateway};
+use super::{apply_slippage, AccountEvents, ExecutionGateway};
 use crate::backtest::{FillModel, TouchCrossFillModel};
 use crate::error::{Error, Result};
 use crate::events::{AccountEvent, OrderIntent};
 use crate::instrument::pricing::margin_required;
+use crate::instrument::ticks::{notional_decimal, PriceTicks, QtyLots};
 use crate::instrument::AssetClass;
 use crate::state::{GlobalState, InstrumentMeta};
 use crate::types::{OpenOrder, OrderId, OrderStatus, OrderType, Side};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
+use smallvec::smallvec;
 
 /// Paper trading gateway configuration.
 #[derive(Clone)]
@@ -71,6 +73,22 @@ impl PaperGateway {
     }
 
     fn notional(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
+        let tick = meta.tick_size.unwrap_or(Decimal::new(1, 8));
+        let lot = meta.lot_size.unwrap_or(Decimal::ONE);
+        if PriceTicks::is_exact(price, tick) && QtyLots::is_exact(qty, lot) {
+            if let (Some(pt), Some(ql)) = (
+                PriceTicks::from_decimal(price, tick),
+                QtyLots::from_decimal(qty, lot),
+            ) {
+                let base = notional_decimal(pt, ql, tick, lot);
+                return match meta.asset_class {
+                    AssetClass::Future | AssetClass::Perpetual | AssetClass::Option => {
+                        base * meta.contract_multiplier.unwrap_or(Decimal::ONE)
+                    }
+                    _ => base,
+                };
+            }
+        }
         match meta.asset_class {
             AssetClass::Future | AssetClass::Perpetual | AssetClass::Option => {
                 let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
@@ -275,13 +293,13 @@ impl PaperGateway {
         meta: &InstrumentMeta,
         px: Decimal,
         qty: Decimal,
-    ) -> Result<Vec<AccountEvent>> {
+    ) -> Result<AccountEvents> {
         let fee = Self::fee_notional(Self::notional(meta, px, qty), self.cfg.fee_bps);
         Self::check_balance_for_fill(state, meta, order.side, px, qty, fee)?;
         let mut filled = order.clone();
         filled.remaining_qty = Decimal::ZERO;
         filled.status = OrderStatus::Filled;
-        let mut evs = vec![Self::emit_order_update(&filled)];
+        let mut evs: AccountEvents = smallvec![Self::emit_order_update(&filled)];
         evs.push(AccountEvent::Fill {
             order_id: filled.id.clone(),
             instrument: filled.instrument.clone(),
@@ -315,7 +333,7 @@ impl PaperGateway {
         &self,
         state: &GlobalState,
         intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
+    ) -> Result<AccountEvents> {
         if intent.order_type != OrderType::Limit {
             return Err(Error::Invalid("place_limit requires limit intent".into()));
         }
@@ -334,7 +352,7 @@ impl PaperGateway {
             }
         }
 
-        Ok(vec![Self::emit_order_update(&o)])
+        Ok(smallvec![Self::emit_order_update(&o)])
     }
 
     /// Sync market placement.
@@ -342,7 +360,7 @@ impl PaperGateway {
         &self,
         state: &GlobalState,
         intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
+    ) -> Result<AccountEvents> {
         let meta = Self::meta(state, &intent.instrument)?;
         let (qty, _, _) = Self::normalize_order(meta, intent.qty, intent.price, intent.stop_price)?;
         let mid = state
@@ -359,7 +377,7 @@ impl PaperGateway {
         &self,
         state: &GlobalState,
         order_id: OrderId,
-    ) -> Result<Vec<AccountEvent>> {
+    ) -> Result<AccountEvents> {
         let o = state
             .open_orders
             .get(&order_id)
@@ -368,12 +386,12 @@ impl PaperGateway {
         let mut c = o;
         c.status = OrderStatus::Canceled;
         c.remaining_qty = Decimal::ZERO;
-        Ok(vec![Self::emit_order_update(&c)])
+        Ok(smallvec![Self::emit_order_update(&c)])
     }
 
     /// Sync cancel all.
-    pub(crate) fn cancel_all_sync(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        let mut out = Vec::new();
+    pub(crate) fn cancel_all_sync(&self, state: &GlobalState) -> Result<AccountEvents> {
+        let mut out = AccountEvents::new();
         for (_, o) in state.open_orders.iter() {
             let mut c = o.clone();
             c.status = OrderStatus::Canceled;
@@ -388,7 +406,7 @@ impl PaperGateway {
         &self,
         state: &GlobalState,
         intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
+    ) -> Result<AccountEvents> {
         if intent.order_type != OrderType::StopMarket {
             return Err(Error::Invalid(
                 "place_stop_market requires StopMarket".into(),
@@ -422,7 +440,7 @@ impl PaperGateway {
             }
         }
 
-        Ok(vec![Self::emit_order_update(&o)])
+        Ok(smallvec![Self::emit_order_update(&o)])
     }
 
     /// Sync stop-limit placement.
@@ -430,7 +448,7 @@ impl PaperGateway {
         &self,
         state: &GlobalState,
         intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
+    ) -> Result<AccountEvents> {
         if intent.order_type != OrderType::StopLimit {
             return Err(Error::Invalid("place_stop_limit requires StopLimit".into()));
         }
@@ -471,92 +489,126 @@ impl PaperGateway {
             }
         }
 
-        Ok(vec![Self::emit_order_update(&o)])
+        Ok(smallvec![Self::emit_order_update(&o)])
     }
 
-    /// Sync passive limit fills after market data.
-    pub(crate) fn poll_after_market_sync(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        let mut out = Vec::new();
-        let orders: Vec<OpenOrder> = state.open_orders.values().cloned().collect();
-        for o in orders {
-            let meta = match Self::meta(state, &o.instrument) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let qty = o.remaining_qty;
+    /// Evaluate one resting order against current market data, appending any resulting fill events.
+    ///
+    /// Shared by the full-book and instrument-scoped pollers so both apply identical fill rules
+    /// (limit cross via the configured [`crate::execution::FillModel`], stop trigger on bar
+    /// high/low, then market/limit execution price).
+    fn try_fill_resting(&self, state: &GlobalState, o: &OpenOrder, out: &mut AccountEvents) {
+        let meta = match Self::meta(state, &o.instrument) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let qty = o.remaining_qty;
 
-            match o.order_type {
-                OrderType::Limit => {
-                    let limit = match o.price {
-                        Some(p) => p,
-                        None => continue,
-                    };
-                    let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
-                        continue;
-                    };
-                    let Some(px) =
-                        Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
-                    else {
-                        continue;
-                    };
-                    match self.emit_fill_events(state, &o, meta, px, qty) {
-                        Ok(mut evs) => out.append(&mut evs),
-                        Err(_) => continue,
-                    }
+        match o.order_type {
+            OrderType::Limit => {
+                let Some(limit) = o.price else { return };
+                let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
+                    return;
+                };
+                let Some(px) =
+                    Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
+                else {
+                    return;
+                };
+                if let Ok(evs) = self.emit_fill_events(state, o, meta, px, qty) {
+                    out.extend(evs);
                 }
-                OrderType::StopMarket => {
-                    let stop = match o.stop_price {
-                        Some(p) => p,
-                        None => continue,
-                    };
-                    let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
-                        continue;
-                    };
-                    if !Self::stop_triggered(o.side, stop, high, low) {
-                        continue;
-                    }
-                    let mid = match state.mid_or_last(&o.instrument) {
-                        Some(m) => m,
-                        None => continue,
-                    };
-                    let px = apply_slippage(o.side, mid, self.cfg.market_slippage_bps);
-                    match self.emit_fill_events(state, &o, meta, px, qty) {
-                        Ok(mut evs) => out.append(&mut evs),
-                        Err(_) => continue,
-                    }
-                }
-                OrderType::StopLimit => {
-                    let stop = match o.stop_price {
-                        Some(p) => p,
-                        None => continue,
-                    };
-                    let limit = match o.price {
-                        Some(p) => p,
-                        None => continue,
-                    };
-                    let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
-                        continue;
-                    };
-                    if !Self::stop_triggered(o.side, stop, high, low) {
-                        continue;
-                    }
-                    let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
-                        continue;
-                    };
-                    let Some(px) =
-                        Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
-                    else {
-                        continue;
-                    };
-                    match self.emit_fill_events(state, &o, meta, px, qty) {
-                        Ok(mut evs) => out.append(&mut evs),
-                        Err(_) => continue,
-                    }
-                }
-                OrderType::Market => {}
             }
+            OrderType::StopMarket => {
+                let Some(stop) = o.stop_price else { return };
+                let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
+                    return;
+                };
+                if !Self::stop_triggered(o.side, stop, high, low) {
+                    return;
+                }
+                let Some(mid) = state.mid_or_last(&o.instrument) else {
+                    return;
+                };
+                let px = apply_slippage(o.side, mid, self.cfg.market_slippage_bps);
+                if let Ok(evs) = self.emit_fill_events(state, o, meta, px, qty) {
+                    out.extend(evs);
+                }
+            }
+            OrderType::StopLimit => {
+                let Some(stop) = o.stop_price else { return };
+                let Some(limit) = o.price else { return };
+                let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
+                    return;
+                };
+                if !Self::stop_triggered(o.side, stop, high, low) {
+                    return;
+                }
+                let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
+                    return;
+                };
+                let Some(px) =
+                    Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
+                else {
+                    return;
+                };
+                if let Ok(evs) = self.emit_fill_events(state, o, meta, px, qty) {
+                    out.extend(evs);
+                }
+            }
+            OrderType::Market => {}
+        }
+    }
+
+    /// Sync passive limit fills after market data, scanning the whole book.
+    pub(crate) fn poll_after_market_sync(&self, state: &GlobalState) -> Result<AccountEvents> {
+        let mut out = AccountEvents::new();
+        for instrument in state
+            .open_orders
+            .instruments_with_orders()
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            self.poll_instrument_into(state, &instrument, &mut out)?;
         }
         Ok(out)
+    }
+
+    /// Sync passive fills restricted to the instrument that just ticked.
+    pub(crate) fn poll_after_market_instrument_sync(
+        &self,
+        state: &GlobalState,
+        instrument: &crate::types::InstrumentId,
+    ) -> Result<AccountEvents> {
+        let mut out = AccountEvents::new();
+        self.poll_instrument_into(state, instrument, &mut out)?;
+        Ok(out)
+    }
+
+    fn poll_instrument_into(
+        &self,
+        state: &GlobalState,
+        instrument: &crate::types::InstrumentId,
+        out: &mut AccountEvents,
+    ) -> Result<()> {
+        let (bid, ask) = match Self::l1_bid_ask(state, instrument) {
+            Some((b, a)) => (Some(b), Some(a)),
+            None => (None, None),
+        };
+        let (high, low) = match Self::bar_high_low(state, instrument) {
+            Some((h, l)) => (Some(h), Some(l)),
+            None => (None, None),
+        };
+        for id in state
+            .open_orders
+            .pollable_ids(instrument, bid, ask, high, low)
+        {
+            let Some(o) = state.open_orders.get(&id) else {
+                continue;
+            };
+            self.try_fill_resting(state, o, out);
+        }
+        Ok(())
     }
 }
 
@@ -567,7 +619,7 @@ impl ExecutionGateway for PaperGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.place_limit_sync(state, intent)
+        self.place_limit_sync(state, intent).map(|e| e.into_vec())
     }
 
     async fn place_market(
@@ -575,7 +627,7 @@ impl ExecutionGateway for PaperGateway {
         state: &GlobalState,
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
-        self.place_market_sync(state, intent)
+        self.place_market_sync(state, intent).map(|e| e.into_vec())
     }
 
     async fn place_stop_market(
@@ -584,6 +636,7 @@ impl ExecutionGateway for PaperGateway {
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
         self.place_stop_market_sync(state, intent)
+            .map(|e| e.into_vec())
     }
 
     async fn place_stop_limit(
@@ -592,18 +645,19 @@ impl ExecutionGateway for PaperGateway {
         intent: &OrderIntent,
     ) -> Result<Vec<AccountEvent>> {
         self.place_stop_limit_sync(state, intent)
+            .map(|e| e.into_vec())
     }
 
     async fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
-        self.cancel_sync(state, order_id)
+        self.cancel_sync(state, order_id).map(|e| e.into_vec())
     }
 
     async fn cancel_all(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.cancel_all_sync(state)
+        self.cancel_all_sync(state).map(|e| e.into_vec())
     }
 
     async fn poll_after_market(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.poll_after_market_sync(state)
+        self.poll_after_market_sync(state).map(|e| e.into_vec())
     }
 }
 
