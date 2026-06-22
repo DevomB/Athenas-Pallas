@@ -144,6 +144,14 @@ impl BacktestConfig {
         }
         parse_base_quote(&self.instrument.symbol, self.asset_class)
     }
+
+    /// Default cash balance when none is supplied (10_000 in the resolved quote asset).
+    pub fn default_balances(&self) -> HashMap<Asset, Decimal> {
+        let (_, quote) = self.resolved_base_quote();
+        let mut balances = HashMap::new();
+        balances.insert(Asset::new(quote), Decimal::new(10_000, 0));
+        balances
+    }
 }
 
 /// Split `exchange:symbol`.

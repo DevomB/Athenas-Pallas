@@ -6,20 +6,16 @@ See the [README](../README.md) for install and quickstart. This page is the long
 
 Files in `data/` are local only (gitignored). Export or copy your market-history CSVs there before running a backtest.
 
-Optional Databento pull:
+## 2. Backtest (built-in buy-and-hold)
 
-```powershell
-$env:DATABENTO_API_KEY="YOUR_KEY"
-cargo run --release -p athenas-pallas --features databento --bin pallas-databento-fetch -- `
-  --dataset XNAS.ITCH `
-  --symbol AAPL `
-  --schema ohlcv-1d `
-  --start 2024-01-01 `
-  --end 2024-02-01 `
-  --output data/AAPL_databento.csv
+```bash
+cargo run --release -p athenas-pallas --bin pallas-backtest -- \
+  --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv \
+  --instrument test:EXAMPLE \
+  --initial-balance USD:10000
 ```
 
-## 2. Backtest (built-in buy-and-hold)
+Equity OHLCV from a local export:
 
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
@@ -34,8 +30,20 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- \
 
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
+  --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv \
+  --instrument test:EXAMPLE \
+  --initial-balance USD:10000 \
+  --strategy simple_sma \
+  --output target/report.json
+```
+
+Crypto-shaped fixture (explicit base/quote):
+
+```bash
+cargo run --release -p athenas-pallas --bin pallas-backtest -- \
   --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv \
-  --instrument csv:BTCUSDT \
+  --instrument test:BTCUSDT \
+  --asset-class crypto \
   --initial-balance USDT:10000 \
   --strategy simple_sma \
   --output target/report.json
@@ -49,32 +57,38 @@ cp backtest.toml.example backtest.toml
 cargo run --release -p athenas-pallas --bin pallas-backtest -- --config backtest.toml
 ```
 
-## 6. Merge, sweep, stress
+## 5. Merge, sweep, resample
+
+These live in the separate tools crate:
 
 ```bash
+cargo build --release -p athenas-pallas-tools
+
 # Merge two CSV streams by timestamp
-cargo run -p athenas-pallas --bin pallas-merge -- \
-  --source ohlcv:csv:BTCUSDT:data/BTC.csv \
-  --source ohlcv:csv:AAPL:data/AAPL.csv \
+cargo run --release -p athenas-pallas-tools --bin pallas-merge -- \
+  --source ohlcv:test:BTCUSDT:data/BTC.csv \
+  --source yahoo:test:AAPL:data/AAPL.csv \
   -o data/merged.csv
 
-# Parameter grid from TOML
-cargo run -p athenas-pallas --bin pallas-sweep -- \
-  --config backtest.toml --sweep sweep.toml -o target/sweep.csv
+# Parameter grid from TOML (see sweep.toml.example)
+cargo run --release -p athenas-pallas-tools --bin pallas-sweep -- \
+  --config backtest.toml --sweep sweep.toml.example -o target/sweep.csv
 
-# Large-run throughput smoke test
-cargo run --release -p athenas-pallas --example stress_backtest -- 100000
+# Resample bars offline
+cargo run --release -p athenas-pallas-tools --bin pallas-resample -- \
+  --input data/BTCUSDT_1m.csv --to 30m -o data/BTCUSDT_30m.csv
 ```
 
-## 7. JSONL event replay
+## 6. JSONL event replay
 
 Record events with `backtest::write_events_jsonl`, then replay via `read_events_jsonl` + `replay_events_serial` for deterministic strategy debugging without reloading CSV.
 
-## 5. Golden tests (CI)
+## 7. Golden tests (CI)
 
 ```bash
 cargo test -p athenas-pallas
 cargo test -p athenas-pallas --test external_strategy_golden -- --ignored
+cargo test -p athenas-pallas --test cpp_strategy_golden -- --ignored
 ```
 
 Fixtures: `athenas-pallas/tests/fixtures/`.

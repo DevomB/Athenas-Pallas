@@ -23,7 +23,7 @@ use crate::metrics::{summarize_with_fills_and_rf, RollingMetrics};
 use crate::risk::{BacktestChecks, MaxDailyLossQuote, MaxPositionSize};
 use crate::state::{GlobalState, InstrumentRegistry};
 use crate::strategy::{Strategy, StrategyContext};
-use crate::types::{Asset, EquityPoint, ExchangeId, InstrumentId, OrderType, Side, Symbol};
+use crate::types::{EquityPoint, ExchangeId, InstrumentId, OrderType, Side, Symbol};
 use crate::{dispatch_replay_bar_sync, dispatch_replay_sync};
 
 /// Built-in buy-on-first-bar strategy when no external script is given.
@@ -130,7 +130,7 @@ impl BacktestRunner {
         }
         let mut balances = cfg.balances.clone();
         if balances.is_empty() {
-            balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
+            balances = cfg.default_balances();
         }
 
         let registry = InstrumentRegistry::from_instruments(instruments);

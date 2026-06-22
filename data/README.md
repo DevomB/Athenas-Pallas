@@ -6,29 +6,12 @@ This folder is your workspace for local market-history files. Nothing here is co
 
 Export or copy a CSV into this directory, then point `pallas-backtest --data` or `[backtest].data` in your TOML at that file.
 
-## Pull from Databento
-
-The optional Databento integration writes engine-compatible OHLCV CSV from the official Rust client. Set `DATABENTO_API_KEY`, choose a Databento dataset/symbol/schema, then backtest the output file.
-
-```powershell
-$env:DATABENTO_API_KEY="YOUR_KEY"
-cargo run --release -p athenas-pallas --features databento --bin pallas-databento-fetch -- `
-  --dataset XNAS.ITCH `
-  --symbol AAPL `
-  --schema ohlcv-1d `
-  --start 2024-01-01 `
-  --end 2024-02-01 `
-  --output data/AAPL_databento.csv
-```
-
-Supported fetch schemas are `ohlcv-1s`, `ohlcv-1m`, `ohlcv-1h`, and `ohlcv-1d`. The output columns are exactly `ts,open,high,low,close,volume`, so use `data_format = "ohlcv"` or `--data-format ohlcv`.
-
 ## Resample offline
 
-Aggregate a finer CSV to a coarser interval:
+Aggregate a finer CSV to a coarser interval (tools crate):
 
 ```bash
-cargo run -p athenas-pallas --bin pallas-resample -- \
+cargo run --release -p athenas-pallas-tools --bin pallas-resample -- \
   --input data/BTCUSDT_1m.csv --to 30m -o data/BTCUSDT_30m.csv
 ```
 
@@ -54,11 +37,11 @@ ts,open,high,low,close,volume
 2024-01-01T00:00:00Z,40000,40100,39900,40050,12.5
 ```
 
-Set `asset_class = "crypto"` (default). For Sharpe annualization, set `bar_interval = "1h"` or enable `auto_periods_per_year = true` in TOML.
+Set `asset_class = "crypto"`. For Sharpe annualization, set `bar_interval = "1h"` or enable `auto_periods_per_year = true` in TOML. Set explicit `base_asset` / `quote_asset` when the symbol does not encode them (e.g. `BTC` / `USDT`).
 
-### Equities (`DataFormat::Ohlcv`)
+### Equities (`DataFormat::Ohlcv` or `yahoo`)
 
-Use the same `ts,open,high,low,close,volume` schema as generic OHLCV.
+Use OHLCV `ts,open,high,low,close,volume` or Yahoo `Date,Open,High,Low,Close,Volume` exports.
 
 Set `asset_class = "equity"`. Optional `session_filter = "equity_rth"` filters to US regular hours if you import intraday bars.
 
@@ -104,15 +87,21 @@ Set `asset_class = "future"`, `data_format = "future"`.
 ## Backtest config hints
 
 ```toml
+[instrument]
+exchange = "test"
+symbol = "EXAMPLE"
+asset_class = "equity"
+base_asset = "EXAMPLE"
+quote_asset = "USD"
+
 [backtest]
-data = "data/BTCUSDT_1h.csv"
-data_format = "ohlcv"
-bar_interval = "1h"
+data = "data/EXAMPLE_1d.csv"
+data_format = "yahoo"
+bar_interval = "1d"
 auto_periods_per_year = true
 session_filter = "none"   # or equity_rth, forex_245
 
-[instrument]
-exchange = "csv"
-symbol = "BTCUSDT"
-asset_class = "crypto"
+[[balances]]
+asset = "USD"
+amount = "10000"
 ```

@@ -64,9 +64,7 @@ pub fn run_external_backtest_with_cancel(
     let mut instruments = HashMap::new();
     instruments.insert(cfg.instrument.clone(), meta.clone());
     let balances = if cfg.balances.is_empty() {
-        let mut b = HashMap::new();
-        b.insert(Asset::new("USDT"), Decimal::new(10_000, 0));
-        b
+        cfg.default_balances()
     } else {
         cfg.balances.clone()
     };
@@ -139,6 +137,12 @@ fn apply_table(
         }
         if let Some(v) = inst.get("expiry").and_then(|v| v.as_str()) {
             cfg.expiry = Some(v.to_string());
+        }
+        if let Some(v) = inst.get("base_asset").and_then(|v| v.as_str()) {
+            cfg.base_asset = Some(v.to_string());
+        }
+        if let Some(v) = inst.get("quote_asset").and_then(|v| v.as_str()) {
+            cfg.quote_asset = Some(v.to_string());
         }
     }
 
@@ -310,6 +314,18 @@ mod tests {
         let cfg = BacktestConfig::load_toml(&path).unwrap();
         assert_eq!(cfg.instrument.symbol, "EXAMPLE");
         assert_eq!(cfg.data_format, DataFormat::Yahoo);
+        assert_eq!(cfg.base_asset.as_deref(), Some("EXAMPLE"));
+        assert_eq!(cfg.quote_asset.as_deref(), Some("USD"));
         assert!(cfg.strategy_path.is_some());
+    }
+
+    #[test]
+    fn default_balances_use_resolved_quote() {
+        let cfg = BacktestConfig::default();
+        let balances = cfg.default_balances();
+        assert_eq!(
+            balances.get(&Asset::new("USD")),
+            Some(&Decimal::new(10_000, 0))
+        );
     }
 }

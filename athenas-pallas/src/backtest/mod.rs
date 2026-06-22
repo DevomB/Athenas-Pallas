@@ -322,9 +322,7 @@ impl FillModel for TouchCrossFillModel {
 pub use bar::{
     decimal_to_ticks, default_tick_size, ticks_to_decimal, Bar, BarSeries, BarSeriesSource,
 };
-pub use batch::{
-    run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario,
-};
+pub use batch::{run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario};
 pub use config::{parse_base_quote, parse_instrument, BacktestConfig, DataFormat, ExtraInstrument};
 pub use cpp_build::build_cpp_strategy;
 pub use interval::{
@@ -336,8 +334,8 @@ pub use merge::{merge_sources, merge_sources_iter, MergedSources};
 pub use pbar::{is_pbar_path, read_pbar, write_pbar};
 pub use replay::{read_events_jsonl, replay_events_serial};
 pub use report::BacktestReport;
-pub use runner::BuyAndHold;
 pub use runner::BacktestRunner;
+pub use runner::BuyAndHold;
 pub use session::{
     run_backtest, run_backtest_with_cancel, run_external_backtest,
     run_external_backtest_with_cancel,

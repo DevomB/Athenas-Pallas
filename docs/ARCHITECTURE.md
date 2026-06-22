@@ -1,22 +1,20 @@
 # Athena's Pallas Architecture
 
-Event-driven trading engine with one core loop for backtest, paper, and live modes.
+Event-driven **backtest** engine with a single synchronous replay loop. External C++/Python strategies attach via newline-delimited JSON.
 
 ```mermaid
 flowchart LR
   subgraph ingest
-    CSV[CSV / pbar]
-    WS[Optional broker WS]
+    CSV[CSV / pbar / JSONL]
   end
   subgraph engine
-    EV[Event queue]
+    EV[Event stream]
     ST[GlobalState]
     STG[Strategy]
     RK[Risk checks]
-    EX[Execution gateway]
+    EX[FillEngine / SimGateway]
   end
   CSV --> EV
-  WS --> EV
   EV --> ST
   ST --> STG
   STG --> RK
@@ -29,10 +27,10 @@ flowchart LR
 
 | Layer | Crate path | Role |
 |-------|------------|------|
-| Data | `backtest/sources` | Normalize CSV layouts |
-| Replay | `backtest/runner`, `backtest/merge` | Deterministic historical event stream and streaming k-way source merge |
+| Data | `backtest/sources` | Normalize CSV layouts (OHLCV, Yahoo, FX L1, futures) |
+| Replay | `backtest/runner`, `backtest/merge`, `engine/replay` | Deterministic historical event stream and streaming k-way source merge |
 | State | `state.rs` | Balances, positions, L1/L2, fills |
-| Execution | `execution/paper.rs` | Simulated fills, fees, margin-aware cash flows |
+| Execution | `execution/fills.rs`, `execution/sync_paper.rs` | Simulated fills, fees, margin-aware cash flows |
 | Strategy | `strategy/`, `trading/` | In-process trait or external JSON-line subprocess; strategy folders are auto-detected |
 | Risk | `risk.rs` | Position limits, pause, daily loss checks |
 | Results | `results/mod.rs` | JSON + JSONL persistence |
@@ -67,11 +65,11 @@ The resolver detects CMake C++ directories, Python directories/files, and compil
 
 ## CLI Tools
 
-| Binary | Purpose |
-|--------|---------|
-| `pallas-backtest` | Run backtest from TOML/flags |
-| `pallas-resample` | Offline bar aggregation |
-| `pallas-merge` | K-way merge CSV streams by timestamp |
-| `pallas-sweep` | Grid search over TOML parameters |
+| Binary | Crate | Purpose |
+|--------|-------|---------|
+| `pallas-backtest` | `athenas-pallas` | Run backtest from TOML/flags |
+| `pallas-resample` | `athenas-pallas-tools` | Offline bar aggregation |
+| `pallas-merge` | `athenas-pallas-tools` | K-way merge CSV streams by timestamp |
+| `pallas-sweep` | `athenas-pallas-tools` | Grid search over TOML parameters |
 
 See [PERFORMANCE.md](PERFORMANCE.md) for hot-path details and benchmark commands.

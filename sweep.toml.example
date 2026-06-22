@@ -1,0 +1,16 @@
+# Example sweep grid for pallas-sweep.
+# Usage:
+#   cargo run -p athenas-pallas-tools --bin pallas-sweep -- \
+#     --config backtest.toml --sweep sweep.toml.example -o target/sweep.csv
+
+[[sweep]]
+name = "fee_5"
+fee_bps = 5
+
+[[sweep]]
+name = "fee_15"
+fee_bps = 15
+
+[[sweep]]
+name = "slip_10"
+slippage_bps = 10

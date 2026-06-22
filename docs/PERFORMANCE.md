@@ -46,20 +46,17 @@ cargo bench -p athenas-pallas --bench backtest_hotpath
 
 Baseline in `docs/benchmarks.txt`: sub-microsecond/bar amortized for a noop strategy on 100k bars (roughly 0.43–0.60 us/bar depending on host). Re-run on the target host before quoting absolute numbers; use the committed Criterion baseline for regression comparison.
 
-## Stress Run
+CI compares `noop_100k_amortized` against a ceiling in `docs/bench_baseline.json`.
 
-```bash
-cargo run --release -p athenas-pallas --example stress_backtest -- 1000000
-```
+## Large-run throughput
 
-Pass bar count as the first argument. For peak RSS, use platform tools such as `/usr/bin/time -v` on Linux.
+Use the Criterion bench above for repeatable numbers. For peak RSS on a long CSV replay, use platform tools such as `/usr/bin/time -v` on Linux while running `pallas-backtest` against a large local file.
 
 ## Future Work
 
-- i64 tick math through fills and fees.
+- i64 tick math through fills and fees (partial: `instrument::ticks` fast path exists).
 - Optional mmap-backed `.pbar` reads if benchmark-backed.
-- Sorted resting-order index with binary search on bar high/low.
-- CI benchmark regression gate.
+- Sorted resting-order index improvements beyond current BTreeMap price levels.
 
 ## Scope
 

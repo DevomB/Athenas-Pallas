@@ -4,6 +4,8 @@
 exchange = "test"
 symbol = "EXAMPLE"
 asset_class = "equity"
+base_asset = "EXAMPLE"
+quote_asset = "USD"
 
 [backtest]
 data = "data/EXAMPLE_1d.csv"

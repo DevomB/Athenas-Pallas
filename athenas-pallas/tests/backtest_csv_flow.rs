@@ -28,10 +28,7 @@ fn csv_replay_buy_and_hold() {
         athenas_pallas::types::Asset("USDT".into()),
         Decimal::new(10_000, 0),
     );
-    balances.insert(
-        athenas_pallas::types::Asset("BTC".into()),
-        Decimal::ZERO,
-    );
+    balances.insert(athenas_pallas::types::Asset("BTC".into()), Decimal::ZERO);
 
     let registry = InstrumentRegistry::from_instruments(instruments);
     let mut state = GlobalState::new(registry, balances);
