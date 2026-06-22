@@ -27,27 +27,27 @@ calls it instead of building a `Vec<OffsetDateTime>`.
 `RollingMetrics::streaming_summary` produces a full `PerformanceSummary` from O(1) streamed state
 when `record_equity_curve = false`; `finalize_report` in `runner.rs` selects curve vs streaming path.
 
-### 5. Avoid Async Engine Snapshot Clones
+### 5. Keep Sync Dispatch Snapshot-Free
 
-Current path: `engine.rs`, `execution/mod.rs`
+Current paths: `engine/sync.rs`, `execution/sync_paper.rs`, `execution/sim.rs`
 
-The synchronous backtest path already avoids most snapshots. The async/live engine still clones `GlobalState` before strategy and execution calls. Split gateway traits into read-only borrowed methods where possible:
+The current installed engine is sync-only for replay. Keep the sync gateway traits borrowed and avoid adding full `GlobalState` clones when extending execution or strategy dispatch.
 
 ```rust
-async fn place_market_ref(&self, state: &GlobalState, intent: &OrderIntent) -> Result<Vec<AccountEvent>>;
+fn place_market(&self, state: &GlobalState, intent: &OrderIntent) -> Result<AccountEvents>;
 ```
 
-For strategies that require immutable snapshots across await points, use `Arc<GlobalStateSnapshot>` with narrowed fields instead of cloning the full state.
+If future integrations need immutable snapshots, use a narrowed snapshot type instead of cloning the full state.
 
-Expected impact: major constant-factor reduction for live/paper mode with many instruments, balances, or orders.
+Expected impact: protects the current low-allocation sync replay path when execution features grow.
 
-Proof: use existing `snapshot_clone` Criterion bench and add async dispatch benchmarks.
+Proof: use existing replay Criterion benches and add dispatch-specific benches for new execution features.
 
 ## Medium Impact
 
 ### 6. Deduplicate Timestamp Extraction — DONE
 
-Current paths: `engine.rs`, `backtest/runner.rs`, `backtest/merge.rs`, `backtest/batch.rs`, `audit.rs`, `system.rs`
+Current paths: `events.rs`, `engine/sync.rs`, `engine/replay.rs`, `backtest/runner.rs`, `backtest/merge.rs`, `backtest/batch.rs`
 
 Five local `event_ts`/`event_time`/`event_timestamp`/`equity_ts`/`event_ts_unix_ns` helpers with
 divergent fallback behavior were consolidated into `events.rs`:
@@ -69,7 +69,7 @@ Proof: existing replay/merge/audit tests stay green; benchmark with Criterion `s
 
 ### 7. Intern or Densify Asset and Instrument IDs
 
-Current paths: `types.rs`, `instrument/registry.rs`, `state.rs`, `execution/paper.rs`
+Current paths: `types.rs`, `instrument/registry.rs`, `state.rs`, `execution/fills.rs`
 
 The registry already uses dense instrument indices, but balances and strategy attribution still use string-backed keys. Add dense `AssetIndex` and store balances in `Vec<Decimal>` once instruments are registered.
 
@@ -89,9 +89,9 @@ Proof: benchmark strategy attribution and registry lookup hot loops.
 
 ### 9. Use `SmallVec` for Tiny Event/Intent Buffers
 
-Current paths: `engine.rs`, `execution/paper.rs`
+Current paths: `engine/sync.rs`, `execution/fills.rs`, `execution/sync_paper.rs`
 
-Most execution calls return 0 to 4 account events. Replace short-lived `Vec<AccountEvent>` returns in the hot paper gateway with `SmallVec<[AccountEvent; 4]>`, then convert only at trait boundaries that need `Vec`.
+Most execution calls return 0 to 4 account events. `AccountEvents` is already `SmallVec<[AccountEvent; 4]>`; keep new gateway paths on that type and avoid reintroducing short-lived `Vec<AccountEvent>` buffers.
 
 Expected impact: removes heap allocation for common fills/cancels.
 
@@ -123,7 +123,7 @@ Proof: benchmark reading 1GB `.pbar`; compare standard read vs mmap.
 
 Current path: `backtest/bar.rs`
 
-CSV load still parses `Decimal` then converts to ticks one field at a time. For high-volume ingestion, parse Databento/DBN fixed-point prices directly into ticks or add a specialized fast path for integer-like CSV fields.
+CSV load still parses `Decimal` then converts to ticks one field at a time. For high-volume ingestion, add a specialized fast path for integer-like CSV fields or an explicit importer that writes the documented OHLCV CSV format. No Databento crate/importer is installed in this checkout.
 
 Expected impact: faster ingestion, not replay.
 
@@ -141,7 +141,7 @@ Proof: benchmark state update plus equity mark for many instruments.
 
 ### 14. Typed Price/Quantity Newtypes Around Ticks
 
-Current paths: `backtest/bar.rs`, `execution/paper.rs`, `state.rs`
+Current paths: `backtest/bar.rs`, `execution/fills.rs`, `state.rs`, `instrument/ticks.rs`
 
 Keep `Decimal` for public reporting, but introduce internal `PriceTicks(i64)` and `QtyLots(i64)` where math is mechanical. This makes units explicit and enables integer math through fills and fees.
 
@@ -151,7 +151,7 @@ Proof: benchmark dense order/fill scenarios; validate exact PnL against existing
 
 ### 15. Enum Dispatch for Common Built-In Strategies and Fill Models
 
-Current paths: `strategy/mod.rs`, `backtest/runner.rs`, `execution/paper.rs`
+Current paths: `strategy/mod.rs`, `backtest/runner.rs`, `execution/fills.rs`
 
 Trait objects are flexible but cost indirect calls. For hot built-ins, offer enum-backed dispatch:
 
@@ -172,7 +172,7 @@ Strong resume bullets should be tied to measured outcomes:
 - "Implemented cache-friendly fixed-point OHLCV replay using contiguous `repr(C)` bars and binary sidecar caches."
 - "Reduced multi-instrument replay memory from materialized event vectors to streaming k-way merge with one pending event per source."
 - "Designed a benchmark-backed order-trigger index reducing passive fill checks from O(bars * orders) to O(log orders + fills)."
-- "Added optional Rust-native Databento ingestion path using DBN fixed-point decoding into engine-compatible OHLCV CSV."
+- "Kept market-data ingestion provider-neutral by requiring local OHLCV/Yahoo/FX/futures CSV or pbar inputs."
 
 ## Verification Plan
 

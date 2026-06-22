@@ -1,5 +1,17 @@
 # Verification audit
 
+## Current installed surface check (2026-06-22)
+
+This repo is currently CLI/Rust-only. Installed workspace crates are `athenas-pallas` and
+`athenas-pallas-tools`; binaries are `pallas-backtest`, `pallas-merge`, `pallas-resample`, and
+`pallas-sweep`. `athenas-pallas` currently exposes only `default` and `tracing-full` features.
+
+Market data ingestion is local-file based: CSV/pbar via `pallas-backtest` and CSV utilities in
+`athenas-pallas-tools`. There is no installed Databento, Alpha Vantage, Binance-live, or generic
+fetch crate/feature/binary in the current manifests or lockfile.
+
+---
+
 ## Pass 2 update (2026-06-21)
 
 Optimization + correctness sweep. `cargo test -p athenas-pallas` and
@@ -32,7 +44,8 @@ hybrid convertible example; SQLite result persistence; pass-3 zero-finding audit
 **Scope:** Master implementation checklist + Extra gaps table (plan `backtest_engine_gap_analysis_4d0a8fe0`)  
 **Tests:** `cargo test -p athenas-pallas` - **PASS** (after `option_meta` strike parse fix in `instrument/index.rs`)
 
-This file is the audit log (plan file is read-only). Pass 2 is required before `verify-audit-loop` can be marked complete.
+This section is retained as historical audit context. The current installed-surface and pass-2
+sections above supersede stale pass-1 status rows where they conflict.
 
 ---
 
@@ -59,10 +72,10 @@ This file is the audit log (plan file is read-only). Pass 2 is required before `
 
 | Item | Status | Evidence / gap |
 |------|--------|----------------|
-| Futures fee notional uses `contract_multiplier` | **DONE** | `execution/paper.rs` `notional()` includes Future/Perpetual/Option with multiplier |
+| Futures fee notional uses `contract_multiplier` | **DONE** | Current implementation is in `execution/fills.rs` `notional()` and includes Future/Perpetual/Option with multiplier |
 | Single unified limit fill model (place + poll) | **DONE** | Both use `crossing_limit` + shared `FillModel` trait |
 | OHLC high/low touch for bar replay fills | **PARTIAL** | Stops use bar high/low; limits still use synthetic L1 bid/ask from close |
-| `lot_size` / `tick_size` enforced at submission | **DONE** | `normalize_order` in `paper.rs` |
+| `lot_size` / `tick_size` enforced at submission | **DONE** | `normalize_order` in `execution/fills.rs` |
 | Auto `periods_per_year` | **DONE** | `runner.rs` + `interval.rs` |
 | Built-in data downloader | **REMOVED** | Historical downloader code and CLI are no longer part of the crate |
 | CSV schemas per asset class | **DONE** | `data/README.md` (updated: Adj Close, FX sources, bonds, futures) |
@@ -82,7 +95,7 @@ This file is the audit log (plan file is read-only). Pass 2 is required before `
 
 | Item | Status | Evidence / gap |
 |------|--------|----------------|
-| StopMarket / StopLimit | **DONE** | `types.rs`, `paper.rs`, `stop_orders_backtest.rs` |
+| StopMarket / StopLimit | **DONE** | `events.rs`, `execution/fills.rs`, `stop_orders_backtest.rs` |
 | OHLC intrabar rules for stops | **DONE** | `stop_triggered` + bar high/low |
 | `pallas-resample` CLI | **DONE** | `bin/pallas-resample.rs` |
 | Equity RTH + **holidays** | **PARTIAL** | RTH in `calendar/mod.rs`; comment says "no holidays" |
@@ -154,7 +167,7 @@ This file is the audit log (plan file is read-only). Pass 2 is required before `
 | No corporate-action table | **wontfix** (deferred) |
 | batch.rs no CLI | **fixed** (`pallas-sweep`) |
 | JSONL replay undocumented | **partial** - not in main README |
-| LiveGateway stub | **wontfix** (Binance live only) |
+| LiveGateway stub | **removed/currently absent** (CLI backtest workflow only) |
 | Close-only synthetic L1 | **partial** - stops use OHLC; limits use touch |
 | Python subprocess live latency | **wontfix** (by design for research) |
 
@@ -174,13 +187,12 @@ This file is the audit log (plan file is read-only). Pass 2 is required before `
 
 ## Open work (priority)
 
-1. Phase 0b: CI bench gate or document as deferred; 10M stress + RSS measurement
-2. Phase 1: equity holiday calendar; position sizer in SDK
-3. Phase 2: per-strategy PnL in report; hybrid example
-4. Phase 3: futures roll; maintenance margin + liquidation; scheduled funding
-5. Phase 4: bond integration test + yield/duration
-6. Phase 5: result persistence (SQLite local)
-7. Pass 2 audit after fixes; zero findings required for `verify-audit-loop`
+1. 10M-bar stress + peak RSS measurement
+2. Futures roll / continuous-contract tooling
+3. Bond integration backtest + yield/duration reporting
+4. Hybrid convertible example/test
+5. Result persistence beyond JSON/JSONL outputs
+6. Pass-3 zero-finding audit
 
 ---
 

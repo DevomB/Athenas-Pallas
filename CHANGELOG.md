@@ -16,8 +16,8 @@
 - `BarSeries::infer_periods_per_year` derives annualization from median bar spacing without
   allocating a full `Vec<OffsetDateTime>` at startup.
 - `FxHashMap` (rustc-hash) for the trusted internal registry `by_id` and `strategy_positions` maps;
-  `SmallVec<[AccountEvent; 4]>` for the sync paper-gateway fill buffers (converted to `Vec` only at
-  the async boundary).
+  `SmallVec<[AccountEvent; 4]>` for the sync paper-gateway fill buffers, converting to `Vec` only
+  when building owned report data.
 - Added `instrument::ticks` (`PriceTicks`/`QtyLots` i64 newtypes) for exact, allocation-free
   tick/lot arithmetic with Decimal round-trip and notional-equivalence tests; paper `notional()`
   uses the integer path when price and quantity are on-grid.
@@ -41,10 +41,11 @@
   (`now_utc`) reads in the hot loop.
 - Cleared the last compiler deprecation (`time::format_description::parse` -> `parse_borrowed`) and
   made `cargo clippy --all-targets -- -D warnings` pass.
-- CI: removed the stale Tauri `pallas-app` job, fixed the non-existent `data-fetch` feature (now a
-  `binance-live`/`control-server`/`databento`/`all` build+test matrix), added dependency caching via
-  `Swatinem/rust-cache`, and added a benchmark regression gate comparing `noop_100k_amortized`
-  against a committed ceiling (`docs/bench_baseline.json`).
+- CI: removed stale non-workspace jobs and the non-existent `data-fetch` feature check; current CI
+  covers fmt, clippy, `athenas-pallas` tests, tools build, Python/C++ strategy golden tests,
+  examples, workspace tests, dependency caching via `Swatinem/rust-cache`, and a benchmark
+  regression gate comparing `noop_100k_amortized` against a committed ceiling
+  (`docs/bench_baseline.json`).
 - Refreshed `docs/benchmarks.txt` and the README/PERFORMANCE per-bar claim to be host-qualified.
 
 ## 3.1.0

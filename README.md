@@ -11,6 +11,13 @@ Event-driven algorithmic **backtesting** in Rust. Replay CSV or pbar history, ru
 - Python and C++ strategies over newline JSON ([protocol](trading/protocol.md))
 - Local CSV, pbar, FX L1, and futures bar workflows
 
+Current installed surface:
+
+- Workspace crates: `athenas-pallas` and `athenas-pallas-tools`
+- Rust binaries: `pallas-backtest`, `pallas-merge`, `pallas-resample`, and `pallas-sweep`
+- Cargo features on `athenas-pallas`: `default` and `tracing-full`
+- Market data ingestion: local CSV/pbar files only. There is no installed Databento, Alpha Vantage, Binance-live, or generic fetch package in this checkout.
+
 ## Install
 
 **Requirements:** Rust 1.85+, Python 3 for Python strategies, CMake/g++ for C++ strategies.
@@ -83,6 +90,8 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_
 ```
 
 Copy [`backtest.toml.example`](backtest.toml.example) to `backtest.toml` and point `[backtest].data` at your file.
+
+This repo does not currently install a provider client or downloader. If you use a vendor such as Databento, export data outside the engine and save it as one of the documented CSV layouts before running `pallas-backtest`.
 
 ## Project Layout
 
