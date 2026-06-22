@@ -161,25 +161,27 @@ pub struct DatabentoCacheResult {
     pub fetched: bool,
 }
 
-/// Parse a Databento CLI datetime. Date-only values are interpreted as UTC midnight.
+/// Parse a Databento CLI datetime.
+///
+/// Date-only values must use American `MM-DD-YYYY` format and are interpreted as UTC midnight.
 pub fn parse_datetime(value: &str) -> Result<OffsetDateTime> {
     let value = value.trim();
     if let Ok(dt) = OffsetDateTime::parse(value, &Rfc3339) {
         return Ok(dt);
     }
-    let date_fmt = format_description!("[year]-[month]-[day]");
+    let date_fmt = format_description!("[month]-[day]-[year]");
     if let Ok(date) = Date::parse(value, &date_fmt) {
         return Ok(date
             .with_hms(0, 0, 0)
             .map_err(|err| Error::Invalid(format!("invalid databento date '{value}': {err}")))?
             .assume_utc());
     }
-    let datetime_fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let datetime_fmt = format_description!("[month]-[day]-[year] [hour]:[minute]:[second]");
     if let Ok(dt) = PrimitiveDateTime::parse(value, &datetime_fmt) {
         return Ok(dt.assume_utc());
     }
     Err(Error::Invalid(format!(
-        "invalid databento datetime '{value}'; use YYYY-MM-DD or RFC3339"
+        "invalid databento datetime '{value}'; use American MM-DD-YYYY format, e.g. 01-31-2025, or RFC3339"
     )))
 }
 
@@ -456,8 +458,8 @@ mod tests {
             dataset: "EQUS.MINI".to_string(),
             symbol: "AAPL".to_string(),
             schema: DatabentoOhlcvSchema::Ohlcv1D,
-            start: parse_datetime("2025-01-01").unwrap(),
-            end: parse_datetime("2025-02-01").unwrap(),
+            start: parse_datetime("01-01-2025").unwrap(),
+            end: parse_datetime("02-01-2025").unwrap(),
             stype_in: DatabentoSType::RawSymbol,
             cache_dir: PathBuf::from("data/databento"),
             refresh_data: false,
@@ -504,8 +506,8 @@ mod tests {
     }
 
     #[test]
-    fn parses_date_only_as_utc_midnight() {
-        let dt = parse_datetime("2025-01-01").unwrap();
+    fn parses_american_date_only_as_utc_midnight() {
+        let dt = parse_datetime("01-01-2025").unwrap();
         assert_eq!(
             dt,
             Date::from_calendar_date(2025, time::Month::January, 1)
@@ -513,5 +515,11 @@ mod tests {
                 .midnight()
                 .assume_utc()
         );
+    }
+
+    #[test]
+    fn rejects_iso_date_only_format() {
+        let err = parse_datetime("2025-01-01").unwrap_err();
+        assert!(err.to_string().contains("American MM-DD-YYYY format"));
     }
 }

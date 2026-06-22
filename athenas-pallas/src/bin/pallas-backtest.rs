@@ -21,9 +21,17 @@ struct Args {
     symbol: Option<String>,
     #[arg(long)]
     schema: Option<String>,
-    #[arg(long)]
+    #[arg(
+        long,
+        value_name = "MM-DD-YYYY",
+        help = "Historical range start in American month-day-year format, e.g. 01-01-2025"
+    )]
     start: Option<String>,
-    #[arg(long)]
+    #[arg(
+        long,
+        value_name = "MM-DD-YYYY",
+        help = "Historical range end in American month-day-year format, e.g. 02-01-2025"
+    )]
     end: Option<String>,
     #[arg(long, default_value = "raw_symbol")]
     stype_in: String,
