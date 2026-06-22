@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"C:/Coding-Projects/Trading Stuff/Backtesting-Engine/trading/simple_sma_cpp/build-mingw/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

@@ -1,3 +1,0 @@
-C:/Coding-Projects/Trading Stuff/Backtesting-Engine/trading/simple_sma_cpp/build-mingw/CMakeFiles/simple_sma_cpp.dir
-C:/Coding-Projects/Trading Stuff/Backtesting-Engine/trading/simple_sma_cpp/build-mingw/CMakeFiles/edit_cache.dir
-C:/Coding-Projects/Trading Stuff/Backtesting-Engine/trading/simple_sma_cpp/build-mingw/CMakeFiles/rebuild_cache.dir

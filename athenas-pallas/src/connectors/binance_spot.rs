@@ -4,7 +4,6 @@ use crate::connectors::MarketConnector;
 use crate::engine::EngineHandle;
 use crate::error::{Error, Result};
 use crate::events::{BookL2Snapshot, Event, MarketEvent};
-use crate::integration::ws_connect_async;
 use crate::types::InstrumentId;
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
@@ -58,7 +57,7 @@ impl MarketConnector for BinanceCombinedStream {
             self.stream_symbol,
             self.stream_symbol
         );
-        let (ws, _) = ws_connect_async(&url).await?;
+        let (ws, _) = tokio_tungstenite::connect_async(&url).await?;
         let (mut write, mut read) = ws.split();
 
         while let Some(msg) = read.next().await {
@@ -154,7 +153,7 @@ impl MarketConnector for BinanceDepthStream {
             self.stream_symbol,
             bucket
         );
-        let (ws, _) = ws_connect_async(&url).await?;
+        let (ws, _) = tokio_tungstenite::connect_async(&url).await?;
         let (mut write, mut read) = ws.split();
 
         while let Some(msg) = read.next().await {

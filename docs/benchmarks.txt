@@ -28,8 +28,13 @@ numbers are not comparable to the 2026-06-17 row above):
   equity_curve/10k false: ~12.8 ms   (streaming summary, no Vec<EquityPoint>)
 
 2026-06-21 pass 2 after price-indexed resting orders (BTreeMap per side/price),
-PriceTicks notional fast path in paper fees, and OMS pollable_ids:
-  noop_100k_amortized:    ~158 ms median  (1.58 us/bar on this run; host-contended)
+PriceTicks notional fast path in paper fees, and OMS pollable_ids (release, full suite):
+  noop_100k_bars:         ~60.1 ms median  (0.60 us/bar)
+  noop_100k_amortized:    ~58.3 ms median  (0.58 us/bar)
+  snapshot_clone:         ~2.45 us
+  buy_and_hold_100k:      ~70.4 ms median
+  equity_curve/10k true:  ~18.9 ms
+  equity_curve/10k false: ~12.8 ms   (streaming summary, no Vec<EquityPoint>)
 
 command: cargo bench -p athenas-pallas --bench backtest_hotpath -- --noplot
 

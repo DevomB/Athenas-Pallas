@@ -27,7 +27,6 @@ pub mod error;
 pub mod events;
 pub mod execution;
 pub mod instrument;
-pub mod integration;
 pub mod metrics;
 pub mod oms;
 pub mod replica;

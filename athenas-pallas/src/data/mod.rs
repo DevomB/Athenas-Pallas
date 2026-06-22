@@ -10,16 +10,5 @@
 //! remains a single consumer. Normalize venue payloads to [`crate::events::MarketEvent`] inside
 //! each connector; keep the strategy and state venue-agnostic.
 
-/// What public data a connector subscribes to (for documentation and future mux builders).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SubKind {
-    /// Public trades.
-    PublicTrade,
-    /// Top-of-book best bid/ask.
-    BookL1,
-    /// Bounded depth snapshot.
-    BookL2Snapshot,
-}
-
 #[cfg(feature = "databento")]
 pub mod databento;

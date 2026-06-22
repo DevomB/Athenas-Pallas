@@ -1,4 +1,4 @@
-//! Execution backends: paper, simulation, and live stub.
+//! Execution backends: paper, simulation, and live (Binance).
 //!
 //! ## Account event parity (live vs paper / sim)
 //!
@@ -9,12 +9,6 @@
 mod paper;
 mod sim;
 mod sync_paper;
-
-#[cfg(all(feature = "live-trading", not(feature = "binance-live")))]
-mod live;
-
-#[cfg(all(feature = "live-trading", not(feature = "binance-live")))]
-pub use live::LiveGateway;
 
 #[cfg(feature = "binance-live")]
 mod binance_live;
