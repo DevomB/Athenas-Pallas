@@ -19,9 +19,9 @@ pub struct SystemConfig {
 /// One instrument row in config.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InstrumentConfig {
-    /// Exchange id (e.g. `binance_spot`).
+    /// Exchange id (e.g. `test`, `nyse`).
     pub exchange: String,
-    /// Venue symbol (e.g. `BTCUSDT`).
+    /// Venue symbol (e.g. `EXAMPLE`, `AAPL`).
     pub name_exchange: String,
     /// Base/quote underlying.
     pub underlying: UnderlyingConfig,

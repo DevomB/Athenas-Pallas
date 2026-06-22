@@ -1,8 +1,8 @@
 //! Flatten control path cancels then submits reduce-only market intents.
 
-use athenas_pallas::dispatch_event;
+use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::events::{ControlEvent, Event, MarketEvent, OrderIntent};
-use athenas_pallas::execution::{PaperConfig, PaperGateway};
+use athenas_pallas::execution::{PaperConfig, SimGateway};
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
@@ -17,9 +17,9 @@ impl Strategy for Quiet {
     fn on_event(&mut self, _ctx: &StrategyContext<'_>, _event: &Event, _: &mut Vec<OrderIntent>) {}
 }
 
-#[tokio::test]
-async fn flatten_closes_position_when_paused() {
-    let inst = InstrumentId::new("binance", "BTCUSDT");
+#[test]
+fn flatten_closes_position_when_paused() {
+    let inst = InstrumentId::new("test", "BTCUSDT");
     let mut instruments = HashMap::new();
     instruments.insert(
         inst.clone(),
@@ -38,10 +38,11 @@ async fn flatten_closes_position_when_paused() {
 
     let mut strat = Quiet;
     let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = PaperGateway::new(PaperConfig::default());
+    let exec = SimGateway::new(PaperConfig::default());
+    let mut intents = Vec::new();
 
     let ts = OffsetDateTime::now_utc();
-    dispatch_event(
+    dispatch_event_sync(
         &mut state,
         &mut strat,
         &risk,
@@ -52,18 +53,18 @@ async fn flatten_closes_position_when_paused() {
             bid: Decimal::new(40_000, 0),
             ask: Decimal::new(40_010, 0),
         }),
+        &mut intents,
     )
-    .await
     .unwrap();
 
-    dispatch_event(
+    dispatch_event_sync(
         &mut state,
         &mut strat,
         &risk,
         &exec,
         Event::Control(ControlEvent::Flatten),
+        &mut intents,
     )
-    .await
     .unwrap();
 
     assert!(state.position_qty(&inst).abs() < Decimal::new(1, 6));

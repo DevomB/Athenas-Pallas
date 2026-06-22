@@ -1,94 +1,18 @@
-//! Execution backends: paper, simulation, and live (Binance).
-//!
-//! ## Account event parity (live vs paper / sim)
-//!
-//! All gateways emit the same [`crate::events::AccountEvent`] shapes (`Balance`, `OrderUpdate`, `Fill`)
-//! so strategies and risk see one normalized world. Live Binance maps REST and user-stream payloads
-//! into those variants; paper and simulation produce identical variants from local fill logic.
+//! Sync execution backends for backtest replay.
 
-mod paper;
+mod fills;
 mod sim;
 mod sync_paper;
 
-#[cfg(feature = "binance-live")]
-mod binance_live;
-
-#[cfg(feature = "binance-live")]
-pub use binance_live::{BinanceCredentials, BinanceLiveGateway};
-
-pub use paper::{PaperConfig, PaperGateway};
+pub use fills::{FillEngine, PaperConfig};
 pub use sim::SimGateway;
 pub use sync_paper::{SyncExecutionGateway, SyncPaperGateway};
 
-use crate::error::Result;
-use crate::events::OrderIntent;
-use crate::state::GlobalState;
-use crate::types::{OrderId, Side};
-use async_trait::async_trait;
+use crate::types::Side;
 use rust_decimal::Decimal;
 
 /// Inline buffer for synchronous gateway results.
-///
-/// Most order placements and passive polls emit 0–4 [`crate::events::AccountEvent`]s
-/// (`OrderUpdate` + `Fill` + two `Balance` updates), so a `SmallVec` keeps them on the stack and
-/// avoids a heap allocation per intent on the backtest hot path. The async [`ExecutionGateway`]
-/// trait keeps returning `Vec` (live path, not latency-critical).
 pub type AccountEvents = smallvec::SmallVec<[crate::events::AccountEvent; 4]>;
-
-/// Async venue bridge invoked by [`crate::Engine`].
-#[async_trait]
-pub trait ExecutionGateway: Send + Sync {
-    /// Resting or crossing limit.
-    async fn place_limit(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<crate::events::AccountEvent>>;
-    /// Immediate market.
-    async fn place_market(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<crate::events::AccountEvent>>;
-    /// Stop market (optional; paper/sim implement).
-    async fn place_stop_market(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<crate::events::AccountEvent>> {
-        let _ = (state, intent);
-        Err(crate::error::Error::Invalid(
-            "stop market not supported by this gateway".into(),
-        ))
-    }
-    /// Stop limit (optional; paper/sim implement).
-    async fn place_stop_limit(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<crate::events::AccountEvent>> {
-        let _ = (state, intent);
-        Err(crate::error::Error::Invalid(
-            "stop limit not supported by this gateway".into(),
-        ))
-    }
-    /// Cancel one order.
-    async fn cancel(
-        &self,
-        state: &GlobalState,
-        order_id: OrderId,
-    ) -> Result<Vec<crate::events::AccountEvent>>;
-    /// Cancel all working orders.
-    async fn cancel_all(&self, state: &GlobalState) -> Result<Vec<crate::events::AccountEvent>>;
-    /// Passive fills after a market event (paper/sim).
-    async fn poll_after_market(
-        &self,
-        state: &GlobalState,
-    ) -> Result<Vec<crate::events::AccountEvent>> {
-        let _ = state;
-        Ok(vec![])
-    }
-}
 
 /// Apply market-order slippage in basis points around `mid`.
 pub(crate) fn apply_slippage(side: Side, mid: Decimal, bps: Decimal) -> Decimal {

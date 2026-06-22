@@ -5,7 +5,7 @@ mod common;
 use athenas_pallas::backtest::{build_cpp_strategy, BacktestConfig, BacktestRunner, DataFormat};
 use athenas_pallas::instrument::AssetClass;
 use athenas_pallas::strategy::ExternalStrategy;
-use athenas_pallas::types::{Asset, InstrumentId};
+use athenas_pallas::types::Asset;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -37,7 +37,7 @@ fn cpp_sma_matches_golden() {
         serde_json::from_str(include_str!("fixtures/golden_sma_results.json")).unwrap();
 
     let binary = build_cpp_strategy(&dir).expect("cmake build");
-    let instrument = InstrumentId::new("binance", "BTCUSDT");
+    let instrument = common::crypto_fixture_instrument();
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
 
@@ -46,6 +46,8 @@ fn cpp_sma_matches_golden() {
         data_format: DataFormat::Ohlcv,
         instrument: instrument.clone(),
         asset_class: AssetClass::Crypto,
+        base_asset: Some("BTC".into()),
+        quote_asset: Some("USDT".into()),
         balances: balances.clone(),
         fee_bps: Decimal::from(10u64),
         slippage_bps: Decimal::from(5u64),

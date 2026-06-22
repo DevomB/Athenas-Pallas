@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::fmt;
 
-/// Exchange identifier (e.g. `binance_spot`).
+/// Exchange identifier (e.g. `test`, `nyse`).
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ExchangeId(#[serde(with = "smol_str_serde")] pub SmolStr);
 
@@ -35,7 +35,7 @@ impl fmt::Display for ExchangeId {
     }
 }
 
-/// Trading pair symbol on the exchange (e.g. BTCUSDT).
+/// Trading pair symbol on the exchange (e.g. `EXAMPLE`, `AAPL`).
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Symbol(#[serde(with = "smol_str_serde")] pub SmolStr);
 

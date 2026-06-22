@@ -1,48 +1,12 @@
-//! Performance metrics from an equity curve.
+//! Equity-curve and fill-ledger performance statistics.
 
+use super::positions::{strategy_position_report, StrategyPositionRow};
 use crate::events::FillRecord;
-use crate::instrument::InstrumentIndex;
 use crate::state::GlobalState;
-use crate::types::{EquityPoint, InstrumentId, Side, StrategyId};
+use crate::types::{EquityPoint, Side, StrategyId};
 use rust_decimal::prelude::{Signed, ToPrimitive};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-
-/// One non-zero **attributed** net base position (see [`GlobalState::strategy_positions`](crate::state::GlobalState::strategy_positions)).
-#[derive(Clone, Debug, PartialEq)]
-pub struct StrategyPositionRow {
-    /// Instrument.
-    pub instrument: InstrumentId,
-    /// Sub-strategy id from fills / orders.
-    pub strategy_id: StrategyId,
-    /// Signed net base quantity.
-    pub net_base_qty: Decimal,
-}
-
-/// Collect attributed positions for reporting (table-style tear-sheet input).
-///
-/// Only entries with non-zero qty are returned, sorted by `strategy_id` then `instrument`.
-pub fn strategy_position_report(state: &GlobalState) -> Vec<StrategyPositionRow> {
-    let mut rows: Vec<StrategyPositionRow> = state
-        .strategy_positions
-        .iter()
-        .filter(|(_, q)| !q.is_zero())
-        .filter_map(|((ix, sid), qty)| {
-            let inst = state.registry.id(InstrumentIndex(*ix))?.clone();
-            Some(StrategyPositionRow {
-                instrument: inst,
-                strategy_id: sid.clone(),
-                net_base_qty: *qty,
-            })
-        })
-        .collect();
-    rows.sort_by(|a, b| {
-        a.strategy_id
-            .cmp(&b.strategy_id)
-            .then_with(|| a.instrument.cmp(&b.instrument))
-    });
-    rows
-}
 
 /// Summary statistics after a run.
 #[derive(Clone, Debug)]
@@ -653,36 +617,6 @@ mod tests {
         assert_eq!(sb.performance.pnl, Decimal::from(-10));
         assert!(sa.period_label.contains("a"));
         assert!(sb.period_label.contains("b"));
-    }
-
-    #[test]
-    fn strategy_position_report_rows() {
-        use crate::events::AccountEvent;
-        use crate::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
-        use crate::types::{Asset, InstrumentId, OrderId, Side};
-
-        let i = InstrumentId::new("t", "BTCUSDT");
-        let mut inst = HashMap::new();
-        inst.insert(
-            i.clone(),
-            InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
-        );
-        let mut s = GlobalState::new(InstrumentRegistry::from_instruments(inst), HashMap::new());
-        s.apply_account(&AccountEvent::Fill {
-            order_id: OrderId::new_v4(),
-            instrument: i.clone(),
-            side: Side::Buy,
-            price: Decimal::ONE,
-            qty: Decimal::ONE,
-            fee: Decimal::ZERO,
-            fee_asset: Asset("USDT".into()),
-            strategy_id: Some(StrategyId::new("z")),
-        });
-        let rows = super::strategy_position_report(&s);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].instrument, i);
-        assert_eq!(rows[0].strategy_id, StrategyId::new("z"));
-        assert_eq!(rows[0].net_base_qty, Decimal::ONE);
     }
 
     #[test]

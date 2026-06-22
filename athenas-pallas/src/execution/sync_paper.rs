@@ -5,7 +5,7 @@ use crate::events::OrderIntent;
 use crate::state::GlobalState;
 use crate::types::OrderId;
 
-use super::{AccountEvents, PaperGateway};
+use super::{AccountEvents, FillEngine};
 
 /// Sync venue bridge for deterministic replay without async overhead.
 pub trait SyncExecutionGateway: Send + Sync {
@@ -54,17 +54,17 @@ pub trait SyncExecutionGateway: Send + Sync {
     }
 }
 
-/// Backtest gateway delegating to [`PaperGateway`] sync fill rules.
+/// Backtest gateway delegating to [`FillEngine`] sync fill rules.
 #[derive(Clone)]
 pub struct SyncPaperGateway {
-    inner: PaperGateway,
+    inner: FillEngine,
 }
 
 impl SyncPaperGateway {
     /// New sync paper gateway.
     pub fn new(cfg: super::PaperConfig) -> Self {
         Self {
-            inner: PaperGateway::new(cfg),
+            inner: FillEngine::new(cfg),
         }
     }
 }

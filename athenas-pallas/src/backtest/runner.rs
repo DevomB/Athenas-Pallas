@@ -1,11 +1,7 @@
 //! Synchronous backtest driver.
 
 use rust_decimal::Decimal;
-use serde::Serialize;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -18,50 +14,17 @@ use super::interval::periods_per_year_from_interval_for_class;
 use super::lifecycle::apply_bar_lifecycle;
 use super::merge::merge_sources_iter;
 use super::pbar::is_pbar_path;
-use super::sources::{FutureCsvSource, FxCsvSource, YahooCsvSource};
-use super::{CsvBarSource, HistoricalSource};
+use super::report::{report_from_summary, BacktestReport};
+use super::source_loader::{detect_format, load_all_sources, load_source};
 use crate::calendar::{is_session_open, SessionFilter};
 use crate::events::{Event, FillRecord, MarketEvent, OrderIntent};
 use crate::execution::{PaperConfig, SyncPaperGateway};
-use crate::metrics::{summarize_with_fills_and_rf, PerformanceSummary, RollingMetrics};
+use crate::metrics::{summarize_with_fills_and_rf, RollingMetrics};
 use crate::risk::{BacktestChecks, MaxDailyLossQuote, MaxPositionSize};
 use crate::state::{GlobalState, InstrumentRegistry};
 use crate::strategy::{Strategy, StrategyContext};
 use crate::types::{Asset, EquityPoint, ExchangeId, InstrumentId, OrderType, Side, Symbol};
 use crate::{dispatch_replay_bar_sync, dispatch_replay_sync};
-
-/// JSON-serializable run output.
-#[derive(Clone, Debug, Serialize)]
-pub struct BacktestReport {
-    /// Net PnL in quote currency.
-    pub pnl: String,
-    /// PnL as fraction of starting equity.
-    pub pnl_pct: String,
-    /// Peak-to-trough drawdown (0..1).
-    pub max_drawdown: f64,
-    /// Annualized Sharpe ratio.
-    pub sharpe: f64,
-    /// Annualized Sortino ratio.
-    pub sortino: f64,
-    /// Number of fills.
-    pub fill_count: u64,
-    /// Mark-to-market equity samples.
-    pub equity_curve: Vec<EquityPoint>,
-    /// Per-fill blotter when recorded.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub fills: Vec<FillRecord>,
-    /// Wall-clock runtime in milliseconds.
-    pub wall_time_ms: u64,
-    /// Fraction of closed round-trips with positive PnL.
-    pub win_rate: f64,
-    /// Gross profit / gross loss.
-    pub profit_factor: f64,
-    /// Closed round-trip count from fill ledger.
-    pub closed_trades: usize,
-    /// Per-sub-strategy realized PnL when fills carry a `strategy_id` (empty otherwise).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub per_strategy: Vec<crate::metrics::StrategyPnlRow>,
-}
 
 /// Built-in buy-on-first-bar strategy when no external script is given.
 pub struct BuyAndHold {
@@ -412,126 +375,6 @@ fn record_equity(state: &GlobalState, multi: bool, primary_ix: usize) -> Option<
     }
 }
 
-fn load_all_sources(
-    cfg: &BacktestConfig,
-    exchange: ExchangeId,
-    symbol: Symbol,
-    fmt: DataFormat,
-    ohlcv_series: Option<BarSeries>,
-) -> crate::Result<Vec<Box<dyn HistoricalSource>>> {
-    let mut out = vec![load_source(cfg, exchange, symbol, fmt, ohlcv_series)?];
-    for extra in &cfg.extra_instruments {
-        let Some(path) = &extra.data_path else {
-            continue;
-        };
-        let ex = ExchangeId::new(extra.instrument.exchange.as_str());
-        let sym = Symbol::new(extra.instrument.symbol.as_str());
-        let fmt = extra.data_format.unwrap_or(DataFormat::Auto);
-        let fmt = if fmt == DataFormat::Auto {
-            detect_format(path)?
-        } else {
-            fmt
-        };
-        out.push(open_source_path(path, ex, sym, fmt)?);
-    }
-    Ok(out)
-}
-
-fn open_source_path(
-    path: &Path,
-    exchange: ExchangeId,
-    symbol: Symbol,
-    fmt: DataFormat,
-) -> crate::Result<Box<dyn HistoricalSource>> {
-    Ok(match fmt {
-        DataFormat::Ohlcv => Box::new(CsvBarSource::from_path(path, exchange, symbol)?),
-        DataFormat::Yahoo => Box::new(YahooCsvSource::from_path(path, exchange, symbol)?),
-        DataFormat::Fx => Box::new(FxCsvSource::from_path(path, exchange, symbol)?),
-        DataFormat::Future => Box::new(FutureCsvSource::from_path(path, exchange, symbol)?),
-        DataFormat::Auto => unreachable!(),
-    })
-}
-
-fn load_source(
-    cfg: &BacktestConfig,
-    exchange: ExchangeId,
-    symbol: Symbol,
-    fmt: DataFormat,
-    ohlcv_series: Option<BarSeries>,
-) -> crate::Result<Box<dyn HistoricalSource>> {
-    let path = &cfg.data_path;
-    Ok(match fmt {
-        DataFormat::Ohlcv => {
-            if let Some(series) = ohlcv_series {
-                Box::new(BarSeriesSource::new(series, exchange, symbol))
-            } else if is_pbar_path(path) {
-                let series = BarSeries::from_csv_path_or_pbar(path, default_tick_size())
-                    .map_err(crate::error::Error::Io)?;
-                Box::new(BarSeriesSource::new(series, exchange, symbol))
-            } else {
-                Box::new(CsvBarSource::from_path(path, exchange, symbol)?)
-            }
-        }
-        DataFormat::Yahoo => Box::new(YahooCsvSource::from_path(path, exchange, symbol)?),
-        DataFormat::Fx => Box::new(FxCsvSource::from_path(path, exchange, symbol)?),
-        DataFormat::Future => Box::new(FutureCsvSource::from_path(path, exchange, symbol)?),
-        DataFormat::Auto => unreachable!(),
-    })
-}
-
-fn detect_format(path: &Path) -> crate::Result<DataFormat> {
-    let mut rdr = csv::Reader::from_path(path).map_err(|e| {
-        crate::error::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    })?;
-    let headers = rdr
-        .headers()
-        .map_err(|e| {
-            crate::error::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        })?
-        .clone();
-    if headers.iter().any(|h| h == "Date") {
-        return Ok(DataFormat::Yahoo);
-    }
-    if headers.iter().any(|h| h == "bid") {
-        return Ok(DataFormat::Fx);
-    }
-    Ok(DataFormat::Ohlcv)
-}
-
 fn event_ts(ev: &Event) -> time::OffsetDateTime {
     ev.timestamp_or_now()
-}
-
-fn report_from_summary(
-    s: PerformanceSummary,
-    fill_count: u64,
-    wall_time_ms: u64,
-    fills: Vec<FillRecord>,
-) -> BacktestReport {
-    let per_strategy = crate::metrics::per_strategy_pnl(&fills);
-    BacktestReport {
-        pnl: s.pnl.to_string(),
-        pnl_pct: s.pnl_pct.to_string(),
-        max_drawdown: s.max_drawdown,
-        sharpe: s.sharpe,
-        sortino: s.sortino,
-        fill_count,
-        equity_curve: s.equity,
-        fills,
-        wall_time_ms,
-        win_rate: s.win_rate,
-        profit_factor: s.profit_factor,
-        closed_trades: s.closed_trades,
-        per_strategy,
-    }
-}
-
-impl BacktestReport {
-    /// Write pretty JSON to disk.
-    pub fn write_json(&self, path: &Path) -> crate::Result<()> {
-        let json = serde_json::to_string_pretty(self)?;
-        let mut f = File::create(path)?;
-        f.write_all(json.as_bytes())?;
-        Ok(())
-    }
 }

@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use super::config::{instrument_meta_from_config, BacktestConfig, DataFormat, ExtraInstrument};
 use super::cpp_build::build_cpp_strategy;
-use super::runner::{BacktestReport, BacktestRunner};
+use super::report::BacktestReport;
+use super::runner::BacktestRunner;
 use super::strategy_resolver::{resolve_strategy_path, ResolvedStrategy};
 use crate::instrument::AssetClass;
 use crate::strategy::ExternalStrategy;
@@ -307,8 +308,8 @@ mod tests {
             .join("..")
             .join("backtest.toml.example");
         let cfg = BacktestConfig::load_toml(&path).unwrap();
-        assert_eq!(cfg.instrument.symbol, "BTCUSDT");
-        assert_eq!(cfg.data_format, DataFormat::Ohlcv);
+        assert_eq!(cfg.instrument.symbol, "EXAMPLE");
+        assert_eq!(cfg.data_format, DataFormat::Yahoo);
         assert!(cfg.strategy_path.is_some());
     }
 }

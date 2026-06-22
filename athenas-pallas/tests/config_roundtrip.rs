@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 
 #[test]
 fn barter_system_config_deserializes() {
-    let raw = include_str!("../examples/system_config.json");
+    let raw = include_str!("fixtures/system_config.json");
     let cfg: SystemConfig = serde_json::from_str(raw).expect("parse");
     assert!(cfg.risk_free_return > Decimal::ZERO || !cfg.executions.is_empty());
     let indexed = IndexedInstruments::new(cfg.instruments);

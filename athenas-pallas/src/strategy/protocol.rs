@@ -214,7 +214,7 @@ mod tests {
 
     fn intent_parses_stop_and_strategy_id() {
         let j = IntentJson {
-            instrument: InstrumentId::new("binance", "BTCUSDT"),
+            instrument: InstrumentId::new("test", "BTCUSDT"),
 
             side: Side::Buy,
 

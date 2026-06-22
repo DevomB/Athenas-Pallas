@@ -22,7 +22,10 @@ fn merged_extra_instrument_updates_registry() {
     let cfg = BacktestConfig {
         data_path: base.join("BTCUSDT_1d.csv"),
         data_format: DataFormat::Ohlcv,
-        instrument: athenas_pallas::types::InstrumentId::new("binance", "BTCUSDT"),
+        instrument: athenas_pallas::types::InstrumentId::new("test", "BTCUSDT"),
+        asset_class: AssetClass::Crypto,
+        base_asset: Some("BTC".into()),
+        quote_asset: Some("USDT".into()),
         balances,
         extra_instruments: vec![ExtraInstrument {
             instrument: athenas_pallas::types::InstrumentId::new("yahoo", "AAPL"),

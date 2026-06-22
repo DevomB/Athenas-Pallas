@@ -5,15 +5,15 @@
 [![docs.rs](https://img.shields.io/docsrs/athenas-pallas)](https://docs.rs/athenas-pallas)
 [![license](https://img.shields.io/crates/l/athenas-pallas.svg)](#license)
 
-Event-driven algorithmic trading in Rust: **backtest**, **paper**, and **live** share one engine. Swap data sources and execution backends; keep your strategy and risk logic.
+Event-driven algorithmic **backtesting** in Rust. Replay CSV or pbar history, run in-process or external C++/Python strategies, and export performance reports.
 
 - Sync CSV replay hot path (sub-microsecond/bar amortized for a noop strategy; ~0.43–0.60 us/bar depending on host — see [benchmarks](docs/benchmarks.txt))
 - Python and C++ strategies over newline JSON ([protocol](trading/protocol.md))
-- Local CSV, pbar, and strategy-driven backtest workflows
+- Local CSV, pbar, FX L1, and futures bar workflows
 
 ## Install
 
-**Requirements:** Rust 1.85+, Python 3 for Python strategies.
+**Requirements:** Rust 1.85+, Python 3 for Python strategies, CMake/g++ for C++ strategies.
 
 ```bash
 git clone https://github.com/DevomB/Athenas-Pallas.git
@@ -29,16 +29,16 @@ cargo test -p athenas-pallas
 
 ## Quick Demo
 
-Built-in buy-and-hold over the committed BTCUSDT fixture:
+Built-in buy-and-hold over the committed EXAMPLE fixture:
 
 ```bash
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument csv:BTCUSDT --initial-balance USDT:10000
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv --instrument test:EXAMPLE --initial-balance USD:10000
 ```
 
 Direct strategy-name resolution:
 
 ```bash
-cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv --instrument csv:BTCUSDT --initial-balance USDT:10000 --strategy simple_sma
+cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv --instrument test:EXAMPLE --initial-balance USD:10000 --strategy simple_sma
 ```
 
 Or use the helper scripts:
@@ -84,33 +84,12 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- --data data/AAPL_
 
 Copy [`backtest.toml.example`](backtest.toml.example) to `backtest.toml` and point `[backtest].data` at your file.
 
-### Databento Historical Fetch
-
-Enable the optional Databento Rust client to pull OHLCV bars into the same CSV format:
-
-```bash
-$env:DATABENTO_API_KEY="YOUR_KEY"  # PowerShell
-cargo run --release -p athenas-pallas --features databento --bin pallas-databento-fetch -- `
-  --dataset XNAS.ITCH `
-  --symbol AAPL `
-  --schema ohlcv-1d `
-  --start 2024-01-01 `
-  --end 2024-02-01 `
-  --output data/AAPL_databento.csv
-
-cargo run --release -p athenas-pallas --bin pallas-backtest -- `
-  --data data/AAPL_databento.csv `
-  --data-format ohlcv `
-  --instrument databento:AAPL `
-  --asset-class equity `
-  --initial-balance USD:10000
-```
-
 ## Project Layout
 
 | Path | Purpose |
 |------|---------|
-| `athenas-pallas/` | Rust engine and CLI tools |
+| `athenas-pallas/` | Rust backtest engine and `pallas-backtest` CLI |
+| `tools/athenas-pallas-tools/` | Optional utilities: merge, sweep, resample |
 | `trading/` | Direct Python/C++ strategy folders plus shared SDKs in `_sdk/` |
 | `data/` | Your local CSVs (empty in git) |
 | `athenas-pallas/tests/fixtures/` | CI / golden test data only |
@@ -119,20 +98,18 @@ cargo run --release -p athenas-pallas --bin pallas-backtest -- `
 
 ```bash
 cargo run -p athenas-pallas --example backtest_csv
-cargo run -p athenas-pallas --example paper_binance --features binance,control-server
 ```
 
-Binance execution examples are optional broker-specific demos only; do not use them unless you intentionally want Binance order routing.
+## CLI Tools
 
-## Features
+Parameter sweeps and CSV utilities live in a separate workspace crate:
 
-| Cargo feature | Enables |
-|---------------|---------|
-| `binance` | Public WebSocket connector |
-| `binance-live` | Signed REST + user stream |
-| `control-server` | Localhost HTTP control plane |
-| `databento` | Databento historical OHLCV fetch CLI |
-| `all` | All optional deps |
+```bash
+cargo build --release -p athenas-pallas-tools
+cargo run --release -p athenas-pallas-tools --bin pallas-sweep -- --help
+cargo run --release -p athenas-pallas-tools --bin pallas-merge -- --help
+cargo run --release -p athenas-pallas-tools --bin pallas-resample -- --help
+```
 
 ## Benchmarks
 

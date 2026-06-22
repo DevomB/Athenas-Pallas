@@ -1,6 +1,6 @@
-use athenas_pallas::dispatch_event;
+use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::events::{Event, MarketEvent, OrderIntent, OrderIntentSource};
-use athenas_pallas::execution::{PaperConfig, PaperGateway};
+use athenas_pallas::execution::{PaperConfig, SimGateway};
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
@@ -38,9 +38,9 @@ impl Strategy for OneShot {
     }
 }
 
-#[tokio::test]
-async fn paper_market_updates_balances() {
-    let inst = InstrumentId::new("binance", "BTCUSDT");
+#[test]
+fn paper_market_updates_balances() {
+    let inst = InstrumentId::new("test", "BTCUSDT");
     let mut instruments = HashMap::new();
     instruments.insert(
         inst.clone(),
@@ -57,7 +57,8 @@ async fn paper_market_updates_balances() {
         fired: false,
     };
     let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = PaperGateway::new(PaperConfig::default());
+    let exec = SimGateway::new(PaperConfig::default());
+    let mut intents = Vec::new();
 
     let ts = OffsetDateTime::now_utc();
     let ev = Event::Market(MarketEvent::BookL1 {
@@ -66,9 +67,7 @@ async fn paper_market_updates_balances() {
         bid: Decimal::new(100_000, 0),
         ask: Decimal::new(100_010, 0),
     });
-    dispatch_event(&mut state, &mut strat, &risk, &exec, ev)
-        .await
-        .unwrap();
+    dispatch_event_sync(&mut state, &mut strat, &risk, &exec, ev, &mut intents).unwrap();
 
     let btc = *state.balances.get(&Asset("BTC".into())).unwrap();
     assert!(btc > Decimal::ZERO);

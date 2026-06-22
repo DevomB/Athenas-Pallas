@@ -9,8 +9,10 @@ pub mod lifecycle;
 pub mod merge;
 pub mod pbar;
 pub mod replay;
+pub mod report;
 pub mod runner;
 pub mod session;
+pub mod source_loader;
 pub mod sources;
 pub mod strategy_resolver;
 
@@ -321,7 +323,7 @@ pub use bar::{
     decimal_to_ticks, default_tick_size, ticks_to_decimal, Bar, BarSeries, BarSeriesSource,
 };
 pub use batch::{
-    run_scenarios_parallel, run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario,
+    run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario,
 };
 pub use config::{parse_base_quote, parse_instrument, BacktestConfig, DataFormat, ExtraInstrument};
 pub use cpp_build::build_cpp_strategy;
@@ -333,8 +335,9 @@ pub use interval::{
 pub use merge::{merge_sources, merge_sources_iter, MergedSources};
 pub use pbar::{is_pbar_path, read_pbar, write_pbar};
 pub use replay::{read_events_jsonl, replay_events_serial};
+pub use report::BacktestReport;
 pub use runner::BuyAndHold;
-pub use runner::{BacktestReport, BacktestRunner};
+pub use runner::BacktestRunner;
 pub use session::{
     run_backtest, run_backtest_with_cancel, run_external_backtest,
     run_external_backtest_with_cancel,
@@ -356,7 +359,7 @@ mod csv_tests {
     fn from_path_yields_ninety_events() {
         let mut src = CsvBarSource::from_path(
             &sample_csv(),
-            ExchangeId("binance".into()),
+            ExchangeId("test".into()),
             Symbol("BTCUSDT".into()),
         )
         .expect("csv");
@@ -371,7 +374,7 @@ mod csv_tests {
     fn from_path_last_close() {
         let mut src = CsvBarSource::from_path(
             &sample_csv(),
-            ExchangeId("binance".into()),
+            ExchangeId("test".into()),
             Symbol("BTCUSDT".into()),
         )
         .expect("csv");

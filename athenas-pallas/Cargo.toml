@@ -1,6 +1,6 @@
 [package]
 name = "athenas-pallas"
-description = "Event-driven algorithmic trading framework (live, paper, backtest)"
+description = "Event-driven algorithmic backtesting framework"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,24 +10,16 @@ readme = "../README.md"
 documentation = "https://docs.rs/athenas-pallas"
 homepage = "https://github.com/DevomB/Athenas-Pallas"
 keywords = ["trading", "backtest", "strategy", "algo"]
-categories = ["asynchronous", "network-programming"]
+categories = ["algorithms", "simulation"]
 
 [features]
 default = []
-binance = ["dep:tokio-tungstenite", "dep:futures-util"]
-control-server = ["dep:axum", "dep:tower", "dep:hyper"]
-databento = ["dep:databento"]
-live-trading = ["dep:reqwest"]
-binance-live = ["binance", "live-trading", "dep:hmac", "dep:sha2", "dep:hex"]
 tracing-full = ["dep:tracing-subscriber"]
-all = ["binance-live", "control-server", "databento", "tracing-full"]
 
 [dependencies]
-async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "signal", "net", "io-util"] }
 tracing = "0.1"
 rust_decimal = { version = "1", features = ["serde-with-str"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
@@ -39,71 +31,17 @@ smallvec = "1"
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
 rayon = "1.10"
-databento = { version = "0.53", optional = true, default-features = false, features = ["historical"] }
-tokio-tungstenite = { version = "0.24", optional = true, default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
-futures-util = { version = "0.3", optional = true }
-reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "rustls-tls"] }
-axum = { version = "0.8", optional = true }
-tower = { version = "0.5", optional = true }
-hyper = { version = "1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
-
-hmac = { version = "0.12", optional = true }
-sha2 = { version = "0.10", optional = true }
-hex = { version = "0.4", optional = true }
-
-[[bin]]
-name = "pallas-resample"
-path = "src/bin/pallas-resample.rs"
-
-[[bin]]
-name = "pallas-merge"
-path = "src/bin/pallas-merge.rs"
-
-[[bin]]
-name = "pallas-sweep"
-path = "src/bin/pallas-sweep.rs"
 
 [[bin]]
 name = "pallas-backtest"
 path = "src/bin/pallas-backtest.rs"
 
-[[bin]]
-name = "pallas-databento-fetch"
-path = "src/bin/pallas-databento-fetch.rs"
-required-features = ["databento"]
-
-[[example]]
-name = "stress_backtest"
-path = "examples/stress_backtest.rs"
-
 [[example]]
 name = "backtest_csv"
 path = "examples/backtest_csv.rs"
 
-[[example]]
-name = "paper_trading"
-path = "examples/paper_trading.rs"
-required-features = ["control-server"]
-
-[[example]]
-name = "paper_binance"
-path = "examples/paper_binance.rs"
-required-features = ["binance", "control-server"]
-
-[[example]]
-name = "live_binance"
-path = "examples/live_binance.rs"
-required-features = ["binance-live", "control-server"]
-
-[[example]]
-name = "system_config"
-path = "examples/system_config.rs"
-
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-wiremock = "0.6"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 criterion = "0.5"
 

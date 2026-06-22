@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn apply_bar_sets_l1_from_high_low() {
-        let i = crate::types::InstrumentId::new("x", "BTCUSDT");
+        let i = crate::types::InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn mark_equity_includes_cash() {
-        let i = crate::types::InstrumentId::new("x", "BTCUSDT");
+        let i = crate::types::InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn strategy_positions_from_tagged_fills() {
-        let i = crate::types::InstrumentId::new("x", "BTCUSDT");
+        let i = crate::types::InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),

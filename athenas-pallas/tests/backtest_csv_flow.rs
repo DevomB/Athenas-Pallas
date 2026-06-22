@@ -5,14 +5,13 @@ mod common;
 use athenas_pallas::backtest::{BuyAndHold, CsvBarSource, HistoricalSource};
 use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::events::Event;
-use athenas_pallas::execution::{PaperConfig, SyncPaperGateway};
+use athenas_pallas::execution::{PaperConfig, SimGateway};
 use athenas_pallas::metrics::summarize;
 use athenas_pallas::risk::{PauseCheck, RiskPipeline};
-use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
-use athenas_pallas::types::{Asset, EquityPoint, ExchangeId, InstrumentId, Symbol};
+use athenas_pallas::state::{GlobalState, InstrumentRegistry};
+use athenas_pallas::types::{EquityPoint, ExchangeId, Symbol};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn sample_csv() -> PathBuf {
@@ -21,26 +20,29 @@ fn sample_csv() -> PathBuf {
 
 #[test]
 fn csv_replay_buy_and_hold() {
-    let instrument = InstrumentId::new("binance", "BTCUSDT");
-    let mut instruments = HashMap::new();
-    instruments.insert(
-        instrument.clone(),
-        InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
+    let instrument = common::crypto_fixture_instrument();
+    let mut instruments = std::collections::HashMap::new();
+    instruments.insert(instrument.clone(), common::crypto_fixture_meta());
+    let mut balances = std::collections::HashMap::new();
+    balances.insert(
+        athenas_pallas::types::Asset("USDT".into()),
+        Decimal::new(10_000, 0),
     );
-    let mut balances = HashMap::new();
-    balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
-    balances.insert(Asset("BTC".into()), Decimal::ZERO);
+    balances.insert(
+        athenas_pallas::types::Asset("BTC".into()),
+        Decimal::ZERO,
+    );
 
     let registry = InstrumentRegistry::from_instruments(instruments);
     let mut state = GlobalState::new(registry, balances);
     let qty = Decimal::from_f64(0.01).unwrap_or(Decimal::ZERO);
     let mut strategy = BuyAndHold::new(instrument.clone(), qty);
     let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = SyncPaperGateway::new(PaperConfig::default());
+    let exec = SimGateway::new(PaperConfig::default());
 
     let mut src = CsvBarSource::from_path(
         &sample_csv(),
-        ExchangeId("binance".into()),
+        ExchangeId("test".into()),
         Symbol("BTCUSDT".into()),
     )
     .expect("csv");

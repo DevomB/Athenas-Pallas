@@ -8,9 +8,9 @@ From `Backtesting-Engine`:
 
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
-  --data athenas-pallas/tests/fixtures/data/BTCUSDT_1d.csv \
-  --instrument binance:BTCUSDT \
-  --initial-balance USDT:10000 \
+  --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv \
+  --instrument test:EXAMPLE \
+  --initial-balance USD:10000 \
   --strategy simple_sma \
   --output results.json
 ```

@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn max_position_rejects() {
-        let i = InstrumentId::new("t", "BTCUSDT");
+        let i = InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn pause_blocks_user_not_flatten() {
-        let i = InstrumentId::new("t", "BTCUSDT");
+        let i = InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn trading_disabled_blocks_user_not_flatten() {
-        let i = InstrumentId::new("t", "BTCUSDT");
+        let i = InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn max_daily_loss_blocks_after_anchor_drop() {
-        let i = InstrumentId::new("t", "BTCUSDT");
+        let i = InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
             i.clone(),

@@ -48,7 +48,7 @@ fn stop_market_triggers_when_high_crosses_stop() {
     writeln!(f, "2024-01-01T00:00:00Z,100,100,99,100,1").unwrap();
     writeln!(f, "2024-01-01T01:00:00Z,100,102,100,101,1").unwrap();
 
-    let instrument = InstrumentId::new("binance", "BTCUSDT");
+    let instrument = InstrumentId::new("test", "BTCUSDT");
     let mut balances = HashMap::new();
     balances.insert(
         athenas_pallas::types::Asset("USDT".into()),
@@ -59,6 +59,9 @@ fn stop_market_triggers_when_high_crosses_stop() {
         data_path: csv,
         data_format: DataFormat::Ohlcv,
         instrument: instrument.clone(),
+        asset_class: athenas_pallas::instrument::AssetClass::Crypto,
+        base_asset: Some("BTC".into()),
+        quote_asset: Some("USDT".into()),
         balances,
         ..BacktestConfig::default()
     };

@@ -1,11 +1,11 @@
-//! Replay recorded [`crate::events::Event`] streams (JSON Lines) through the same engine path as live feeds.
+//! Sync replay of recorded [`crate::events::Event`] streams.
 
 use std::io::{BufRead, BufReader, Read};
 
-use crate::engine::EngineBuilder;
+use crate::engine::replay_events_sync;
 use crate::error::Result;
 use crate::events::Event;
-use crate::execution::ExecutionGateway;
+use crate::execution::SyncExecutionGateway;
 use crate::risk::RiskPipeline;
 use crate::state::GlobalState;
 use crate::strategy::Strategy;
@@ -25,8 +25,8 @@ pub fn read_events_jsonl(r: impl Read) -> Result<Vec<Event>> {
     Ok(out)
 }
 
-/// Offline replay identical to [`EngineBuilder::run_batch`] (explicit name for recorded streams).
-pub async fn replay_events_serial<S, E>(
+/// Offline replay through the sync dispatch path.
+pub fn replay_events_serial<S, E>(
     state: GlobalState,
     strategy: S,
     risk: &RiskPipeline,
@@ -35,9 +35,9 @@ pub async fn replay_events_serial<S, E>(
 ) -> Result<GlobalState>
 where
     S: Strategy,
-    E: ExecutionGateway,
+    E: SyncExecutionGateway,
 {
-    EngineBuilder::run_batch(state, strategy, risk, exec, events).await
+    replay_events_sync(state, strategy, risk, exec, events)
 }
 
 #[cfg(test)]

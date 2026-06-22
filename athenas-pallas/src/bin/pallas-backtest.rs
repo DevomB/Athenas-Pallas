@@ -13,7 +13,7 @@ use std::path::PathBuf;
 struct Args {
     #[arg(long)]
     data: Option<PathBuf>,
-    #[arg(long, default_value = "csv:BTCUSDT")]
+    #[arg(long, default_value = "test:EXAMPLE")]
     instrument: String,
     #[arg(long = "initial-balance", value_parser = parse_balance)]
     initial_balance: Vec<(String, String)>,
@@ -23,7 +23,7 @@ struct Args {
     python: String,
     #[arg(long, default_value = "auto")]
     data_format: String,
-    #[arg(long, default_value = "crypto")]
+    #[arg(long, default_value = "equity")]
     asset_class: String,
     #[arg(long, default_value = "10")]
     fee_bps: u64,
@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 let mut b = HashMap::new();
                 b.insert(
-                    athenas_pallas::types::Asset::new("USDT"),
+                    athenas_pallas::types::Asset::new("USD"),
                     Decimal::new(10_000, 0),
                 );
                 b

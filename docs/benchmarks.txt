@@ -46,3 +46,8 @@ Notes:
     path (no full equity curve materialized).
   - session_overhead_100k reuses a fresh CSV sidecar .pbar cache when available.
   - 90-bar noop debug integration tests remain sub-millisecond.
+
+2026-06-21 after backtest-only debloat (live modules removed, sync engine only,
+csv_common dedupe, metrics split; release, Windows 11):
+  noop_100k_amortized:    ~50.0 ms median  (~0.50 us/bar)
+  (Criterion reported ~68% improvement vs prior local baseline in target/criterion history)

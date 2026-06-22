@@ -4,7 +4,7 @@ use athenas_pallas::backtest::{
 };
 use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::dispatch_replay_sync;
-use athenas_pallas::execution::{PaperConfig, SyncPaperGateway};
+use athenas_pallas::execution::{PaperConfig, SimGateway};
 use athenas_pallas::risk::{BacktestChecks, PauseCheck, RiskPipeline};
 use athenas_pallas::state::{GlobalState, InstrumentRegistry};
 use athenas_pallas::strategy::NoopStrategy;
@@ -13,26 +13,26 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
-fn setup_noop_replay(n_bars: usize) -> (GlobalState, BarSeriesSource, SyncPaperGateway) {
-    let inst = InstrumentId::new("binance", "BTCUSDT");
+fn setup_noop_replay(n_bars: usize) -> (GlobalState, BarSeriesSource, SimGateway) {
+    let inst = InstrumentId::new("test", "EXAMPLE");
     let mut map = HashMap::new();
     map.insert(
         inst.clone(),
-        athenas_pallas::instrument::InstrumentMeta::spot("BTC", "USDT"),
+        athenas_pallas::instrument::InstrumentMeta::spot("EXAMPLE", "USD"),
     );
     let mut balances = HashMap::new();
-    balances.insert(Asset::new("USDT"), Decimal::new(10_000, 0));
+    balances.insert(Asset::new("USD"), Decimal::new(10_000, 0));
     let state = GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
-    let exec = SyncPaperGateway::new(PaperConfig::default());
-    let series = BarSeries::random_walk(n_bars, 42, Decimal::new(40_000, 0), default_tick_size());
-    let src = BarSeriesSource::new(series, ExchangeId::new("binance"), Symbol::new("BTCUSDT"));
+    let exec = SimGateway::new(PaperConfig::default());
+    let series = BarSeries::random_walk(n_bars, 42, Decimal::new(100, 0), default_tick_size());
+    let src = BarSeriesSource::new(series, ExchangeId::new("test"), Symbol::new("EXAMPLE"));
     (state, src, exec)
 }
 
 fn replay_noop_loop(
     state: &mut GlobalState,
     src: &mut BarSeriesSource,
-    exec: &SyncPaperGateway,
+    exec: &SimGateway,
     risk: &RiskPipeline,
 ) {
     let mut strategy = NoopStrategy;
@@ -87,22 +87,22 @@ fn bench_snapshot_cost(c: &mut Criterion) {
 fn bench_buy_and_hold(c: &mut Criterion) {
     c.bench_function("buy_and_hold_100k", |b| {
         b.iter(|| {
-            let inst = InstrumentId::new("binance", "BTCUSDT");
+            let inst = InstrumentId::new("test", "EXAMPLE");
             let mut map = HashMap::new();
             map.insert(
                 inst.clone(),
-                athenas_pallas::instrument::InstrumentMeta::spot("BTC", "USDT"),
+                athenas_pallas::instrument::InstrumentMeta::spot("EXAMPLE", "USD"),
             );
             let mut balances = HashMap::new();
-            balances.insert(Asset::new("USDT"), Decimal::new(10_000, 0));
+            balances.insert(Asset::new("USD"), Decimal::new(10_000, 0));
             let mut state = GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
             let mut strategy = BuyAndHold::new(inst.clone(), Decimal::new(1, 2));
             let checks = BacktestChecks::default();
-            let exec = SyncPaperGateway::new(PaperConfig::default());
+            let exec = SimGateway::new(PaperConfig::default());
             let series =
-                BarSeries::random_walk(100_000, 42, Decimal::new(40_000, 0), default_tick_size());
+                BarSeries::random_walk(100_000, 42, Decimal::new(100, 0), default_tick_size());
             let mut src =
-                BarSeriesSource::new(series, ExchangeId::new("binance"), Symbol::new("BTCUSDT"));
+                BarSeriesSource::new(series, ExchangeId::new("test"), Symbol::new("EXAMPLE"));
             let mut intents = Vec::with_capacity(4);
             while let Some((bar, ts)) = src.next_bar() {
                 state.apply_bar(0, &bar, src.tick_size(), Decimal::from(5u64));

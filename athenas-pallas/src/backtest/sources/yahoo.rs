@@ -1,33 +1,12 @@
 //! Yahoo Finance daily CSV (`Date,Open,High,Low,Close,Adj Close,Volume`).
 #![allow(missing_docs)]
 
-use rust_decimal::Decimal;
-use serde::Deserialize;
-use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 
-use crate::backtest::{parse_ts, parse_ts_required_err, HistoricalSource};
+use super::csv_common::{parse_yahoo_csv, YahooRow};
+use crate::backtest::{parse_ts, HistoricalSource};
 use crate::events::{Event, MarketEvent};
 use crate::types::{ExchangeId, InstrumentId, Symbol};
-
-#[derive(Clone, Debug, Deserialize)]
-struct YahooRow {
-    #[serde(rename = "Date")]
-    date: String,
-    #[serde(rename = "Open")]
-    open: Decimal,
-    #[serde(rename = "High")]
-    high: Decimal,
-    #[serde(rename = "Low")]
-    low: Decimal,
-    #[serde(rename = "Close")]
-    close: Decimal,
-    #[serde(rename = "Adj Close", default)]
-    adj_close: Option<Decimal>,
-    #[serde(rename = "Volume")]
-    volume: Decimal,
-}
 
 /// Yahoo-format OHLCV file.
 pub struct YahooCsvSource {
@@ -38,34 +17,12 @@ pub struct YahooCsvSource {
 
 impl YahooCsvSource {
     pub fn from_path(path: &Path, exchange: ExchangeId, symbol: Symbol) -> std::io::Result<Self> {
-        let mut buf = String::new();
-        File::open(path)?.read_to_string(&mut buf)?;
-        let mut rdr = csv::Reader::from_reader(buf.as_bytes());
-        let mut rows = Vec::new();
-        for (i, rec) in rdr.deserialize().enumerate() {
-            let row: YahooRow =
-                rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            parse_ts_required_err(&row.date, &format!("row {}", i + 2))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            rows.push(row);
-        }
-        if rows.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "empty csv",
-            ));
-        }
+        let rows = parse_yahoo_csv(path)?;
         Ok(Self {
             rows,
             idx: 0,
             instrument: InstrumentId::new(exchange.to_string(), symbol.to_string()),
         })
-    }
-}
-
-impl YahooRow {
-    fn effective_close(&self) -> Decimal {
-        self.adj_close.unwrap_or(self.close)
     }
 }
 
@@ -84,18 +41,5 @@ impl HistoricalSource for YahooCsvSource {
             close,
             volume: row.volume,
         }))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn prefers_adj_close_when_present() {
-        let csv = "Date,Open,High,Low,Close,Adj Close,Volume\n2024-01-02,10,11,9,10,9.5,100\n";
-        let mut rdr = csv::Reader::from_reader(csv.as_bytes());
-        let row: YahooRow = rdr.deserialize().next().unwrap().unwrap();
-        assert_eq!(row.effective_close(), Decimal::new(95, 1));
     }
 }

@@ -1,31 +1,13 @@
 //! Futures OHLCV CSV (Yahoo or standard OHLCV columns; contract terms from config).
 #![allow(missing_docs)]
 
-use rust_decimal::Decimal;
-use serde::Deserialize;
-use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use super::csv_common::{headers_are_yahoo, read_yahoo_rows, YahooRow};
 use crate::backtest::{parse_ts, parse_ts_required_err, HistoricalSource, OhlcvRow};
 use crate::events::{Event, MarketEvent};
 use crate::types::{ExchangeId, InstrumentId, Symbol};
-
-#[derive(Clone, Debug, Deserialize)]
-struct YahooRow {
-    #[serde(rename = "Date")]
-    date: String,
-    #[serde(rename = "Open")]
-    open: Decimal,
-    #[serde(rename = "High")]
-    high: Decimal,
-    #[serde(rename = "Low")]
-    low: Decimal,
-    #[serde(rename = "Close")]
-    close: Decimal,
-    #[serde(rename = "Volume")]
-    volume: Decimal,
-}
 
 enum FutureRow {
     Yahoo(YahooRow),
@@ -42,17 +24,12 @@ pub struct FutureCsvSource {
 impl FutureCsvSource {
     pub fn from_path(path: &Path, exchange: ExchangeId, symbol: Symbol) -> std::io::Result<Self> {
         let mut buf = String::new();
-        File::open(path)?.read_to_string(&mut buf)?;
+        std::fs::File::open(path)?.read_to_string(&mut buf)?;
         let mut rdr = csv::Reader::from_reader(buf.as_bytes());
         let headers = rdr.headers()?.clone();
-        let yahoo = headers.iter().any(|h| h == "Date");
         let mut rows = Vec::new();
-        if yahoo {
-            for (i, rec) in rdr.deserialize::<YahooRow>().enumerate() {
-                let row =
-                    rec.map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                parse_ts_required_err(&row.date, &format!("row {}", i + 2))
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        if headers_are_yahoo(&headers) {
+            for row in read_yahoo_rows(&mut rdr)? {
                 rows.push(FutureRow::Yahoo(row));
             }
         } else {
@@ -63,12 +40,12 @@ impl FutureCsvSource {
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 rows.push(FutureRow::Ohlcv(row));
             }
-        }
-        if rows.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "empty csv",
-            ));
+            if rows.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "empty csv",
+                ));
+            }
         }
         Ok(Self {
             rows,
@@ -91,7 +68,7 @@ impl HistoricalSource for FutureCsvSource {
                     open: r.open,
                     high: r.high,
                     low: r.low,
-                    close: r.close,
+                    close: r.effective_close(),
                     volume: r.volume,
                 }))
             }

@@ -25,9 +25,11 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy -p athenas-pallas --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test athenas-pallas
         run: cargo test -p athenas-pallas
+      - name: build tools
+        run: cargo build -p athenas-pallas-tools --release
       - name: python SMA golden
         run: cargo test -p athenas-pallas --test external_strategy_golden -- --ignored
       - name: python SDK tests
@@ -55,9 +57,6 @@ jobs:
       - name: Bench noop amortized
         run: cargo bench -p athenas-pallas --bench backtest_hotpath -- --noplot noop_100k_amortized
       - name: Regression gate (compare against committed ceiling)
-        # Criterion writes the mean estimate (ns) to estimates.json. We fail only on gross
-        # regressions so shared-runner variance does not produce false negatives. The ceiling
-        # lives in docs/bench_baseline.json and is intentionally generous (see that file).
         run: |
           EST=target/criterion/noop_100k_amortized/new/estimates.json
           CEIL_MS=$(jq -r '.noop_100k_amortized.ceiling_ms' docs/bench_baseline.json)
@@ -75,20 +74,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Test workspace (default features)
+      - name: Test workspace
         run: cargo test --workspace
-
-  feature-matrix:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        features: [binance-live, control-server, databento, all]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build athenas-pallas (${{ matrix.features }})
-        run: cargo build -p athenas-pallas --features ${{ matrix.features }}
-      - name: Test athenas-pallas (${{ matrix.features }})
-        run: cargo test -p athenas-pallas --features ${{ matrix.features }}

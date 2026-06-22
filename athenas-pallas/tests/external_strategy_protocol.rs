@@ -5,7 +5,7 @@ mod common;
 use athenas_pallas::backtest::{BacktestConfig, BacktestRunner, DataFormat};
 use athenas_pallas::instrument::{AssetClass, InstrumentMeta};
 use athenas_pallas::strategy::ExternalStrategy;
-use athenas_pallas::types::{Asset, InstrumentId};
+use athenas_pallas::types::Asset;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::fs;
@@ -16,7 +16,7 @@ fn sample_csv() -> PathBuf {
 }
 
 fn cfg() -> BacktestConfig {
-    let instrument = InstrumentId::new("binance", "BTCUSDT");
+    let instrument = common::crypto_fixture_instrument();
     let mut balances = HashMap::new();
     balances.insert(Asset("USDT".into()), Decimal::new(10_000, 0));
     BacktestConfig {
@@ -24,6 +24,8 @@ fn cfg() -> BacktestConfig {
         data_format: DataFormat::Ohlcv,
         instrument,
         asset_class: AssetClass::Crypto,
+        base_asset: Some("BTC".into()),
+        quote_asset: Some("USDT".into()),
         balances,
         fee_bps: Decimal::from(10u64),
         slippage_bps: Decimal::from(5u64),
@@ -59,7 +61,7 @@ while True:
     if m.get("msg") != "event":
         continue
     intents = [{
-        "instrument": {"exchange": "binance", "symbol": "BTCUSDT"},
+        "instrument": {"exchange": "test", "symbol": "BTCUSDT"},
         "side": "Buy",
         "order_type": "Market",
         "qty": "0.01"

@@ -84,6 +84,10 @@ pub struct BacktestConfig {
     pub max_daily_loss_quote: Option<Decimal>,
     /// Additional instruments to register in the replay registry.
     pub extra_instruments: Vec<ExtraInstrument>,
+    /// Explicit base asset when symbol parsing is insufficient.
+    pub base_asset: Option<String>,
+    /// Explicit quote asset when symbol parsing is insufficient.
+    pub quote_asset: Option<String>,
 }
 
 impl std::fmt::Debug for BacktestConfig {
@@ -101,9 +105,11 @@ impl Default for BacktestConfig {
         Self {
             data_path: PathBuf::new(),
             data_format: DataFormat::Auto,
-            instrument: InstrumentId::new("binance", "BTCUSDT"),
-            asset_class: AssetClass::Crypto,
+            instrument: InstrumentId::new("test", "EXAMPLE"),
+            asset_class: AssetClass::Equity,
             balances: HashMap::new(),
+            base_asset: Some("EXAMPLE".into()),
+            quote_asset: Some("USD".into()),
             fee_bps: Decimal::from(10u64),
             slippage_bps: Decimal::from(5u64),
             half_spread_bps: Decimal::from(5u64),
@@ -130,6 +136,16 @@ impl Default for BacktestConfig {
     }
 }
 
+impl BacktestConfig {
+    /// Resolved base/quote for instrument metadata construction.
+    pub fn resolved_base_quote(&self) -> (String, String) {
+        if let (Some(base), Some(quote)) = (&self.base_asset, &self.quote_asset) {
+            return (base.clone(), quote.clone());
+        }
+        parse_base_quote(&self.instrument.symbol, self.asset_class)
+    }
+}
+
 /// Split `exchange:symbol`.
 pub fn parse_instrument(s: &str) -> Result<InstrumentId, String> {
     let (ex, sym) = s
@@ -152,22 +168,16 @@ pub fn parse_base_quote(symbol: &str, class: AssetClass) -> (String, String) {
         AssetClass::Option | AssetClass::Perpetual | AssetClass::Hybrid => {
             (symbol.to_string(), "USD".to_string())
         }
-        _ if symbol.ends_with("USDT") => (
-            symbol.trim_end_matches("USDT").to_string(),
-            "USDT".to_string(),
-        ),
-        _ if symbol.ends_with("USD") => (
-            symbol.trim_end_matches("USD").to_string(),
-            "USD".to_string(),
-        ),
         _ => (symbol.to_string(), "USD".to_string()),
     }
 }
 
 /// Build registry metadata from primary backtest config.
 pub fn instrument_meta_from_config(cfg: &BacktestConfig) -> InstrumentMeta {
-    instrument_meta_from_fields(
-        &cfg.instrument.symbol,
+    let (base, quote) = cfg.resolved_base_quote();
+    instrument_meta_from_fields_with_assets(
+        base,
+        quote,
         cfg.asset_class,
         cfg.lot_size,
         cfg.tick_size,
@@ -200,6 +210,29 @@ fn instrument_meta_from_fields(
     margin_initial_rate: Option<Decimal>,
 ) -> InstrumentMeta {
     let (base, quote) = parse_base_quote(symbol, asset_class);
+    instrument_meta_from_fields_with_assets(
+        base,
+        quote,
+        asset_class,
+        lot_size,
+        tick_size,
+        contract_multiplier,
+        expiry,
+        margin_initial_rate,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn instrument_meta_from_fields_with_assets(
+    base: String,
+    quote: String,
+    asset_class: AssetClass,
+    lot_size: Option<Decimal>,
+    tick_size: Option<Decimal>,
+    contract_multiplier: Option<Decimal>,
+    expiry: Option<String>,
+    margin_initial_rate: Option<Decimal>,
+) -> InstrumentMeta {
     let mut meta = match asset_class {
         AssetClass::Future => InstrumentMeta::future(
             base,

@@ -1,8 +1,8 @@
-//! Paper execution: local balances and simple touch / last-trade fill rules.
+//! Sync fill simulation for backtest replay. local balances and simple touch / last-trade fill rules.
 
 use std::sync::Arc;
 
-use super::{apply_slippage, AccountEvents, ExecutionGateway};
+use super::{apply_slippage, AccountEvents};
 use crate::backtest::{FillModel, TouchCrossFillModel};
 use crate::error::{Error, Result};
 use crate::events::{AccountEvent, OrderIntent};
@@ -11,7 +11,6 @@ use crate::instrument::ticks::{notional_decimal, PriceTicks, QtyLots};
 use crate::instrument::AssetClass;
 use crate::state::{GlobalState, InstrumentMeta};
 use crate::types::{OpenOrder, OrderId, OrderStatus, OrderType, Side};
-use async_trait::async_trait;
 use rust_decimal::Decimal;
 use smallvec::smallvec;
 
@@ -46,13 +45,13 @@ impl Default for PaperConfig {
     }
 }
 
-/// Thread-safe paper gateway (shared across engine tasks).
+/// Sync fill engine for backtest and simulation gateways.
 #[derive(Clone)]
-pub struct PaperGateway {
+pub struct FillEngine {
     cfg: PaperConfig,
 }
 
-impl PaperGateway {
+impl FillEngine {
     /// New paper gateway.
     pub fn new(cfg: PaperConfig) -> Self {
         Self { cfg }
@@ -612,54 +611,6 @@ impl PaperGateway {
     }
 }
 
-#[async_trait]
-impl ExecutionGateway for PaperGateway {
-    async fn place_limit(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
-        self.place_limit_sync(state, intent).map(|e| e.into_vec())
-    }
-
-    async fn place_market(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
-        self.place_market_sync(state, intent).map(|e| e.into_vec())
-    }
-
-    async fn place_stop_market(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
-        self.place_stop_market_sync(state, intent)
-            .map(|e| e.into_vec())
-    }
-
-    async fn place_stop_limit(
-        &self,
-        state: &GlobalState,
-        intent: &OrderIntent,
-    ) -> Result<Vec<AccountEvent>> {
-        self.place_stop_limit_sync(state, intent)
-            .map(|e| e.into_vec())
-    }
-
-    async fn cancel(&self, state: &GlobalState, order_id: OrderId) -> Result<Vec<AccountEvent>> {
-        self.cancel_sync(state, order_id).map(|e| e.into_vec())
-    }
-
-    async fn cancel_all(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.cancel_all_sync(state).map(|e| e.into_vec())
-    }
-
-    async fn poll_after_market(&self, state: &GlobalState) -> Result<Vec<AccountEvent>> {
-        self.poll_after_market_sync(state).map(|e| e.into_vec())
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -674,7 +625,7 @@ mod tests {
     use time::OffsetDateTime;
 
     fn setup_l1(bid: Decimal, ask: Decimal) -> (GlobalState, InstrumentId) {
-        let inst = InstrumentId::new("binance", "BTCUSDT");
+        let inst = InstrumentId::new("test", "BTCUSDT");
         let mut instruments = HashMap::new();
         instruments.insert(
             inst.clone(),
@@ -696,7 +647,7 @@ mod tests {
     #[test]
     fn buy_limit_at_ask_fills() {
         let (state, inst) = setup_l1(Decimal::new(100, 0), Decimal::new(101, 0));
-        let gw = PaperGateway::new(PaperConfig::default());
+        let gw = FillEngine::new(PaperConfig::default());
         let intent = OrderIntent {
             instrument: inst,
             side: Side::Buy,
@@ -714,7 +665,7 @@ mod tests {
 
     #[test]
     fn market_fill_updates_balances_and_fee() {
-        let inst = InstrumentId::new("binance", "BTCUSDT");
+        let inst = InstrumentId::new("test", "BTCUSDT");
         let mut instruments = HashMap::new();
         instruments.insert(
             inst.clone(),
@@ -729,7 +680,7 @@ mod tests {
             bid: Decimal::new(100, 0),
             ask: Decimal::new(101, 0),
         });
-        let gw = PaperGateway::new(PaperConfig {
+        let gw = FillEngine::new(PaperConfig {
             fee_bps: Decimal::from(100u64),
             market_slippage_bps: Decimal::ZERO,
             ..PaperConfig::default()
@@ -761,11 +712,11 @@ mod tests {
     #[test]
     fn slippage_moves_fill_price() {
         let (state, inst) = setup_l1(Decimal::new(100, 0), Decimal::new(100, 0));
-        let low = PaperGateway::new(PaperConfig {
+        let low = FillEngine::new(PaperConfig {
             market_slippage_bps: Decimal::ZERO,
             ..PaperConfig::default()
         });
-        let high = PaperGateway::new(PaperConfig {
+        let high = FillEngine::new(PaperConfig {
             market_slippage_bps: Decimal::from(100u64),
             ..PaperConfig::default()
         });
@@ -804,7 +755,7 @@ mod tests {
     #[test]
     fn buy_limit_below_bid_does_not_fill() {
         let (state, inst) = setup_l1(Decimal::new(100, 0), Decimal::new(101, 0));
-        let gw = PaperGateway::new(PaperConfig::default());
+        let gw = FillEngine::new(PaperConfig::default());
         let intent = OrderIntent {
             instrument: inst,
             side: Side::Buy,
@@ -822,7 +773,7 @@ mod tests {
 
     #[test]
     fn market_buy_rejects_insufficient_quote() {
-        let inst = InstrumentId::new("binance", "BTCUSDT");
+        let inst = InstrumentId::new("test", "BTCUSDT");
         let mut instruments = HashMap::new();
         instruments.insert(
             inst.clone(),
@@ -838,7 +789,7 @@ mod tests {
             bid: Decimal::new(40_000, 0),
             ask: Decimal::new(40_010, 0),
         });
-        let gw = PaperGateway::new(PaperConfig::default());
+        let gw = FillEngine::new(PaperConfig::default());
         let intent = OrderIntent {
             instrument: inst,
             side: Side::Buy,

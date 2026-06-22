@@ -56,30 +56,15 @@ struct ParsedRow {
 }
 
 fn load_rows(path: &PathBuf) -> Result<Vec<ParsedRow>, Box<dyn std::error::Error>> {
+    use athenas_pallas::backtest::sources::{headers_are_yahoo, read_yahoo_rows};
+
     let mut buf = String::new();
     std::io::Read::read_to_string(&mut File::open(path)?, &mut buf)?;
     let mut rdr = csv::Reader::from_reader(buf.as_bytes());
     let headers = rdr.headers()?.clone();
-    let yahoo = headers.iter().any(|h| h == "Date");
     let mut out = Vec::new();
-    if yahoo {
-        #[derive(serde::Deserialize)]
-        struct YahooRow {
-            #[serde(rename = "Date")]
-            date: String,
-            #[serde(rename = "Open")]
-            open: Decimal,
-            #[serde(rename = "High")]
-            high: Decimal,
-            #[serde(rename = "Low")]
-            low: Decimal,
-            #[serde(rename = "Close")]
-            close: Decimal,
-            #[serde(rename = "Volume")]
-            volume: Decimal,
-        }
-        for rec in rdr.deserialize::<YahooRow>() {
-            let row = rec?;
+    if headers_are_yahoo(&headers) {
+        for row in read_yahoo_rows(&mut rdr)? {
             let ts = athenas_pallas::backtest::parse_timestamp(&row.date)
                 .ok_or_else(|| format!("bad timestamp: {}", row.date))?;
             out.push(ParsedRow {
@@ -87,7 +72,7 @@ fn load_rows(path: &PathBuf) -> Result<Vec<ParsedRow>, Box<dyn std::error::Error
                 open: row.open,
                 high: row.high,
                 low: row.low,
-                close: row.close,
+                close: row.effective_close(),
                 volume: row.volume,
             });
         }

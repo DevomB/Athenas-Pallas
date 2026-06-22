@@ -1,29 +1,29 @@
 # Copy to backtest.toml and set [backtest].data to a CSV you imported into data/
 
 [instrument]
-exchange = "csv"
-symbol = "BTCUSDT"
-asset_class = "crypto"
+exchange = "test"
+symbol = "EXAMPLE"
+asset_class = "equity"
 
 [backtest]
-data = "data/BTCUSDT_live.csv"
-data_format = "ohlcv"
+data = "data/EXAMPLE_1d.csv"
+data_format = "yahoo"
 fee_bps = 10
 slippage_bps = 5
 half_spread_bps = 5
-periods_per_year = 365.0
+periods_per_year = 252.0
 strategy = "simple_sma"
 python = "python"
 output = "target/backtest_report.json"
 
 [[balances]]
-asset = "USDT"
+asset = "USD"
 amount = "10000"
 
 # Optional extra symbols for merged multi-instrument replay:
 # [[instruments]]
-# exchange = "csv"
+# exchange = "test"
 # symbol = "AAPL"
 # asset_class = "equity"
-# data = "data/AAPL_live.csv"
-# data_format = "ohlcv"
+# data = "data/AAPL_1d.csv"
+# data_format = "yahoo"

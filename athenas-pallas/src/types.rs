@@ -67,7 +67,7 @@ impl OrderId {
         Self(Uuid::new_v4())
     }
 
-    /// Deterministic id from a venue numeric order id (e.g. Binance `orderId`).
+    /// Deterministic id from a venue numeric order id string.
     pub fn from_venue_u64(id: u64) -> Self {
         Self(Uuid::from_u128(id as u128))
     }

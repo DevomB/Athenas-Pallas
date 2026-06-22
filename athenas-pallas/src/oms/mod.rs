@@ -285,8 +285,8 @@ mod tests {
 
     #[test]
     fn instrument_index_tracks_add_and_remove() {
-        let a = InstrumentId::new("binance", "BTCUSDT");
-        let b = InstrumentId::new("binance", "ETHUSDT");
+        let a = InstrumentId::new("test", "BTCUSDT");
+        let b = InstrumentId::new("test", "ETHUSDT");
         let mut store = OrderStore::new();
 
         store.apply_order_update(order(
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn price_index_returns_only_crossing_buy_limits() {
-        let a = InstrumentId::new("binance", "BTCUSDT");
+        let a = InstrumentId::new("test", "BTCUSDT");
         let mut store = OrderStore::new();
         store.apply_order_update(order(
             1,
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn stop_index_respects_bar_high_low() {
-        let a = InstrumentId::new("binance", "BTCUSDT");
+        let a = InstrumentId::new("test", "BTCUSDT");
         let mut store = OrderStore::new();
         store.apply_order_update(order(
             1,

@@ -196,7 +196,7 @@ mod tests {
 
     fn perp_state(qty: Decimal, usd: Decimal, mid: Decimal) -> (GlobalState, usize) {
         let mut map = HashMap::new();
-        let id = crate::types::InstrumentId::new("binance", "BTCUSDT");
+        let id = crate::types::InstrumentId::new("test", "BTCUSDT");
         map.insert(
             id.clone(),
             InstrumentMeta::perpetual("BTC", "USD", None, Some(Decimal::new(1, 1))), // 10% initial

@@ -106,7 +106,7 @@ mod tests {
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data");
         let a = CsvBarSource::from_path(
             &base.join("BTCUSDT_1d.csv"),
-            ExchangeId::new("binance"),
+            ExchangeId::new("test"),
             Symbol::new("BTCUSDT"),
         )
         .unwrap();
@@ -134,7 +134,7 @@ mod tests {
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data");
         let a = CsvBarSource::from_path(
             &base.join("BTCUSDT_1d.csv"),
-            ExchangeId::new("binance"),
+            ExchangeId::new("test"),
             Symbol::new("BTCUSDT"),
         )
         .unwrap();
