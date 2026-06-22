@@ -18,16 +18,17 @@ namespace pallas {
 
 using json = nlohmann::json;
 
+struct InstrumentRef {
+    std::string exchange;
+    std::string symbol;
+};
+
 struct Ctx {
     std::string position_qty;
     std::optional<std::string> mid;
     std::string equity;
     json balances;
-};
-
-struct InstrumentRef {
-    std::string exchange;
-    std::string symbol;
+    std::optional<InstrumentRef> instrument;
 };
 
 struct Intent {
@@ -140,6 +141,15 @@ inline void run(EventHandler on_event, const std::function<void(const json&)>& o
     if (!init.contains("msg") || init.at("msg").get<std::string>() != "init") {
         throw std::runtime_error("expected init message");
     }
+    std::optional<InstrumentRef> session_instrument;
+    if (init.contains("instruments") && init.at("instruments").is_array() &&
+        !init.at("instruments").empty()) {
+        const json& inst = init.at("instruments").at(0);
+        session_instrument = InstrumentRef{
+            inst.at("exchange").get<std::string>(),
+            inst.at("symbol").get<std::string>(),
+        };
+    }
     if (on_init) {
         on_init(init);
     }
@@ -162,9 +172,11 @@ inline void run(EventHandler on_event, const std::function<void(const json&)>& o
             continue;
         }
         const Ctx ctx = ctx_from_json(msg.at("ctx"));
+        Ctx event_ctx = ctx;
+        event_ctx.instrument = session_instrument;
         const json& event = msg.at("event");
         const std::uint64_t seq = msg.at("seq").get<std::uint64_t>();
-        std::vector<Intent> intents = on_event(ctx, event);
+        std::vector<Intent> intents = on_event(event_ctx, event);
         write_intents(seq, intents);
     }
 }

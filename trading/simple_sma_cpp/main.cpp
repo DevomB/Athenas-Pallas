@@ -36,7 +36,7 @@ std::vector<pallas::Intent> on_event(const pallas::Ctx& ctx, const pallas::json&
 
     if (sign != 0 && sign != g_prev_sign) {
         pallas::Intent intent;
-        intent.instrument = {"binance", "BTCUSDT"};
+        intent.instrument = ctx.instrument.value_or(pallas::InstrumentRef{"binance", "BTCUSDT"});
         intent.order_type = "Market";
         if (sign > 0) {
             intent.side = "Buy";
