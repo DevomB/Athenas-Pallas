@@ -11,6 +11,8 @@
 
 pub mod backtest;
 pub mod calendar;
+#[cfg(feature = "databento")]
+pub mod data;
 pub mod engine;
 pub mod error;
 pub mod events;
