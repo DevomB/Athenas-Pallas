@@ -69,7 +69,7 @@ impl OrderId {
 
     /// Deterministic id from a venue numeric order id string.
     pub fn from_venue_u64(id: u64) -> Self {
-        Self(Uuid::from_u128(id as u128))
+        Self(Uuid::from_u128(u128::from(id)))
     }
 }
 

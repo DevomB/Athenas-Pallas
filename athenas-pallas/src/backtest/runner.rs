@@ -192,7 +192,7 @@ impl BacktestRunner {
                         if let Some(ref hook) = cfg.on_progress {
                             hook(&format!("processed {bar_ix} bars"));
                         }
-                        if cancelled(&cancel) {
+                        if cancelled(cancel.as_ref()) {
                             return Err(crate::Error::Cancelled);
                         }
                     }
@@ -245,7 +245,7 @@ impl BacktestRunner {
                     if let Some(ref hook) = cfg.on_progress {
                         hook(&format!("processed {bar_ix} bars"));
                     }
-                    if cancelled(&cancel) {
+                    if cancelled(cancel.as_ref()) {
                         return Err(crate::Error::Cancelled);
                     }
                 }
@@ -280,7 +280,7 @@ impl BacktestRunner {
                     if let Some(ref hook) = cfg.on_progress {
                         hook(&format!("processed {bar_ix} bars"));
                     }
-                    if cancelled(&cancel) {
+                    if cancelled(cancel.as_ref()) {
                         return Err(crate::Error::Cancelled);
                     }
                 }
@@ -348,8 +348,8 @@ fn finalize_report(
     report
 }
 
-fn cancelled(cancel: &Option<Arc<AtomicBool>>) -> bool {
-    cancel.as_ref().is_some_and(|f| f.load(Ordering::Relaxed))
+fn cancelled(cancel: Option<&Arc<AtomicBool>>) -> bool {
+    cancel.is_some_and(|f| f.load(Ordering::Relaxed))
 }
 
 fn resolve_periods_per_year(cfg: &BacktestConfig, series: Option<&BarSeries>) -> f64 {

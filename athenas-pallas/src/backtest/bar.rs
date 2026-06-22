@@ -51,7 +51,7 @@ impl Bar {
     }
 
     pub fn timestamp(&self) -> Option<OffsetDateTime> {
-        OffsetDateTime::from_unix_timestamp_nanos(self.ts_unix_nanos as i128).ok()
+        OffsetDateTime::from_unix_timestamp_nanos(i128::from(self.ts_unix_nanos)).ok()
     }
 }
 
@@ -114,26 +114,29 @@ impl BarSeries {
     /// Deterministic random walk for benchmarks.
     pub fn random_walk(n: usize, seed: u64, start_price: Decimal, tick_size: Decimal) -> Self {
         let start = decimal_to_ticks(start_price, tick_size);
-        let mut bars = Vec::with_capacity(n);
         let mut price = start;
         let mut s = seed;
         let base_ts = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
-        for i in 0..n {
-            s ^= s << 13;
-            s ^= s >> 7;
-            s ^= s << 17;
-            let shock = ((s % 200) as i64) - 100;
-            price = (price + shock).max(1);
-            let ts = base_ts + (i as i64) * 86_400_000_000_000;
-            bars.push(Bar {
-                ts_unix_nanos: ts,
-                open_ticks: price,
-                high_ticks: price + 50,
-                low_ticks: price - 50,
-                close_ticks: price,
-                volume_lots: 1,
-            });
-        }
+        let bars = (0..n)
+            .map(|i| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                let shock = i64::try_from(s % 200).unwrap_or_default() - 100;
+                price = (price + shock).max(1);
+                let ts = base_ts
+                    + i64::try_from(i).unwrap_or(i64::MAX / 86_400_000_000_000)
+                        * 86_400_000_000_000;
+                Bar {
+                    ts_unix_nanos: ts,
+                    open_ticks: price,
+                    high_ticks: price + 50,
+                    low_ticks: price - 50,
+                    close_ticks: price,
+                    volume_lots: 1,
+                }
+            })
+            .collect();
         Self { bars, tick_size }
     }
 
@@ -147,6 +150,10 @@ impl BarSeries {
 
     pub fn get(&self, i: usize) -> Option<&Bar> {
         self.bars.get(i)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Bar> {
+        self.bars.iter()
     }
 
     pub fn tick_size(&self) -> Decimal {

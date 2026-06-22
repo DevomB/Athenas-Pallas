@@ -268,6 +268,17 @@ impl InstrumentRegistry {
         self.ids.get(ix.0)
     }
 
+    /// Dense id/meta rows in index order.
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (InstrumentIndex, &LegacyInstrumentId, &InstrumentMeta)> {
+        self.ids
+            .iter()
+            .zip(&self.metas)
+            .enumerate()
+            .map(|(ix, (id, meta))| (InstrumentIndex(ix), id, meta))
+    }
+
     /// Meta at index.
     pub fn meta(&self, ix: InstrumentIndex) -> Option<&InstrumentMeta> {
         self.metas.get(ix.0)

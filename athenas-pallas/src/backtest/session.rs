@@ -108,7 +108,7 @@ fn resolve_config_path(base_dir: Option<&Path>, p: &str) -> PathBuf {
     if path.is_absolute() {
         return path;
     }
-    base_dir.map(|b| b.join(&path)).unwrap_or(path)
+    base_dir.map_or(path, |b| b.join(p))
 }
 
 fn apply_table(
@@ -153,16 +153,16 @@ fn apply_table(
         if let Some(f) = bt.get("data_format").and_then(|v| v.as_str()) {
             cfg.data_format = parse_data_format(f);
         }
-        if let Some(fee) = bt.get("fee_bps").and_then(|v| v.as_integer()) {
+        if let Some(fee) = bt.get("fee_bps").and_then(toml::Value::as_integer) {
             cfg.fee_bps = Decimal::from(fee as u64);
         }
-        if let Some(slip) = bt.get("slippage_bps").and_then(|v| v.as_integer()) {
+        if let Some(slip) = bt.get("slippage_bps").and_then(toml::Value::as_integer) {
             cfg.slippage_bps = Decimal::from(slip as u64);
         }
-        if let Some(hs) = bt.get("half_spread_bps").and_then(|v| v.as_integer()) {
+        if let Some(hs) = bt.get("half_spread_bps").and_then(toml::Value::as_integer) {
             cfg.half_spread_bps = Decimal::from(hs as u64);
         }
-        if let Some(py) = bt.get("periods_per_year").and_then(|v| v.as_float()) {
+        if let Some(py) = bt.get("periods_per_year").and_then(toml::Value::as_float) {
             cfg.periods_per_year = py;
             cfg.auto_periods_per_year = false;
         }
@@ -172,7 +172,10 @@ fn apply_table(
         if let Some(sf) = bt.get("session_filter").and_then(|v| v.as_str()) {
             cfg.session_filter = Some(sf.to_string());
         }
-        if let Some(v) = bt.get("auto_periods_per_year").and_then(|v| v.as_bool()) {
+        if let Some(v) = bt
+            .get("auto_periods_per_year")
+            .and_then(toml::Value::as_bool)
+        {
             cfg.auto_periods_per_year = v;
         }
         if let Some(p) = bt.get("output").and_then(|v| v.as_str()) {
@@ -184,10 +187,10 @@ fn apply_table(
         if let Some(p) = bt.get("python").and_then(|v| v.as_str()) {
             cfg.python_exe = p.to_string();
         }
-        if let Some(v) = bt.get("record_equity_curve").and_then(|v| v.as_bool()) {
+        if let Some(v) = bt.get("record_equity_curve").and_then(toml::Value::as_bool) {
             cfg.record_equity_curve = v;
         }
-        if let Some(v) = bt.get("risk_free_annual").and_then(|v| v.as_float()) {
+        if let Some(v) = bt.get("risk_free_annual").and_then(toml::Value::as_float) {
             cfg.risk_free_annual = v;
         }
         if let Some(v) = bt.get("max_position_abs").and_then(|v| v.as_str()) {
@@ -201,10 +204,10 @@ fn apply_table(
         }
     }
 
-    if let Some(fee) = table.get("fee_bps").and_then(|v| v.as_integer()) {
+    if let Some(fee) = table.get("fee_bps").and_then(toml::Value::as_integer) {
         cfg.fee_bps = Decimal::from(fee as u64);
     }
-    if let Some(slip) = table.get("slippage_bps").and_then(|v| v.as_integer()) {
+    if let Some(slip) = table.get("slippage_bps").and_then(toml::Value::as_integer) {
         cfg.slippage_bps = Decimal::from(slip as u64);
     }
 
@@ -243,8 +246,7 @@ fn apply_table(
             let ac = tbl
                 .get("asset_class")
                 .and_then(|v| v.as_str())
-                .map(parse_asset_class)
-                .unwrap_or(AssetClass::Crypto);
+                .map_or(AssetClass::Crypto, parse_asset_class);
             let mut extra = ExtraInstrument {
                 instrument: crate::types::InstrumentId::new(ex, sym),
                 asset_class: ac,

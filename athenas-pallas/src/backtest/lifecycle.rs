@@ -7,7 +7,6 @@ use crate::instrument::pricing::{
     apply_perp_funding, bond_coupon_cash, maintenance_margin_required, should_exercise_european,
 };
 use crate::instrument::AssetClass;
-use crate::instrument::InstrumentIndex;
 use crate::instrument::InstrumentMeta;
 use crate::instrument::OptionKind;
 use crate::state::GlobalState;
@@ -28,11 +27,12 @@ fn is_funding_time(ts: OffsetDateTime) -> bool {
 
 /// Apply funding, coupons, and expiry exercise after a bar at `ts`.
 pub fn apply_bar_lifecycle(state: &mut GlobalState, ts: OffsetDateTime) {
-    let n = state.registry.len();
-    for ix in 0..n {
-        let Some(meta) = state.registry.meta(InstrumentIndex(ix)).cloned() else {
-            continue;
-        };
+    let instruments: Vec<_> = state
+        .registry
+        .iter()
+        .map(|(ix, _, meta)| (ix.0, meta.clone()))
+        .collect();
+    for (ix, meta) in instruments {
         let Some(mid) = state.mid_or_last_ix(ix) else {
             continue;
         };

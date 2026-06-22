@@ -24,8 +24,7 @@ pub fn write_pbar(path: &Path, series: &BarSeries) -> std::io::Result<()> {
     f.write_all(tick_str.as_bytes())?;
     let count = series.len() as u64;
     f.write_all(&count.to_le_bytes())?;
-    for i in 0..series.len() {
-        let bar = series.get(i).expect("bar index");
+    for bar in series.iter() {
         f.write_all(&bar.ts_unix_nanos.to_le_bytes())?;
         f.write_all(&bar.open_ticks.to_le_bytes())?;
         f.write_all(&bar.high_ticks.to_le_bytes())?;
@@ -114,8 +113,7 @@ fn read_i64(bytes: &[u8]) -> i64 {
 pub fn is_pbar_path(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("pbar"))
-        .unwrap_or(false)
+        .is_some_and(|e| e.eq_ignore_ascii_case("pbar"))
 }
 
 #[cfg(test)]

@@ -121,10 +121,7 @@ impl GlobalState {
     pub fn portfolio_equity_for_quote(&self, quote: &Asset) -> Decimal {
         let mut quote_cash_added = false;
         let mut total = Decimal::ZERO;
-        for ix in 0..self.registry.len() {
-            let Some(meta) = self.registry.meta(InstrumentIndex(ix)) else {
-                continue;
-            };
+        for (ix, _, meta) in self.registry.iter() {
             if meta.quote != *quote {
                 continue;
             }
@@ -132,7 +129,7 @@ impl GlobalState {
                 total += self.balances.get(quote).copied().unwrap_or(Decimal::ZERO);
                 quote_cash_added = true;
             }
-            let mid = self.mid_or_last_ix(ix).unwrap_or(Decimal::ZERO);
+            let mid = self.mid_or_last_ix(ix.0).unwrap_or(Decimal::ZERO);
             let base = self
                 .balances
                 .get(&meta.base)
@@ -148,14 +145,11 @@ impl GlobalState {
 
     /// Total portfolio equity across all registered quote currencies.
     pub fn portfolio_equity(&self) -> Decimal {
-        let mut quotes = FxHashSet::default();
-        for ix in 0..self.registry.len() {
-            if let Some(meta) = self.registry.meta(InstrumentIndex(ix)) {
-                quotes.insert(meta.quote.clone());
-            }
-        }
-        quotes
+        self.registry
             .iter()
+            .map(|(_, _, meta)| &meta.quote)
+            .collect::<FxHashSet<_>>()
+            .into_iter()
             .map(|q| self.portfolio_equity_for_quote(q))
             .fold(Decimal::ZERO, |a, b| a + b)
     }

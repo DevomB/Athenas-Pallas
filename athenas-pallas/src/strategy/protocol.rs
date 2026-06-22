@@ -139,58 +139,42 @@ pub fn snapshot_from(
 }
 
 pub fn intents_to_orders(intents: Vec<IntentJson>) -> crate::Result<Vec<OrderIntent>> {
-    let mut out = Vec::with_capacity(intents.len());
+    intents.into_iter().map(intent_to_order).collect()
+}
 
-    for i in intents {
-        let qty: Decimal = i
-            .qty
-            .parse()
-            .map_err(|_| crate::error::Error::Invalid(format!("bad qty {}", i.qty)))?;
+fn intent_to_order(intent: IntentJson) -> crate::Result<OrderIntent> {
+    let qty: Decimal = intent
+        .qty
+        .parse()
+        .map_err(|_| crate::error::Error::Invalid(format!("bad qty {}", intent.qty)))?;
 
-        if qty <= Decimal::ZERO {
-            return Err(crate::error::Error::Invalid("qty must be positive".into()));
-        }
-
-        let price = match i.price {
-            Some(ref p) => Some(
-                p.parse()
-                    .map_err(|_| crate::error::Error::Invalid(format!("bad price {p}")))?,
-            ),
-
-            None => None,
-        };
-
-        let stop_price = match i.stop_price {
-            Some(ref p) => Some(
-                p.parse()
-                    .map_err(|_| crate::error::Error::Invalid(format!("bad stop_price {p}")))?,
-            ),
-
-            None => None,
-        };
-
-        out.push(OrderIntent {
-            instrument: i.instrument,
-
-            side: i.side,
-
-            order_type: i.order_type,
-
-            price,
-
-            stop_price,
-
-            qty,
-
-            client_order_id: i.client_order_id.map(ClientOrderId),
-
-            source: crate::events::OrderIntentSource::User,
-
-            strategy_id: i.strategy_id.map(StrategyId::new),
-        });
+    if qty <= Decimal::ZERO {
+        return Err(crate::error::Error::Invalid("qty must be positive".into()));
     }
 
-    Ok(out)
+    let price = parse_optional_decimal(intent.price.as_deref(), "price")?;
+    let stop_price = parse_optional_decimal(intent.stop_price.as_deref(), "stop_price")?;
+
+    Ok(OrderIntent {
+        instrument: intent.instrument,
+        side: intent.side,
+        order_type: intent.order_type,
+        price,
+        stop_price,
+        qty,
+        client_order_id: intent.client_order_id.map(ClientOrderId),
+        source: crate::events::OrderIntentSource::User,
+        strategy_id: intent.strategy_id.map(StrategyId::new),
+    })
+}
+
+fn parse_optional_decimal(value: Option<&str>, name: &str) -> crate::Result<Option<Decimal>> {
+    value
+        .map(|raw| {
+            raw.parse()
+                .map_err(|_| crate::error::Error::Invalid(format!("bad {name} {raw}")))
+        })
+        .transpose()
 }
 
 #[cfg(test)]

@@ -150,6 +150,42 @@ impl ExternalStrategy {
             }
         }
     }
+
+    fn orders_for_event(
+        &mut self,
+        ctx: &StrategyContext,
+        event: &Event,
+    ) -> Result<Vec<OrderIntent>> {
+        self.seq += 1;
+        let seq = self.seq;
+        let msg = EventMsg {
+            msg: "event".into(),
+            seq,
+            event: event.clone(),
+            ctx: snapshot_from(ctx.state, &self.instrument),
+        };
+        let line = serde_json::to_string(&msg)
+            .map_err(|e| Error::StrategyProtocol(format!("serialize event: {e}")))?;
+        writeln!(self.stdin, "{line}")
+            .and_then(|_| self.stdin.flush())
+            .map_err(|_| Error::StrategyProtocol("write to strategy failed".into()))?;
+        let line = self.read_line_timeout(Duration::from_secs(30))?;
+        let parsed: IntentsMsg = serde_json::from_str(&line)
+            .map_err(|e| Error::StrategyProtocol(format!("parse intents: {e}; line={line}")))?;
+        if parsed.msg != "intents" {
+            return Err(Error::StrategyProtocol(format!(
+                "expected intents, got {}",
+                parsed.msg
+            )));
+        }
+        if parsed.seq != seq {
+            return Err(Error::StrategyProtocol(format!(
+                "seq mismatch expected {seq} got {}",
+                parsed.seq
+            )));
+        }
+        intents_to_orders(parsed.intents)
+    }
 }
 
 fn reader_loop(stdout: ChildStdout, tx: mpsc::Sender<String>) {
@@ -173,56 +209,7 @@ impl Strategy for ExternalStrategy {
         if self.protocol_error.is_some() {
             return;
         }
-        self.seq += 1;
-        let seq = self.seq;
-        let msg = EventMsg {
-            msg: "event".into(),
-            seq,
-            event: event.clone(),
-            ctx: snapshot_from(ctx.state, &self.instrument),
-        };
-        let line = match serde_json::to_string(&msg) {
-            Ok(l) => l,
-            Err(e) => {
-                self.fail(Error::StrategyProtocol(format!("serialize event: {e}")));
-                return;
-            }
-        };
-        if writeln!(self.stdin, "{line}").is_err() || self.stdin.flush().is_err() {
-            self.fail(Error::StrategyProtocol("write to strategy failed".into()));
-            return;
-        }
-        let line = match self.read_line_timeout(Duration::from_secs(30)) {
-            Ok(l) => l,
-            Err(e) => {
-                self.fail(e);
-                return;
-            }
-        };
-        let parsed: IntentsMsg = match serde_json::from_str(&line) {
-            Ok(m) => m,
-            Err(e) => {
-                self.fail(Error::StrategyProtocol(format!(
-                    "parse intents: {e}; line={line}"
-                )));
-                return;
-            }
-        };
-        if parsed.msg != "intents" {
-            self.fail(Error::StrategyProtocol(format!(
-                "expected intents, got {}",
-                parsed.msg
-            )));
-            return;
-        }
-        if parsed.seq != seq {
-            self.fail(Error::StrategyProtocol(format!(
-                "seq mismatch expected {seq} got {}",
-                parsed.seq
-            )));
-            return;
-        }
-        match intents_to_orders(parsed.intents) {
+        match self.orders_for_event(ctx, event) {
             Ok(orders) => out.extend(orders),
             Err(e) => self.fail(e),
         }
