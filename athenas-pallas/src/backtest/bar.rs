@@ -63,22 +63,6 @@ pub struct BarSeries {
 }
 
 impl BarSeries {
-    /// Load OHLCV CSV (`ts,open,high,low,close,volume`) or binary `.pbar` cache.
-    pub fn from_csv_path_or_pbar(path: &Path, tick_size: Decimal) -> std::io::Result<Self> {
-        if super::pbar::is_pbar_path(path) {
-            return super::pbar::read_pbar(path);
-        }
-        let sidecar = path.with_extension("pbar");
-        if sidecar_is_fresh(path, &sidecar) {
-            if let Ok(series) = super::pbar::read_pbar(&sidecar) {
-                return Ok(series);
-            }
-        }
-        let series = Self::from_csv_path(path, tick_size)?;
-        let _ = super::pbar::write_pbar(&sidecar, &series);
-        Ok(series)
-    }
-
     /// Build from pre-encoded bars (e.g. after reading `.pbar`).
     pub fn from_bars(bars: Vec<Bar>, tick_size: Decimal) -> Self {
         Self { bars, tick_size }
@@ -191,16 +175,6 @@ impl BarSeries {
     }
 }
 
-fn sidecar_is_fresh(csv_path: &Path, sidecar_path: &Path) -> bool {
-    let Ok(csv_modified) = std::fs::metadata(csv_path).and_then(|m| m.modified()) else {
-        return false;
-    };
-    let Ok(sidecar_modified) = std::fs::metadata(sidecar_path).and_then(|m| m.modified()) else {
-        return false;
-    };
-    sidecar_modified >= csv_modified
-}
-
 /// Walk a preloaded series by index.
 pub struct BarSeriesSource {
     series: BarSeries,
@@ -309,26 +283,5 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data/BTCUSDT_1d.csv");
         let s = BarSeries::from_csv_path(&path, default_tick_size()).expect("csv");
         assert_eq!(s.len(), 90);
-    }
-
-    #[test]
-    fn csv_sidecar_pbar_is_reused_when_fresh() {
-        let dir = std::env::temp_dir().join("pallas_bar_sidecar_test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let csv = dir.join("bars.csv");
-        std::fs::write(
-            &csv,
-            "ts,open,high,low,close,volume\n2024-01-01,1,2,1,2,10\n",
-        )
-        .unwrap();
-        let pbar = csv.with_extension("pbar");
-        let _ = std::fs::remove_file(&pbar);
-
-        let first = BarSeries::from_csv_path_or_pbar(&csv, default_tick_size()).unwrap();
-        assert_eq!(first.len(), 1);
-        assert!(pbar.is_file());
-
-        let second = BarSeries::from_csv_path_or_pbar(&csv, default_tick_size()).unwrap();
-        assert_eq!(second.len(), 1);
     }
 }

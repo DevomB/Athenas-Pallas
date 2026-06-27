@@ -43,6 +43,38 @@ pub enum DataFormat {
     Future,
 }
 
+impl DataFormat {
+    /// Parse user-facing data-format aliases.
+    pub fn parse(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "ohlcv" => Self::Ohlcv,
+            "yahoo" => Self::Yahoo,
+            "fx" => Self::Fx,
+            "future" | "futures" => Self::Future,
+            _ => Self::Auto,
+        }
+    }
+}
+
+/// Parse user-facing asset-class aliases.
+pub fn parse_asset_class(s: &str) -> AssetClass {
+    match s.to_ascii_lowercase().as_str() {
+        "equity" => AssetClass::Equity,
+        "forex" | "fx" => AssetClass::Forex,
+        "future" | "futures" => AssetClass::Future,
+        "option" | "options" => AssetClass::Option,
+        "perpetual" | "perp" => AssetClass::Perpetual,
+        "bond" | "bonds" => AssetClass::Bond,
+        "hybrid" => AssetClass::Hybrid,
+        _ => AssetClass::Crypto,
+    }
+}
+
+/// Parse user-facing data-format aliases.
+pub fn parse_data_format(s: &str) -> DataFormat {
+    DataFormat::parse(s)
+}
+
 /// Optional progress callback for CLI/integration consumers (`bar N` messages).
 pub type ProgressHook = Arc<dyn Fn(&str) + Send + Sync>;
 
@@ -313,4 +345,17 @@ fn instrument_meta_from_fields_with_assets(
         meta.margin_initial_rate = margin_initial_rate;
     }
     meta
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_user_facing_enums() {
+        assert_eq!(parse_asset_class("perp"), AssetClass::Perpetual);
+        assert_eq!(parse_asset_class("options"), AssetClass::Option);
+        assert_eq!(parse_data_format("futures"), DataFormat::Future);
+        assert_eq!(parse_data_format("unknown"), DataFormat::Auto);
+    }
 }

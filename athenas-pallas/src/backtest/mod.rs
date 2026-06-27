@@ -323,7 +323,10 @@ pub use bar::{
     decimal_to_ticks, default_tick_size, ticks_to_decimal, Bar, BarSeries, BarSeriesSource,
 };
 pub use batch::{run_scenarios_parallel_sync, run_scenarios_serial, RunReport, Scenario};
-pub use config::{parse_base_quote, parse_instrument, BacktestConfig, DataFormat, ExtraInstrument};
+pub use config::{
+    parse_asset_class, parse_base_quote, parse_data_format, parse_instrument, BacktestConfig,
+    DataFormat, ExtraInstrument,
+};
 pub use cpp_build::build_cpp_strategy;
 pub use interval::{
     default_periods_per_year, infer_periods_per_year_from_spacing,

@@ -6,12 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use super::config::{instrument_meta_from_config, BacktestConfig, DataFormat, ExtraInstrument};
+use super::config::{
+    instrument_meta_from_config, parse_asset_class, parse_data_format, BacktestConfig,
+    ExtraInstrument,
+};
 use super::cpp_build::build_cpp_strategy;
 use super::report::BacktestReport;
 use super::runner::BacktestRunner;
 use super::strategy_resolver::{resolve_strategy_path, ResolvedStrategy};
-use crate::instrument::AssetClass;
 use crate::strategy::ExternalStrategy;
 use crate::types::Asset;
 
@@ -74,29 +76,6 @@ pub fn run_external_backtest_with_cancel(
     let report = BacktestRunner::run_with_strategy_with_cancel(cfg, &mut ext, cancel)?;
     ext.take_error()?;
     Ok(report)
-}
-
-fn parse_asset_class(s: &str) -> AssetClass {
-    match s.to_lowercase().as_str() {
-        "equity" => AssetClass::Equity,
-        "forex" | "fx" => AssetClass::Forex,
-        "future" | "futures" => AssetClass::Future,
-        "option" | "options" => AssetClass::Option,
-        "perpetual" | "perp" => AssetClass::Perpetual,
-        "bond" | "bonds" => AssetClass::Bond,
-        "hybrid" => AssetClass::Hybrid,
-        _ => AssetClass::Crypto,
-    }
-}
-
-fn parse_data_format(s: &str) -> DataFormat {
-    match s.to_lowercase().as_str() {
-        "ohlcv" => DataFormat::Ohlcv,
-        "yahoo" => DataFormat::Yahoo,
-        "fx" => DataFormat::Fx,
-        "future" | "futures" => DataFormat::Future,
-        _ => DataFormat::Auto,
-    }
 }
 
 fn parse_decimal_opt(s: &str) -> Option<Decimal> {
@@ -246,7 +225,7 @@ fn apply_table(
             let ac = tbl
                 .get("asset_class")
                 .and_then(|v| v.as_str())
-                .map_or(AssetClass::Crypto, parse_asset_class);
+                .map_or(crate::instrument::AssetClass::Crypto, parse_asset_class);
             let mut extra = ExtraInstrument {
                 instrument: crate::types::InstrumentId::new(ex, sym),
                 asset_class: ac,
@@ -307,6 +286,7 @@ fn spawn_external_strategy(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backtest::DataFormat;
 
     #[test]
     fn load_toml_example_fields() {

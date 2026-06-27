@@ -1,7 +1,8 @@
 //! Run a CSV backtest with optional external strategy script.
 
 use athenas_pallas::backtest::{
-    parse_instrument, run_backtest, run_external_backtest, BacktestConfig, DataFormat,
+    parse_asset_class, parse_data_format, parse_instrument, run_backtest, run_external_backtest,
+    BacktestConfig,
 };
 use clap::Parser;
 use rust_decimal::Decimal;
@@ -80,25 +81,6 @@ fn parse_balance(s: &str) -> Result<(String, String), String> {
     Ok((a.to_string(), v.to_string()))
 }
 
-fn parse_asset_class(s: &str) -> athenas_pallas::instrument::AssetClass {
-    match s.to_lowercase().as_str() {
-        "equity" => athenas_pallas::instrument::AssetClass::Equity,
-        "forex" | "fx" => athenas_pallas::instrument::AssetClass::Forex,
-        "future" | "futures" => athenas_pallas::instrument::AssetClass::Future,
-        _ => athenas_pallas::instrument::AssetClass::Crypto,
-    }
-}
-
-fn parse_data_format(s: &str) -> DataFormat {
-    match s.to_lowercase().as_str() {
-        "ohlcv" => DataFormat::Ohlcv,
-        "yahoo" => DataFormat::Yahoo,
-        "fx" => DataFormat::Fx,
-        "future" | "futures" => DataFormat::Future,
-        _ => DataFormat::Auto,
-    }
-}
-
 fn parse_balances(
     rows: &[(String, String)],
 ) -> Result<HashMap<athenas_pallas::types::Asset, Decimal>, Box<dyn std::error::Error>> {
@@ -174,6 +156,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 #[cfg(feature = "databento")]
                 {
+                    use athenas_pallas::backtest::DataFormat;
                     use athenas_pallas::data::databento::{
                         cache_path, ensure_cached_csv, parse_datetime, DatabentoFetchConfig,
                         DatabentoOhlcvSchema, DatabentoSType,
