@@ -2,8 +2,12 @@
 *.csv text eol=lf
 *.jsonl text eol=lf
 
-# Exclude C++ strategy SDK and examples from GitHub language stats (Linguist).
+# Exclude strategy SDK, examples, and docs from GitHub language stats (Linguist).
 trading/_sdk/cpp/** linguist-vendored
+trading/_sdk/python/** linguist-vendored
 trading/*_cpp/** linguist-vendored
+trading/**/strategy.py linguist-vendored
+trading/**/main.py linguist-vendored
 trading/protocol.md linguist-documentation
 trading/_template/** linguist-documentation
+trading/**/README.md linguist-documentation
