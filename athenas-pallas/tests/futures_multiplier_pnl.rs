@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 fn write_es_fixture(path: &PathBuf) {
     let mut f = std::fs::File::create(path).unwrap();
-    writeln!(f, "Date,Open,High,Low,Close,Volume").unwrap();
+    writeln!(f, "ts,open,high,low,close,volume").unwrap();
     writeln!(f, "2024-01-02,5000,5010,4990,5000,100000").unwrap();
     writeln!(f, "2024-01-03,5000,5020,4995,5010,100000").unwrap();
 }
@@ -27,7 +27,7 @@ fn futures_pnl_scales_by_multiplier() {
 
     let spot_cfg = BacktestConfig {
         data_path: csv.clone(),
-        data_format: DataFormat::Future,
+        data_format: DataFormat::Ohlcv,
         instrument: instrument.clone(),
         asset_class: AssetClass::Crypto,
         balances: balances.clone(),

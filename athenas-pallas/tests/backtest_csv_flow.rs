@@ -10,7 +10,7 @@ use athenas_pallas::metrics::summarize;
 use athenas_pallas::risk::{PauseCheck, RiskEngine};
 use athenas_pallas::state::{GlobalState, InstrumentRegistry};
 use athenas_pallas::types::{EquityPoint, ExchangeId, Symbol};
-use athenas_pallas::{CsvBarSource, HistoricalSource};
+use athenas_pallas::{default_tick_size, BarSeries, BarSeriesSource, HistoricalSource};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use std::path::PathBuf;
@@ -38,12 +38,8 @@ fn csv_replay_buy_and_hold() {
     let risk = RiskEngine::new(vec![Box::new(PauseCheck)]);
     let exec = PaperExecution::new(PaperConfig::default());
 
-    let mut src = CsvBarSource::from_path(
-        &sample_csv(),
-        ExchangeId("test".into()),
-        Symbol("BTCUSDT".into()),
-    )
-    .expect("csv");
+    let series = BarSeries::from_csv_path(&sample_csv(), default_tick_size()).expect("csv");
+    let mut src = BarSeriesSource::new(series, ExchangeId("test".into()), Symbol("BTCUSDT".into()));
 
     let mut curve: Vec<EquityPoint> = Vec::new();
     let mut intents = Vec::new();

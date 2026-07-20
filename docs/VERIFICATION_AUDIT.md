@@ -96,7 +96,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 | `lot_size` / `tick_size` enforced at submission | **DONE** | `normalize_order` in `execution/fills.rs` |
 | Auto `periods_per_year` | **DONE** | `runner.rs` + `interval.rs` |
 | Built-in data downloader | **REMOVED** | Historical downloader code and CLI are no longer part of the crate |
-| CSV schemas per asset class | **DONE** | `data/README.md` (updated: Adj Close, FX sources, bonds, futures) |
+| Replay schemas | **DONE** | `data/README.md` documents canonical OHLCV/pbar and FX L1 inputs |
 
 ### Phase 0b - Portfolio performance
 
@@ -160,7 +160,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 | Desktop equity curve >50k bars | **REMOVED** | Desktop app removed; CLI reports keep full engine output |
 | Protocol strategy_id / client order id | **DONE** | `strategy/protocol.rs`, `trading/protocol.md` |
 | Sharpe/Sortino minus risk-free | **DONE** | `summarize_with_fills_and_rf` |
-| Yahoo Adj Close | **DONE** | `yahoo.rs` `effective_close()` |
+| Canonical bar schema | **DONE** | All bar asset classes use raw `ts,open,high,low,close,volume` input |
 | Disconnected IndexedInstruments API | **removed** | Runtime registry is the single dense instrument index. |
 | SQLite/JSON result persistence | **NOT DONE** | DSQL schema only; runner writes JSON report |
 | Extra gaps table closed | **NOT DONE** | See below |
@@ -181,7 +181,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 | Sharpe ignores risk-free | **fixed** |
 | Desktop skips equity >50k | **removed with desktop app** |
 | DSQL never written | **not done** |
-| Yahoo Adj Close ignored | **fixed** |
+| Mixed vendor-specific bar schemas | **removed** |
 | No corporate-action table | **wontfix** (deferred) |
 | batch.rs no CLI | **fixed** (`pallas-sweep`) |
 | JSONL replay undocumented | **partial** - not in main README |
@@ -196,7 +196,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 1. Fixed compile: `InstrumentKind::Option` strike `String` -> `Decimal` in `index.rs`
 2. Fixed option TOML meta: strike vs tick increment in `config.rs`
 3. Corrected `docs/PERFORMANCE.md` (removed false CI regression claim)
-4. Updated `data/README.md` (Adj Close, FX, bonds)
+4. Updated `data/README.md` (canonical bars, FX, bonds)
 5. Added `[[instruments]]` comment to `backtest.toml.example`
 6. Re-ran full test suite - pass
 7. Reset session todos to honest statuses

@@ -31,7 +31,7 @@ pub mod types;
 
 pub use bar::{
     decimal_to_ticks, default_tick_size, parse_timestamp, ticks_to_decimal, Bar, BarSeries,
-    BarSeriesSource, CsvBarSource, OhlcvRow,
+    BarSeriesSource, OhlcvRow,
 };
 pub use engine::{
     dispatch_event_sync, dispatch_replay_bar_sync, dispatch_replay_sync, dispatch_strategy_sync,

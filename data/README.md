@@ -6,6 +6,11 @@ This folder is your workspace for local market-history files. Nothing here is co
 
 Export or copy a CSV into this directory, then point `pallas-backtest --data` or `[backtest].data` in your TOML at that file.
 
+Databento caches contain the raw OHLCV values returned by its market-data schema, converted only
+from fixed-point integers to decimal text. The engine does not apply split or dividend adjustment
+factors; adjustment-factor ingestion is a separate future feature. `raw_symbol` selects input
+symbology and does not imply adjusted prices.
+
 ## Resample offline
 
 Aggregate a finer CSV to a coarser interval (tools crate):
@@ -39,9 +44,9 @@ ts,open,high,low,close,volume
 
 Set `asset_class = "crypto"`. For Sharpe annualization, set `bar_interval = "1h"` or enable `auto_periods_per_year = true` in TOML. Set explicit `base_asset` / `quote_asset` when the symbol does not encode them (e.g. `BTC` / `USDT`).
 
-### Equities (`DataFormat::Ohlcv` or `yahoo`)
+### Equities (`DataFormat::Ohlcv`)
 
-Use OHLCV `ts,open,high,low,close,volume` or Yahoo `Date,Open,High,Low,Close,Volume` exports.
+Use the canonical OHLCV columns above.
 
 Set `asset_class = "equity"`. Optional `session_filter = "equity_rth"` filters to US regular hours if you import intraday bars.
 
@@ -72,7 +77,7 @@ Bond economics use config metadata; CSV can match OHLCV layout for price history
 
 Coupons are applied on scheduled dates during replay (`backtest/lifecycle.rs`). **Yield/duration reporting is not yet implemented.**
 
-### Futures (`DataFormat::Future`)
+### Futures (`AssetClass::Future`)
 
 Same columns as OHLCV. Contract economics come from config, not the CSV.
 
@@ -82,7 +87,7 @@ Required TOML instrument fields:
 - `tick_size` (e.g. `0.25`)
 - optional `lot_size`, `expiry`
 
-Set `asset_class = "future"`, `data_format = "future"`.
+Set `asset_class = "future"`, `data_format = "ohlcv"`.
 
 ## Backtest config hints
 
@@ -96,7 +101,7 @@ quote_asset = "USD"
 
 [backtest]
 data = "data/EXAMPLE_1d.csv"
-data_format = "yahoo"
+data_format = "ohlcv"
 bar_interval = "1d"
 auto_periods_per_year = true
 session_filter = "none"   # or equity_rth, forex_245

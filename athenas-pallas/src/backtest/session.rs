@@ -97,7 +97,7 @@ mod tests {
             .join("backtest.toml.example");
         let cfg = BacktestConfig::load_toml(&path).unwrap();
         assert_eq!(cfg.instrument.symbol, "EXAMPLE");
-        assert_eq!(cfg.data_format, DataFormat::Yahoo);
+        assert_eq!(cfg.data_format, DataFormat::Ohlcv);
         assert_eq!(cfg.base_asset.as_deref(), Some("EXAMPLE"));
         assert_eq!(cfg.quote_asset.as_deref(), Some("USD"));
         assert_eq!(cfg.buy_and_hold_qty, Some(Decimal::ONE));

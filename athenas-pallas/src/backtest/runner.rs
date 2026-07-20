@@ -11,12 +11,11 @@ use super::config::{
 };
 use super::lifecycle::apply_bar_lifecycle;
 use super::merge::merge_sources_iter;
-use super::pbar::is_pbar_path;
 use super::report::{
     report_from_summary, BacktestParameters, BacktestReport, DataMetadata, DataSourceMetadata,
     FinalPosition, PendingOrder, ReportDetails,
 };
-use super::source_loader::{detect_format, load_all_sources, load_source};
+use super::source_loader::{load_all_sources, load_source, resolve_format};
 use crate::bar::{default_tick_size, BarSeries, BarSeriesSource};
 use crate::calendar::{is_session_open, SessionFilter};
 use crate::dispatch_replay_sync;
@@ -217,10 +216,7 @@ impl<'a> ReplayRun<'a> {
             .0;
         state.synthetic_half_spread_bps = cfg.half_spread_bps;
         let risk = configure_risk(cfg, &meta, &mut state);
-        let format = match cfg.data_format {
-            DataFormat::Auto => detect_format(&cfg.data_path)?,
-            other => other,
-        };
+        let format = resolve_format(&cfg.data_path, cfg.data_format)?;
         let series = load_bar_series(cfg, format)?;
         let periods_per_year = resolve_periods_per_year(cfg, series.as_ref());
         let capacity = series.as_ref().map_or(1, BarSeries::len);
@@ -488,7 +484,7 @@ fn configure_risk(
 }
 
 fn load_bar_series(cfg: &BacktestConfig, format: DataFormat) -> crate::Result<Option<BarSeries>> {
-    if format == DataFormat::Ohlcv || is_pbar_path(&cfg.data_path) {
+    if format == DataFormat::Ohlcv {
         BarSeries::from_csv_path_or_pbar(&cfg.data_path, default_tick_size())
             .map(Some)
             .map_err(crate::Error::Io)
@@ -592,13 +588,19 @@ fn report_data(
         format: data_format_name(format).into(),
     }];
     sources.extend(cfg.extra_instruments.iter().map(|extra| {
+        let configured = extra.data_format.unwrap_or(DataFormat::Auto);
+        let format = extra
+            .data_path
+            .as_deref()
+            .and_then(|path| resolve_format(path, configured).ok())
+            .unwrap_or(configured);
         DataSourceMetadata {
             instrument: extra.instrument.clone(),
             path: extra
                 .data_path
                 .as_ref()
                 .map(|path| path.display().to_string()),
-            format: data_format_name(extra.data_format.unwrap_or(DataFormat::Auto)).into(),
+            format: data_format_name(format).into(),
         }
     }));
     DataMetadata {
@@ -679,9 +681,7 @@ fn data_format_name(format: DataFormat) -> &'static str {
     match format {
         DataFormat::Auto => "auto",
         DataFormat::Ohlcv => "ohlcv",
-        DataFormat::Yahoo => "yahoo",
         DataFormat::Fx => "fx",
-        DataFormat::Future => "future",
     }
 }
 

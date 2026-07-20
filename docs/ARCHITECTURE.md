@@ -27,7 +27,7 @@ flowchart LR
 
 | Layer | Crate path | Role |
 |-------|------------|------|
-| Data | `backtest/sources` | Normalize CSV layouts (OHLCV, Yahoo, FX L1, futures) |
+| Data | `bar.rs`, `backtest/sources` | Load canonical OHLCV/pbar data and normalize FX L1 quotes |
 | Replay | `backtest/runner`, `backtest/merge`, `engine/replay` | Deterministic historical event stream and streaming k-way source merge |
 | State | `state.rs` | Balances, positions, L1/L2, fills |
 | Execution | `execution/fills.rs`, `execution/sync_paper.rs` | Simulated fills, fees, margin-aware cash flows |

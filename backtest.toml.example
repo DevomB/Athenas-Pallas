@@ -9,7 +9,7 @@ quote_asset = "USD"
 
 [backtest]
 data = "data/EXAMPLE_1d.csv"
-data_format = "yahoo"
+data_format = "ohlcv"
 fee_bps = 10
 slippage_bps = 5
 half_spread_bps = 5
@@ -32,7 +32,7 @@ slow_window = 20
 # Optional extra symbols for merged multi-instrument replay:
 # [[instruments]]
 # exchange = "test"
-# symbol = "AAPL"
+# symbol = "SECOND"
 # asset_class = "equity"
-# data = "data/AAPL_1d.csv"
-# data_format = "yahoo"
+# data = "data/SECOND_1d.csv"
+# data_format = "ohlcv"

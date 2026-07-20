@@ -38,9 +38,7 @@ pub enum DataFormat {
     #[default]
     Auto,
     Ohlcv,
-    Yahoo,
     Fx,
-    Future,
 }
 
 impl DataFormat {
@@ -49,9 +47,7 @@ impl DataFormat {
         match s.to_ascii_lowercase().as_str() {
             "auto" => Ok(Self::Auto),
             "ohlcv" => Ok(Self::Ohlcv),
-            "yahoo" => Ok(Self::Yahoo),
             "fx" => Ok(Self::Fx),
-            "future" | "futures" => Ok(Self::Future),
             _ => Err(format!("unsupported data format `{s}`")),
         }
     }
@@ -350,7 +346,8 @@ mod tests {
     fn parses_user_facing_enums() {
         assert_eq!(parse_asset_class("perp"), Ok(AssetClass::Perpetual));
         assert_eq!(parse_asset_class("options"), Ok(AssetClass::Option));
-        assert_eq!(parse_data_format("futures"), Ok(DataFormat::Future));
+        assert_eq!(parse_asset_class("futures"), Ok(AssetClass::Future));
+        assert!(parse_data_format("future").is_err());
         assert!(parse_data_format("unknown").is_err());
     }
 }

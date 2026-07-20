@@ -90,27 +90,21 @@ pub fn merge_sources_iter(sources: &mut [Box<dyn HistoricalSource>]) -> MergedSo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::sources::YahooCsvSource;
-    use crate::bar::CsvBarSource;
+    use crate::bar::{default_tick_size, BarSeries, BarSeriesSource};
     use crate::events::MarketEvent;
     use crate::types::{ExchangeId, Symbol};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    fn source(base: &Path, file: &str, exchange: &str, symbol: &str) -> BarSeriesSource {
+        let series = BarSeries::from_csv_path(&base.join(file), default_tick_size()).unwrap();
+        BarSeriesSource::new(series, ExchangeId::new(exchange), Symbol::new(symbol))
+    }
 
     #[test]
     fn merge_two_csvs_by_ts() {
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data");
-        let a = CsvBarSource::from_path(
-            &base.join("BTCUSDT_1d.csv"),
-            ExchangeId::new("test"),
-            Symbol::new("BTCUSDT"),
-        )
-        .unwrap();
-        let b = YahooCsvSource::from_path(
-            &base.join("AAPL_1d.csv"),
-            ExchangeId::new("yahoo"),
-            Symbol::new("AAPL"),
-        )
-        .unwrap();
+        let a = source(&base, "BTCUSDT_1d.csv", "test", "BTCUSDT");
+        let b = source(&base, "EXAMPLE_1d.csv", "test", "EXAMPLE");
         let mut sources: Vec<Box<dyn HistoricalSource>> = vec![Box::new(a), Box::new(b)];
         let merged: Vec<_> = merge_sources_iter(&mut sources).collect();
         assert!(!merged.is_empty());
@@ -127,18 +121,8 @@ mod tests {
     #[test]
     fn merge_iterator_streams_in_order() {
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data");
-        let a = CsvBarSource::from_path(
-            &base.join("BTCUSDT_1d.csv"),
-            ExchangeId::new("test"),
-            Symbol::new("BTCUSDT"),
-        )
-        .unwrap();
-        let b = YahooCsvSource::from_path(
-            &base.join("AAPL_1d.csv"),
-            ExchangeId::new("yahoo"),
-            Symbol::new("AAPL"),
-        )
-        .unwrap();
+        let a = source(&base, "BTCUSDT_1d.csv", "test", "BTCUSDT");
+        let b = source(&base, "EXAMPLE_1d.csv", "test", "EXAMPLE");
         let mut sources: Vec<Box<dyn HistoricalSource>> = vec![Box::new(a), Box::new(b)];
         let mut prev = None;
         let mut count = 0usize;

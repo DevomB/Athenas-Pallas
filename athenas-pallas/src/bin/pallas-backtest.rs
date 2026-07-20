@@ -54,7 +54,11 @@ struct Args {
     strategy: Option<PathBuf>,
     #[arg(long, default_value = "python")]
     python: String,
-    #[arg(long, default_value = "auto")]
+    #[arg(
+        long,
+        default_value = "auto",
+        help = "Input layout: auto, ohlcv, or fx"
+    )]
     data_format: String,
     #[arg(long, default_value = "equity")]
     asset_class: String,

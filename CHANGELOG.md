@@ -71,8 +71,7 @@
   futures fee notional uses `contract_multiplier`; initial margin via `margin_required`; perp
   funding and bond-coupon lifecycle hooks; European option exercise at expiry.
 - Multi-instrument backtests through `[[instruments]]` config plus a streaming k-way source merge;
-  FX L1 and Yahoo (`Adj Close`) data sources; `pallas-merge`, `pallas-resample`, and `pallas-sweep`
-  CLIs.
+  canonical OHLCV and FX L1 sources; `pallas-resample` and `pallas-sweep` CLIs.
 - Reporting: risk-free-adjusted Sharpe/Sortino, trade ledger (win rate, profit factor, closed
   round-trips), and automatic periods-per-year inference from bar spacing.
 

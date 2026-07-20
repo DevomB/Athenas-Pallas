@@ -119,6 +119,11 @@ cargo run --release -p athenas-pallas --features databento --bin pallas-backtest
 
 Set `DATABENTO_API_KEY` in the repo-root `.env` before fetching uncached data. Use `--estimate-only` to check vendor cost without downloading.
 
+Databento cache export preserves the raw OHLCV values returned by the selected market-data schema;
+the engine only converts Databento fixed-point integers to decimal CSV text. It does not apply
+split or dividend adjustment factors. Adjustment-factor support is a separate future feature, and
+`raw_symbol` refers to input symbology rather than adjusted prices.
+
 ## Project Layout
 
 | Path | Purpose |

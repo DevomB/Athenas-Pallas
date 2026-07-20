@@ -4,7 +4,7 @@ use athenas_pallas::OhlcvRow;
 use clap::Parser;
 use rust_decimal::Decimal;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use time::OffsetDateTime;
 
@@ -14,7 +14,7 @@ use time::OffsetDateTime;
     about = "Aggregate OHLCV CSV to a coarser interval"
 )]
 struct Args {
-    /// Input CSV (`ts,open,high,low,close,volume` or Yahoo `Date,...`).
+    /// Input CSV (`ts,open,high,low,close,volume`).
     #[arg(long)]
     input: PathBuf,
     /// Target interval: `5m`, `15m`, `30m`, `1h`, `4h`, `1d`.
@@ -56,40 +56,20 @@ struct ParsedRow {
 }
 
 fn load_rows(path: &PathBuf) -> Result<Vec<ParsedRow>, Box<dyn std::error::Error>> {
-    use athenas_pallas::backtest::sources::{headers_are_yahoo, read_yahoo_rows};
-
-    let mut buf = String::new();
-    std::io::Read::read_to_string(&mut File::open(path)?, &mut buf)?;
-    let mut rdr = csv::Reader::from_reader(buf.as_bytes());
-    let headers = rdr.headers()?.clone();
+    let mut rdr = csv::Reader::from_reader(BufReader::new(File::open(path)?));
     let mut out = Vec::new();
-    if headers_are_yahoo(&headers) {
-        for row in read_yahoo_rows(&mut rdr)? {
-            let ts = athenas_pallas::parse_timestamp(&row.date)
-                .ok_or_else(|| format!("bad timestamp: {}", row.date))?;
-            out.push(ParsedRow {
-                ts,
-                open: row.open,
-                high: row.high,
-                low: row.low,
-                close: row.effective_close(),
-                volume: row.volume,
-            });
-        }
-    } else {
-        for rec in rdr.deserialize::<OhlcvRow>() {
-            let row: OhlcvRow = rec?;
-            let ts = athenas_pallas::parse_timestamp(&row.ts)
-                .ok_or_else(|| format!("bad timestamp: {}", row.ts))?;
-            out.push(ParsedRow {
-                ts,
-                open: row.open,
-                high: row.high,
-                low: row.low,
-                close: row.close,
-                volume: row.volume,
-            });
-        }
+    for rec in rdr.deserialize::<OhlcvRow>() {
+        let row = rec?;
+        let ts = athenas_pallas::parse_timestamp(&row.ts)
+            .ok_or_else(|| format!("bad timestamp: {}", row.ts))?;
+        out.push(ParsedRow {
+            ts,
+            open: row.open,
+            high: row.high,
+            low: row.low,
+            close: row.close,
+            volume: row.volume,
+        });
     }
     Ok(out)
 }

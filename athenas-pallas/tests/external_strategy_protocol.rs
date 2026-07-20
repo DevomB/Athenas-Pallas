@@ -160,7 +160,7 @@ while True:
         .strategy_parameters
         .insert("window".into(), 20.into());
     config.extra_instruments.push(ExtraInstrument {
-        instrument: athenas_pallas::types::InstrumentId::new("yahoo", "AAPL"),
+        instrument: athenas_pallas::types::InstrumentId::new("nasdaq", "AAPL"),
         asset_class: AssetClass::Equity,
         lot_size: Some(Decimal::ONE),
         tick_size: Some(Decimal::new(1, 2)),

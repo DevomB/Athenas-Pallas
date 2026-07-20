@@ -17,7 +17,7 @@ expiry = "2025-03"
 
 [backtest]
 data = "data/ES_1d.csv"
-data_format = "future"
+data_format = "ohlcv"
 fee_bps = 10
 slippage_bps = 5
 half_spread_bps = 8
@@ -37,7 +37,7 @@ amount = "100000"
     assert_eq!(cfg.instrument.symbol, "ES");
     assert_eq!(cfg.asset_class, AssetClass::Future);
     assert_eq!(cfg.contract_multiplier, Some(Decimal::from(50u64)));
-    assert_eq!(cfg.data_format, DataFormat::Future);
+    assert_eq!(cfg.data_format, DataFormat::Ohlcv);
     assert_eq!(
         cfg.balances.get(&Asset("USD".into())),
         Some(&Decimal::from(100_000u64))

@@ -173,7 +173,7 @@ Strong resume bullets should be tied to measured outcomes:
 - "Implemented cache-friendly fixed-point OHLCV replay using contiguous `repr(C)` bars and binary sidecar caches."
 - "Reduced multi-instrument replay memory from materialized event vectors to streaming k-way merge with one pending event per source."
 - "Designed a benchmark-backed order-trigger index reducing passive fill checks from O(bars * orders) to O(log orders + fills)."
-- "Kept the replay core provider-neutral by normalizing vendor data into local OHLCV/Yahoo/FX/futures CSV or pbar inputs before backtesting."
+- "Kept the replay core provider-neutral by normalizing vendor bars into canonical local OHLCV/pbar inputs before backtesting."
 
 ## Verification Plan
 
