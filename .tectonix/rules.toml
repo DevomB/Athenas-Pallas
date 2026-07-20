@@ -1,0 +1,25 @@
+[constraints]
+min_quality = 0.70
+min_modularity = 0.38
+min_equality = 0.56
+min_redundancy = 0.90
+max_cycles = 0
+max_cc = 20
+max_fn_lines = 80
+no_god_files = true
+max_upward_violations = 0
+
+[[layers]]
+name = "application"
+paths = ["athenas-pallas/src/backtest/**", "athenas-pallas/src/bin/**", "tools/**"]
+order = 0
+
+[[layers]]
+name = "engine"
+paths = ["athenas-pallas/src/engine/**", "athenas-pallas/src/execution/**", "athenas-pallas/src/risk.rs", "athenas-pallas/src/state.rs"]
+order = 1
+
+[[layers]]
+name = "domain"
+paths = ["athenas-pallas/src/events.rs", "athenas-pallas/src/types.rs", "athenas-pallas/src/instrument/**"]
+order = 2

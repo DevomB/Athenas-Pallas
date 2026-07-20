@@ -25,7 +25,9 @@ jobs:
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: doctests
+        run: cargo test --workspace --all-features --doc
       - name: test athenas-pallas
         run: cargo test -p athenas-pallas
       - name: build tools
@@ -36,6 +38,18 @@ jobs:
         run: python trading/_sdk/python/test_pallas_strategy.py
       - name: build examples
         run: cargo build -p athenas-pallas --examples
+
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned Tectonix
+        run: cargo install --git https://github.com/DevomB/Tectonix --rev 430b008a --locked tectonix
+      - name: Scan repository root
+        run: tectonix scan .
+      - name: Enforce architecture rules
+        run: tectonix check-rules .
 
   cpp-golden:
     runs-on: ubuntu-latest
