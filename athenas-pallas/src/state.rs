@@ -444,6 +444,11 @@ impl GlobalState {
         }
         self.fill_count += 1;
         if let Some(ts) = self.last_event_ts {
+            let contract_multiplier = self
+                .registry
+                .meta(InstrumentIndex(ix))
+                .and_then(|meta| meta.contract_multiplier)
+                .map(|value| value.to_string());
             self.fill_log.push(FillRecord {
                 ts,
                 order_id: order_id.clone(),
@@ -452,6 +457,7 @@ impl GlobalState {
                 qty: qty.to_string(),
                 price: price.to_string(),
                 fee: fee.to_string(),
+                contract_multiplier,
                 client_order_id: client_order_id.clone(),
                 oco_group: oco_group.clone(),
                 strategy_id: strategy_id.clone(),

@@ -43,9 +43,7 @@ pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, StrategyId, Symbol,
 
 pub use execution::{PaperConfig, PaperExecution, SyncExecutionGateway};
 pub use instrument::{InstrumentIndex, InstrumentMeta, InstrumentRegistry};
-pub use metrics::{
-    strategy_position_report, trading_summaries_per_strategy, StrategyPositionRow, TradingSummary,
-};
+pub use metrics::{strategy_position_report, StrategyPositionRow};
 pub use oms::OrderStore;
 pub use results::{append_results_jsonl, write_backtest_json, write_backtest_outputs};
 pub use source::HistoricalSource;

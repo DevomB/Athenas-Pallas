@@ -1,8 +1,6 @@
 //! Equity-curve and fill-ledger performance statistics.
 
-use super::positions::{strategy_position_report, StrategyPositionRow};
 use crate::events::FillRecord;
-use crate::state::GlobalState;
 use crate::types::{EquityPoint, Side, StrategyId};
 use rust_decimal::prelude::{Signed, ToPrimitive};
 use rust_decimal::Decimal;
@@ -320,13 +318,13 @@ fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecor
     let mut ledger = TradeLedger::default();
 
     for fill in fills {
-        let Some((qty, price, fee)) = parsed_fill(fill) else {
+        let Some((qty, price, fee, multiplier)) = parsed_fill(fill) else {
             continue;
         };
         let position = positions
             .entry(&fill.instrument)
             .or_insert_with(OpenPosition::default);
-        if let Some(pnl) = position.apply(fill.side, qty, price, fee) {
+        if let Some(pnl) = position.apply(fill.side, qty, price, fee, multiplier) {
             ledger.record_close(pnl);
         }
     }
@@ -334,11 +332,17 @@ fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecor
     ledger.finish()
 }
 
-fn parsed_fill(fill: &FillRecord) -> Option<(Decimal, Decimal, Decimal)> {
+fn parsed_fill(fill: &FillRecord) -> Option<(Decimal, Decimal, Decimal, Decimal)> {
     let qty = fill.qty.parse::<Decimal>().ok()?;
     let price = fill.price.parse::<Decimal>().ok()?;
     let fee = fill.fee.parse::<Decimal>().ok()?;
-    (qty > Decimal::ZERO).then_some((qty, price, fee))
+    let multiplier = fill
+        .contract_multiplier
+        .as_deref()
+        .unwrap_or("1")
+        .parse::<Decimal>()
+        .ok()?;
+    (qty > Decimal::ZERO && multiplier > Decimal::ZERO).then_some((qty, price, fee, multiplier))
 }
 
 #[derive(Default)]
@@ -349,7 +353,14 @@ struct OpenPosition {
 }
 
 impl OpenPosition {
-    fn apply(&mut self, side: Side, qty: Decimal, price: Decimal, fee: Decimal) -> Option<Decimal> {
+    fn apply(
+        &mut self,
+        side: Side,
+        qty: Decimal,
+        price: Decimal,
+        fee: Decimal,
+        multiplier: Decimal,
+    ) -> Option<Decimal> {
         let delta = match side {
             Side::Buy => qty,
             Side::Sell => -qty,
@@ -374,7 +385,7 @@ impl OpenPosition {
         let close_qty = qty.min(old_abs);
         let opening_fee = self.entry_fees * close_qty / old_abs;
         let closing_fee = fee * close_qty / qty;
-        let pnl = (price - self.average_price) * self.qty.signum() * close_qty
+        let pnl = (price - self.average_price) * self.qty.signum() * close_qty * multiplier
             - opening_fee
             - closing_fee;
 
@@ -421,87 +432,6 @@ impl TradeLedger {
         };
         self
     }
-}
-
-/// Human-readable performance report (period label + risk-free reference + [`PerformanceSummary`]).
-#[derive(Clone, Debug)]
-pub struct TradingSummary {
-    /// e.g. `"Daily"` or `"BacktestRun / momentum"` when built via [`trading_summaries_per_strategy`].
-    pub period_label: String,
-    /// Annualized risk-free rate used as reporting context (e.g. `0.05` for 5%).
-    pub risk_free_annual: f64,
-    /// Numeric performance bundle.
-    pub performance: PerformanceSummary,
-    /// Optional attributed open-base snapshot (fill with [`Self::with_strategy_attribution`]).
-    pub strategy_attribution: Vec<StrategyPositionRow>,
-}
-
-impl TradingSummary {
-    /// Build from an equity curve and scaling factor (same as [`summarize`]).
-    pub fn from_equity(
-        period_label: impl Into<String>,
-        risk_free_annual: f64,
-        equity: Vec<EquityPoint>,
-        periods_per_year: f64,
-    ) -> Self {
-        Self {
-            period_label: period_label.into(),
-            risk_free_annual,
-            performance: summarize(equity, periods_per_year),
-            strategy_attribution: Vec::new(),
-        }
-    }
-
-    /// Attach [`strategy_position_report`] from the final engine state (e.g. after a run).
-    pub fn with_strategy_attribution(mut self, state: &GlobalState) -> Self {
-        self.strategy_attribution = strategy_position_report(state);
-        self
-    }
-
-    /// Print a one-line summary to stdout (for examples and quick CLI checks).
-    pub fn print_summary(&self) {
-        println!(
-            "[{}] risk_free={:.4} pnl={} pnl_pct={} sharpe={:.3} sortino={:.3} max_dd={:.4}",
-            self.period_label,
-            self.risk_free_annual,
-            self.performance.pnl,
-            self.performance.pnl_pct,
-            self.performance.sharpe,
-            self.performance.sortino,
-            self.performance.max_drawdown,
-        );
-        for row in &self.strategy_attribution {
-            println!(
-                "  strategy={} {} net_base={}",
-                row.strategy_id, row.instrument, row.net_base_qty
-            );
-        }
-    }
-}
-
-/// Build a [`TradingSummary`] per sub-strategy from **caller-supplied** equity curves (one series per [`StrategyId`]).
-///
-/// Each summary's [`TradingSummary::period_label`] is `{period_prefix} / {strategy_id}` so logs and exports stay distinct.
-///
-/// The engine attributes **positions** per strategy when fills carry [`StrategyId`]; account-level mark-to-market
-/// equity is unchanged unless you record or model per-strategy curves yourself.
-pub fn trading_summaries_per_strategy(
-    period_prefix: impl Into<String>,
-    risk_free_annual: f64,
-    curves: HashMap<StrategyId, Vec<EquityPoint>>,
-    periods_per_year: f64,
-) -> HashMap<StrategyId, TradingSummary> {
-    let period_prefix = period_prefix.into();
-    curves
-        .into_iter()
-        .map(|(id, eq)| {
-            let label = format!("{period_prefix} / {id}");
-            (
-                id,
-                TradingSummary::from_equity(label, risk_free_annual, eq, periods_per_year),
-            )
-        })
-        .collect()
 }
 
 fn max_drawdown(equity: &[EquityPoint]) -> f64 {
@@ -606,6 +536,7 @@ mod tests {
             qty: qty.into(),
             price: price.into(),
             fee: fee.into(),
+            contract_multiplier: None,
             client_order_id: None,
             oco_group: None,
             strategy_id: None,
@@ -616,46 +547,6 @@ mod tests {
     fn mdd_nonzero() {
         let s = summarize(curve(), 252.0);
         assert!(s.max_drawdown > 0.0);
-    }
-
-    #[test]
-    fn per_strategy_summaries_from_maps() {
-        let t0 = OffsetDateTime::UNIX_EPOCH;
-        let mut m = HashMap::new();
-        m.insert(
-            StrategyId::new("a"),
-            vec![
-                EquityPoint {
-                    ts: t0,
-                    equity_quote: Decimal::from(100),
-                },
-                EquityPoint {
-                    ts: t0,
-                    equity_quote: Decimal::from(110),
-                },
-            ],
-        );
-        m.insert(
-            StrategyId::new("b"),
-            vec![
-                EquityPoint {
-                    ts: t0,
-                    equity_quote: Decimal::from(50),
-                },
-                EquityPoint {
-                    ts: t0,
-                    equity_quote: Decimal::from(40),
-                },
-            ],
-        );
-        let out = trading_summaries_per_strategy("Daily", 0.0, m, 252.0);
-        assert_eq!(out.len(), 2);
-        let sa = out.get(&StrategyId::new("a")).unwrap();
-        let sb = out.get(&StrategyId::new("b")).unwrap();
-        assert_eq!(sa.performance.pnl, Decimal::from(10));
-        assert_eq!(sb.performance.pnl, Decimal::from(-10));
-        assert!(sa.period_label.contains("a"));
-        assert!(sb.period_label.contains("b"));
     }
 
     #[test]
@@ -674,6 +565,20 @@ mod tests {
         assert_eq!(ledger.closed_trades, 1);
         assert_eq!(ledger.win_rate, 0.0);
         assert_eq!(ledger.gross_profit, Decimal::ZERO);
+        assert_eq!(ledger.gross_loss, Decimal::ZERO);
+    }
+
+    #[test]
+    fn trade_ledger_applies_contract_multiplier_once() {
+        let mut opening = fill("ES", Side::Buy, "1", "100", "1");
+        let mut closing = fill("ES", Side::Sell, "1", "102", "1");
+        opening.contract_multiplier = Some("50".into());
+        closing.contract_multiplier = Some("50".into());
+
+        let ledger = trade_ledger_from_fills(&[opening, closing]);
+
+        assert_eq!(ledger.closed_trades, 1);
+        assert_eq!(ledger.gross_profit, Decimal::from(98));
         assert_eq!(ledger.gross_loss, Decimal::ZERO);
     }
 

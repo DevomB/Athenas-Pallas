@@ -10,6 +10,8 @@
 - Replaced the vendored C++ JSON header with a protocol-specific standard-library SDK.
 - Removed Yahoo and futures-specific CSV compatibility; canonical OHLCV/pbar is the local replay
   contract, while futures economics remain instrument-metadata driven.
+- Removed the unused `TradingSummary` facade; reports and metric summaries are the maintained
+  output APIs.
 
 ### Performance
 
@@ -37,6 +39,8 @@
 - Trade ledgers track average-cost positions per instrument and allocate opening and closing fees;
   reports now include effective parameters, data metadata, total fees, turnover, structured
   rejections, pending/client/OCO order details, final positions, and RFC3339 timestamps.
+- Derivative fill records carry the configured contract multiplier, and realized trade-ledger PnL
+  applies it exactly once.
 - Sharpe/Sortino annualization uses asset-class trading hours for intraday bars and trading-day
   counts for daily equity and FX bars.
 - External protocol v2 sends full multi-instrument metadata and arbitrary strategy parameters,

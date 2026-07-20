@@ -5,8 +5,7 @@ mod positions;
 
 pub use performance::{
     per_strategy_pnl, summarize, summarize_with_fills, summarize_with_fills_and_rf,
-    trade_ledger_from_fills, trading_summaries_per_strategy, PerformanceSummary, RollingMetrics,
-    StrategyPnlRow, TradeLedger, TradingSummary,
+    trade_ledger_from_fills, PerformanceSummary, RollingMetrics, StrategyPnlRow, TradeLedger,
 };
 pub use positions::{strategy_position_report, StrategyPositionRow};
 

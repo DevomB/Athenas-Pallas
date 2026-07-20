@@ -22,4 +22,5 @@ fn equity_buy_and_hold() {
     };
     let report = BacktestRunner::run_buy_and_hold(&cfg).expect("run");
     assert!(report.equity_curve.len() > 1);
+    assert_eq!(report.parameters.periods_per_year, 252.0);
 }

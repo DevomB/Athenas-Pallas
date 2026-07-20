@@ -502,9 +502,10 @@ fn finalize_report(
     equity: Vec<EquityPoint>,
     metrics: &RollingMetrics,
     periods_per_year: f64,
-    details: ReportDetails,
+    mut details: ReportDetails,
     started: Instant,
 ) -> BacktestReport {
+    details.parameters.periods_per_year = periods_per_year;
     let fills = &details.fills;
     let summary = if cfg.record_equity_curve {
         summarize_with_fills_and_rf(equity, periods_per_year, fills, cfg.risk_free_annual)

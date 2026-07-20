@@ -215,6 +215,9 @@ pub struct FillRecord {
     pub price: String,
     /// Fee paid.
     pub fee: String,
+    /// Quote-currency value of one price point per unit, when contract metadata defines one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_multiplier: Option<String>,
     /// Client correlation id, if supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_order_id: Option<ClientOrderId>,

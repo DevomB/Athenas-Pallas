@@ -72,8 +72,8 @@ struct Args {
     buy_and_hold_qty: Option<Decimal>,
     #[arg(long = "param", value_name = "KEY=JSON", value_parser = parse_strategy_parameter)]
     strategy_parameter: Vec<(String, serde_json::Value)>,
-    #[arg(long, default_value = "365")]
-    periods_per_year: f64,
+    #[arg(long, value_parser = parse_positive_f64)]
+    periods_per_year: Option<f64>,
     #[arg(long)]
     output: Option<PathBuf>,
     #[arg(short, long)]
@@ -107,6 +107,16 @@ fn parse_positive_decimal(s: &str) -> Result<Decimal, String> {
         .map_err(|_| format!("invalid decimal `{s}`"))?;
     if value <= Decimal::ZERO {
         return Err("quantity must be positive".into());
+    }
+    Ok(value)
+}
+
+fn parse_positive_f64(s: &str) -> Result<f64, String> {
+    let value = s
+        .parse::<f64>()
+        .map_err(|_| format!("invalid number `{s}`"))?;
+    if value <= 0.0 || !value.is_finite() {
+        return Err("periods per year must be positive and finite".into());
     }
     Ok(value)
 }
@@ -165,7 +175,6 @@ fn build_config(
         slippage_bps: Decimal::from(args.slippage_bps),
         half_spread_bps: Decimal::from(args.half_spread_bps),
         buy_and_hold_qty: args.buy_and_hold_qty,
-        periods_per_year: args.periods_per_year,
         strategy_path: args.strategy.clone(),
         strategy_parameters: args.strategy_parameter.iter().cloned().collect(),
         python_exe: args.python.clone(),
@@ -191,6 +200,10 @@ fn apply_cli_overrides(
     }
     if let Some(qty) = args.buy_and_hold_qty {
         cfg.buy_and_hold_qty = Some(qty);
+    }
+    if let Some(periods_per_year) = args.periods_per_year {
+        cfg.periods_per_year = periods_per_year;
+        cfg.auto_periods_per_year = false;
     }
     cfg.strategy_parameters
         .extend(args.strategy_parameter.iter().cloned());
@@ -323,4 +336,38 @@ fn write_report(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_from_args(args: &[&str]) -> BacktestConfig {
+        let args = Args::try_parse_from(args).unwrap();
+        let balances = HashMap::new();
+        let format = parse_data_format(&args.data_format).unwrap();
+        let mut config = build_config(&args, &balances, format).unwrap();
+        apply_cli_overrides(&args, balances, &mut config);
+        config
+    }
+
+    #[test]
+    fn omitted_periods_per_year_preserves_auto_inference() {
+        let config = config_from_args(&["pallas-backtest"]);
+        assert!(config.auto_periods_per_year);
+        assert_eq!(config.periods_per_year, 365.0);
+    }
+
+    #[test]
+    fn explicit_periods_per_year_disables_auto_inference() {
+        let config = config_from_args(&["pallas-backtest", "--periods-per-year", "252"]);
+        assert!(!config.auto_periods_per_year);
+        assert_eq!(config.periods_per_year, 252.0);
+    }
+
+    #[test]
+    fn periods_per_year_must_be_positive_and_finite() {
+        assert!(Args::try_parse_from(["pallas-backtest", "--periods-per-year", "0"]).is_err());
+        assert!(Args::try_parse_from(["pallas-backtest", "--periods-per-year", "NaN"]).is_err());
+    }
 }

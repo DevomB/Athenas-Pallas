@@ -50,8 +50,16 @@ fn futures_pnl_scales_by_multiplier() {
 
     let spot_pnl: Decimal = spot.pnl.parse().unwrap();
     let fut_pnl: Decimal = fut.pnl.parse().unwrap();
-    eprintln!("spot_pnl={spot_pnl} fut_pnl={fut_pnl}");
     assert!(fut_pnl.abs() > spot_pnl.abs() * Decimal::from(10u64));
+    assert!(!fut.fills.is_empty());
+    assert!(fut
+        .fills
+        .iter()
+        .all(|fill| fill.contract_multiplier.as_deref() == Some("50")));
+    assert!(spot
+        .fills
+        .iter()
+        .all(|fill| fill.contract_multiplier.is_none()));
 }
 
 #[test]
