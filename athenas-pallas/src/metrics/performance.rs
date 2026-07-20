@@ -25,18 +25,18 @@ pub struct PerformanceSummary {
     pub returns: Vec<f64>,
     /// Copy of equity series.
     pub equity: Vec<EquityPoint>,
-    /// Fraction of closed round-trips with positive PnL (0 if none).
+    /// Fraction of realized closing fills with positive PnL (0 if none).
     pub win_rate: f64,
     /// Gross profit / gross loss; `f64::INFINITY` when no losing trades.
     pub profit_factor: f64,
-    /// Closed round-trip count from fill ledger.
+    /// Count of fills that closed all or part of an open position.
     pub closed_trades: usize,
 }
 
-/// Round-trip trade statistics derived from an ordered fill blotter.
+/// Realized trade statistics derived from an ordered fill blotter.
 #[derive(Clone, Debug, Default)]
 pub struct TradeLedger {
-    /// Closed round trips.
+    /// Fills that closed all or part of an open position.
     pub closed_trades: usize,
     /// Winning trades.
     pub wins: usize,
@@ -267,14 +267,14 @@ pub fn summarize_with_fills_and_rf(
     }
 }
 
-/// Realized round-trip PnL attributed to one sub-strategy, for the backtest report.
+/// Realized PnL attributed to one sub-strategy, for the backtest report.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct StrategyPnlRow {
     /// Sub-strategy label (from `OrderIntent::strategy_id`).
     pub strategy_id: String,
-    /// Closed round-trip count for this strategy.
+    /// Count of position-closing fills for this strategy.
     pub closed_trades: usize,
-    /// Fraction of closed round-trips with positive PnL.
+    /// Fraction of position-closing fills with positive PnL.
     pub win_rate: f64,
     /// Gross profit / gross loss for this strategy.
     pub profit_factor: f64,
@@ -282,7 +282,7 @@ pub struct StrategyPnlRow {
     pub realized_pnl: String,
 }
 
-/// Per-strategy realized PnL from tagged fills (FIFO ledger run per [`StrategyId`]).
+/// Per-strategy realized PnL from tagged fills (average-cost ledger per instrument).
 ///
 /// Untagged fills (no `strategy_id`) are excluded. Rows are sorted by `strategy_id` for
 /// deterministic output. Returns empty when no fills carry an attribution.
@@ -310,111 +310,116 @@ pub fn per_strategy_pnl(fills: &[FillRecord]) -> Vec<StrategyPnlRow> {
         .collect()
 }
 
-/// Build round-trip stats from chronological fills (FIFO position tracking).
+/// Build realized trade stats from chronological fills, tracking each instrument independently.
 pub fn trade_ledger_from_fills(fills: &[FillRecord]) -> TradeLedger {
     trade_ledger_from_fill_iter(fills.iter())
 }
 
 fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecord>) -> TradeLedger {
-    let mut position = Decimal::ZERO;
-    let mut entry_price = Decimal::ZERO;
-    let mut entry_fees = Decimal::ZERO;
-    let mut gross_profit = Decimal::ZERO;
-    let mut gross_loss = Decimal::ZERO;
-    let mut wins = 0usize;
-    let mut losses = 0usize;
-    let mut closed = 0usize;
+    let mut positions = HashMap::new();
+    let mut ledger = TradeLedger::default();
 
     for fill in fills {
-        let Ok(qty) = fill.qty.parse::<Decimal>() else {
+        let Some((qty, price, fee)) = parsed_fill(fill) else {
             continue;
         };
-        let Ok(price) = fill.price.parse::<Decimal>() else {
-            continue;
-        };
-        let Ok(fee) = fill.fee.parse::<Decimal>() else {
-            continue;
-        };
-        if qty.is_zero() {
-            continue;
-        }
-        let sign = match fill.side {
-            Side::Buy => Decimal::ONE,
-            Side::Sell => -Decimal::ONE,
-        };
-        let delta = sign * qty;
-
-        if position.is_zero() {
-            position = delta;
-            entry_price = price;
-            entry_fees = fee;
-            continue;
-        }
-
-        if position.signum() == delta.signum() {
-            let new_abs = position.abs() + qty;
-            entry_price = (entry_price * position.abs() + price * qty) / new_abs;
-            position += delta;
-            entry_fees += fee;
-            continue;
-        }
-
-        let old_abs = position.abs();
-        let close_qty = qty.min(old_abs);
-        let pnl_per_unit = (price - entry_price) * position.signum();
-        let opening_fee = entry_fees * close_qty / old_abs;
-        let closing_fee = fee * close_qty / qty;
-        let trade_pnl = pnl_per_unit * close_qty - opening_fee - closing_fee;
-        closed += 1;
-        if trade_pnl > Decimal::ZERO {
-            wins += 1;
-            gross_profit += trade_pnl;
-        } else if trade_pnl < Decimal::ZERO {
-            losses += 1;
-            gross_loss += trade_pnl.abs();
-        }
-        position += delta;
-        if position.is_zero() {
-            entry_price = Decimal::ZERO;
-            entry_fees = Decimal::ZERO;
-        } else if position.signum() == delta.signum() {
-            entry_price = price;
-            entry_fees = fee - closing_fee;
-        } else {
-            entry_fees -= opening_fee;
+        let position = positions
+            .entry(&fill.instrument)
+            .or_insert_with(OpenPosition::default);
+        if let Some(pnl) = position.apply(fill.side, qty, price, fee) {
+            ledger.record_close(pnl);
         }
     }
 
-    finish_trade_ledger(closed, wins, losses, gross_profit, gross_loss)
+    ledger.finish()
 }
 
-fn finish_trade_ledger(
-    closed: usize,
-    wins: usize,
-    losses: usize,
-    gross_profit: Decimal,
-    gross_loss: Decimal,
-) -> TradeLedger {
-    TradeLedger {
-        closed_trades: closed,
-        wins,
-        losses,
-        win_rate: if closed == 0 {
+fn parsed_fill(fill: &FillRecord) -> Option<(Decimal, Decimal, Decimal)> {
+    let qty = fill.qty.parse::<Decimal>().ok()?;
+    let price = fill.price.parse::<Decimal>().ok()?;
+    let fee = fill.fee.parse::<Decimal>().ok()?;
+    (qty > Decimal::ZERO).then_some((qty, price, fee))
+}
+
+#[derive(Default)]
+struct OpenPosition {
+    qty: Decimal,
+    average_price: Decimal,
+    entry_fees: Decimal,
+}
+
+impl OpenPosition {
+    fn apply(&mut self, side: Side, qty: Decimal, price: Decimal, fee: Decimal) -> Option<Decimal> {
+        let delta = match side {
+            Side::Buy => qty,
+            Side::Sell => -qty,
+        };
+
+        if self.qty.is_zero() {
+            self.qty = delta;
+            self.average_price = price;
+            self.entry_fees = fee;
+            return None;
+        }
+
+        if self.qty.signum() == delta.signum() {
+            let new_abs = self.qty.abs() + qty;
+            self.average_price = (self.average_price * self.qty.abs() + price * qty) / new_abs;
+            self.qty += delta;
+            self.entry_fees += fee;
+            return None;
+        }
+
+        let old_abs = self.qty.abs();
+        let close_qty = qty.min(old_abs);
+        let opening_fee = self.entry_fees * close_qty / old_abs;
+        let closing_fee = fee * close_qty / qty;
+        let pnl = (price - self.average_price) * self.qty.signum() * close_qty
+            - opening_fee
+            - closing_fee;
+
+        self.qty += delta;
+        if self.qty.is_zero() {
+            self.average_price = Decimal::ZERO;
+            self.entry_fees = Decimal::ZERO;
+        } else if self.qty.signum() == delta.signum() {
+            self.average_price = price;
+            self.entry_fees = fee - closing_fee;
+        } else {
+            self.entry_fees -= opening_fee;
+        }
+        Some(pnl)
+    }
+}
+
+impl TradeLedger {
+    fn record_close(&mut self, pnl: Decimal) {
+        self.closed_trades += 1;
+        if pnl > Decimal::ZERO {
+            self.wins += 1;
+            self.gross_profit += pnl;
+        } else if pnl < Decimal::ZERO {
+            self.losses += 1;
+            self.gross_loss += pnl.abs();
+        }
+    }
+
+    fn finish(mut self) -> Self {
+        self.win_rate = if self.closed_trades == 0 {
             0.0
         } else {
-            wins as f64 / closed as f64
-        },
-        profit_factor: if gross_loss.is_zero() {
-            if gross_profit.is_zero() {
+            self.wins as f64 / self.closed_trades as f64
+        };
+        self.profit_factor = if self.gross_loss.is_zero() {
+            if self.gross_profit.is_zero() {
                 0.0
             } else {
                 f64::INFINITY
             }
         } else {
-            gross_profit.to_f64().unwrap_or(0.0) / gross_loss.to_f64().unwrap_or(1.0)
-        },
-        gross_profit,
-        gross_loss,
+            self.gross_profit.to_f64().unwrap_or(0.0) / self.gross_loss.to_f64().unwrap_or(1.0)
+        };
+        self
     }
 }
 
@@ -567,6 +572,7 @@ fn sortino_ratio_excess(rets: &[f64], periods_per_year: f64, rf_per_period: f64)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{InstrumentId, OrderId};
     use time::OffsetDateTime;
 
     fn curve() -> Vec<EquityPoint> {
@@ -589,6 +595,21 @@ mod tests {
                 equity_quote: Decimal::from(120),
             },
         ]
+    }
+
+    fn fill(symbol: &str, side: Side, qty: &str, price: &str, fee: &str) -> FillRecord {
+        FillRecord {
+            ts: OffsetDateTime::UNIX_EPOCH,
+            order_id: OrderId::new_v4(),
+            instrument: InstrumentId::new("test", symbol),
+            side,
+            qty: qty.into(),
+            price: price.into(),
+            fee: fee.into(),
+            client_order_id: None,
+            oco_group: None,
+            strategy_id: None,
+        }
     }
 
     #[test]
@@ -645,26 +666,46 @@ mod tests {
 
     #[test]
     fn trade_ledger_charges_opening_and_closing_fees() {
-        use crate::types::{InstrumentId, OrderId};
-
-        let instrument = InstrumentId::new("test", "ABC");
-        let fill = |side, price: &str| FillRecord {
-            ts: OffsetDateTime::UNIX_EPOCH,
-            order_id: OrderId::new_v4(),
-            instrument: instrument.clone(),
-            side,
-            qty: "1".into(),
-            price: price.into(),
-            fee: "1".into(),
-            client_order_id: None,
-            oco_group: None,
-            strategy_id: None,
-        };
-        let ledger = trade_ledger_from_fills(&[fill(Side::Buy, "100"), fill(Side::Sell, "102")]);
+        let ledger = trade_ledger_from_fills(&[
+            fill("ABC", Side::Buy, "1", "100", "1"),
+            fill("ABC", Side::Sell, "1", "102", "1"),
+        ]);
 
         assert_eq!(ledger.closed_trades, 1);
         assert_eq!(ledger.win_rate, 0.0);
         assert_eq!(ledger.gross_profit, Decimal::ZERO);
         assert_eq!(ledger.gross_loss, Decimal::ZERO);
+    }
+
+    #[test]
+    fn trade_ledger_keeps_instruments_independent() {
+        let ledger = trade_ledger_from_fills(&[
+            fill("ABC", Side::Buy, "1", "100", "0"),
+            fill("XYZ", Side::Buy, "1", "1000", "0"),
+            fill("ABC", Side::Sell, "1", "110", "0"),
+            fill("XYZ", Side::Sell, "1", "900", "0"),
+        ]);
+
+        assert_eq!(ledger.closed_trades, 2);
+        assert_eq!(ledger.wins, 1);
+        assert_eq!(ledger.losses, 1);
+        assert_eq!(ledger.gross_profit, Decimal::from(10));
+        assert_eq!(ledger.gross_loss, Decimal::from(100));
+    }
+
+    #[test]
+    fn trade_ledger_allocates_fees_across_partial_close_and_reversal() {
+        let ledger = trade_ledger_from_fills(&[
+            fill("ABC", Side::Buy, "2", "100", "2"),
+            fill("ABC", Side::Sell, "1", "110", "1"),
+            fill("ABC", Side::Sell, "2", "90", "2"),
+            fill("ABC", Side::Buy, "1", "80", "1"),
+        ]);
+
+        assert_eq!(ledger.closed_trades, 3);
+        assert_eq!(ledger.wins, 2);
+        assert_eq!(ledger.losses, 1);
+        assert_eq!(ledger.gross_profit, Decimal::from(16));
+        assert_eq!(ledger.gross_loss, Decimal::from(12));
     }
 }

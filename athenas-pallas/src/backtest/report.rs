@@ -110,11 +110,11 @@ pub struct BacktestReport {
     pub fills: Vec<FillRecord>,
     /// Wall-clock runtime in milliseconds.
     pub wall_time_ms: u64,
-    /// Fraction of closed round-trips with positive PnL.
+    /// Fraction of position-closing fills with positive PnL.
     pub win_rate: f64,
     /// Gross profit / gross loss.
     pub profit_factor: f64,
-    /// Closed round-trip count from fill ledger.
+    /// Count of fills that closed all or part of an open position.
     pub closed_trades: usize,
     /// Per-sub-strategy realized PnL when fills carry a `strategy_id` (empty otherwise).
     #[serde(skip_serializing_if = "Vec::is_empty")]

@@ -8,6 +8,8 @@
 - Removed the disconnected Barter-style configuration/index API, generic batch replay wrappers,
   and the non-replayable `pallas-merge` binary.
 - Replaced the vendored C++ JSON header with a protocol-specific standard-library SDK.
+- Removed Yahoo and futures-specific CSV compatibility; canonical OHLCV/pbar is the local replay
+  contract, while futures economics remain instrument-metadata driven.
 
 ### Performance
 
@@ -32,9 +34,11 @@
 
 - Removed bar lookahead: orders emitted from a completed OHLCV bar wait for the next market update;
   next-open execution now honors `half_spread_bps`, and unexecuted final-bar orders remain visible.
-- Trade ledgers allocate opening and closing fees; reports now include effective parameters, data
-  metadata, total fees, turnover, structured rejections, pending/client/OCO order details, final
-  positions, and RFC3339 timestamps.
+- Trade ledgers track average-cost positions per instrument and allocate opening and closing fees;
+  reports now include effective parameters, data metadata, total fees, turnover, structured
+  rejections, pending/client/OCO order details, final positions, and RFC3339 timestamps.
+- Sharpe/Sortino annualization uses asset-class trading hours for intraday bars and trading-day
+  counts for daily equity and FX bars.
 - External protocol v2 sends full multi-instrument metadata and arbitrary strategy parameters,
   reports fills/rejections/working orders, and supports cancel-by-id, OCO groups, and a final
   flatten callback while retaining a single-instrument initialization helper.
@@ -71,8 +75,8 @@
   funding and bond-coupon lifecycle hooks; European option exercise at expiry.
 - Multi-instrument backtests through `[[instruments]]` config plus a streaming k-way source merge;
   canonical OHLCV and FX L1 sources; `pallas-resample` and `pallas-sweep` CLIs.
-- Reporting: risk-free-adjusted Sharpe/Sortino, trade ledger (win rate, profit factor, closed
-  round-trips), and automatic periods-per-year inference from bar spacing.
+- Reporting: risk-free-adjusted Sharpe/Sortino, trade ledger (win rate, profit factor,
+  position-closing fills), and automatic periods-per-year inference from bar spacing.
 
 ## 3.0.0
 
