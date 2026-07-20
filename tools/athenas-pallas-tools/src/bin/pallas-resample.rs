@@ -1,6 +1,6 @@
 //! Offline OHLCV bar aggregation (e.g. 1m CSV -> 30m).
 
-use athenas_pallas::backtest::OhlcvRow;
+use athenas_pallas::OhlcvRow;
 use clap::Parser;
 use rust_decimal::Decimal;
 use std::fs::File;
@@ -65,7 +65,7 @@ fn load_rows(path: &PathBuf) -> Result<Vec<ParsedRow>, Box<dyn std::error::Error
     let mut out = Vec::new();
     if headers_are_yahoo(&headers) {
         for row in read_yahoo_rows(&mut rdr)? {
-            let ts = athenas_pallas::backtest::parse_timestamp(&row.date)
+            let ts = athenas_pallas::parse_timestamp(&row.date)
                 .ok_or_else(|| format!("bad timestamp: {}", row.date))?;
             out.push(ParsedRow {
                 ts,
@@ -79,7 +79,7 @@ fn load_rows(path: &PathBuf) -> Result<Vec<ParsedRow>, Box<dyn std::error::Error
     } else {
         for rec in rdr.deserialize::<OhlcvRow>() {
             let row: OhlcvRow = rec?;
-            let ts = athenas_pallas::backtest::parse_timestamp(&row.ts)
+            let ts = athenas_pallas::parse_timestamp(&row.ts)
                 .ok_or_else(|| format!("bad timestamp: {}", row.ts))?;
             out.push(ParsedRow {
                 ts,

@@ -1,7 +1,7 @@
 use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::events::{Event, MarketEvent, OrderIntent, OrderIntentSource};
-use athenas_pallas::execution::{PaperConfig, SimGateway};
-use athenas_pallas::risk::{PauseCheck, RiskPipeline};
+use athenas_pallas::execution::{PaperConfig, PaperExecution};
+use athenas_pallas::risk::{PauseCheck, RiskEngine};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
 use athenas_pallas::types::{Asset, InstrumentId, OrderType, Side};
@@ -31,6 +31,7 @@ impl Strategy for OneShot {
                 stop_price: None,
                 qty: Decimal::new(1, 3),
                 client_order_id: None,
+                oco_group: None,
                 source: OrderIntentSource::User,
                 strategy_id: None,
             });
@@ -56,8 +57,8 @@ fn paper_market_updates_balances() {
         inst: inst.clone(),
         fired: false,
     };
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = SimGateway::new(PaperConfig::default());
+    let risk = RiskEngine::new(vec![Box::new(PauseCheck)]);
+    let exec = PaperExecution::new(PaperConfig::default());
     let mut intents = Vec::new();
 
     let ts = OffsetDateTime::now_utc();

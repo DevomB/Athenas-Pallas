@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use super::{apply_slippage, AccountEvents};
-use crate::backtest::{FillModel, TouchCrossFillModel};
+use super::{FillModel, TouchCrossFillModel};
 use crate::error::{Error, Result};
-use crate::events::{AccountEvent, OrderIntent};
+use crate::events::{AccountEvent, OrderIntent, RejectionKind, RejectionRecord};
 use crate::instrument::pricing::margin_required;
 use crate::instrument::ticks::{notional_decimal, PriceTicks, QtyLots};
 use crate::instrument::AssetClass;
@@ -221,6 +221,8 @@ impl FillEngine {
             remaining_qty: qty,
             original_qty: qty,
             status: OrderStatus::Open,
+            client_order_id: intent.client_order_id.clone(),
+            oco_group: intent.oco_group.clone(),
             strategy_id: intent.strategy_id.clone(),
         }
     }
@@ -236,6 +238,8 @@ impl FillEngine {
             remaining_qty: o.remaining_qty,
             original_qty: o.original_qty,
             status: o.status,
+            client_order_id: o.client_order_id.clone(),
+            oco_group: o.oco_group.clone(),
             strategy_id: o.strategy_id.clone(),
         }
     }
@@ -306,10 +310,55 @@ impl FillEngine {
             qty,
             fee,
             fee_asset: meta.quote.clone(),
+            client_order_id: filled.client_order_id.clone(),
+            oco_group: filled.oco_group.clone(),
             strategy_id: filled.strategy_id.clone(),
         });
+        self.push_oco_cancellations(state, &filled, &mut evs);
         Self::push_balance_updates_after_fill(state, &filled, meta, px, qty, fee, &mut evs);
         Ok(evs)
+    }
+
+    fn push_oco_cancellations(
+        &self,
+        state: &GlobalState,
+        filled: &OpenOrder,
+        evs: &mut AccountEvents,
+    ) {
+        let Some(group) = filled.oco_group.as_deref() else {
+            return;
+        };
+        for sibling in state
+            .open_orders
+            .values()
+            .filter(|order| order.id != filled.id && order.oco_group.as_deref() == Some(group))
+        {
+            let mut canceled = sibling.clone();
+            canceled.status = OrderStatus::Canceled;
+            canceled.remaining_qty = Decimal::ZERO;
+            evs.push(Self::emit_order_update(&canceled));
+        }
+    }
+
+    fn reject_resting_order(
+        state: &GlobalState,
+        order: &OpenOrder,
+        error: &Error,
+        out: &mut AccountEvents,
+    ) {
+        let mut rejected = order.clone();
+        rejected.status = OrderStatus::Rejected;
+        rejected.remaining_qty = Decimal::ZERO;
+        out.push(Self::emit_order_update(&rejected));
+        out.push(AccountEvent::Rejection(RejectionRecord {
+            ts: state
+                .last_event_ts
+                .unwrap_or(time::OffsetDateTime::UNIX_EPOCH),
+            kind: RejectionKind::Execution,
+            instrument: order.instrument.clone(),
+            client_order_id: order.client_order_id.clone(),
+            reason: error.to_string(),
+        }));
     }
 
     fn l1_bid_ask(
@@ -322,6 +371,19 @@ impl FillEngine {
             .get(ix)
             .and_then(|cell| *cell)
             .map(|(_, bid, ask)| (bid, ask))
+    }
+
+    fn market_reference(
+        state: &GlobalState,
+        inst: &crate::types::InstrumentId,
+        side: Side,
+    ) -> Option<Decimal> {
+        Self::l1_bid_ask(state, inst)
+            .map(|(bid, ask)| match side {
+                Side::Buy => ask,
+                Side::Sell => bid,
+            })
+            .or_else(|| state.mid_or_last(inst))
     }
 
     /// Sync limit placement (backtest hot path).
@@ -359,10 +421,9 @@ impl FillEngine {
     ) -> Result<AccountEvents> {
         let meta = Self::meta(state, &intent.instrument)?;
         let (qty, _, _) = Self::normalize_order(meta, intent.qty, intent.price, intent.stop_price)?;
-        let mid = state
-            .mid_or_last(&intent.instrument)
+        let reference = Self::market_reference(state, &intent.instrument, intent.side)
             .ok_or_else(|| Error::Invalid("no mid/last for market order".into()))?;
-        let px = apply_slippage(intent.side, mid, self.cfg.market_slippage_bps);
+        let px = apply_slippage(intent.side, reference, self.cfg.market_slippage_bps);
         let id = OrderId::new_v4();
         let o = Self::build_open(id, intent, qty, None, None, OrderType::Market);
         self.emit_fill_events(state, &o, meta, px, qty)
@@ -428,10 +489,9 @@ impl FillEngine {
 
         if let Some((high, low)) = Self::bar_high_low(state, &intent.instrument) {
             if Self::stop_triggered(intent.side, stop_price, high, low) {
-                let mid = state
-                    .mid_or_last(&intent.instrument)
+                let reference = Self::market_reference(state, &intent.instrument, intent.side)
                     .ok_or_else(|| Error::Invalid("no mid for stop market fill".into()))?;
-                let px = apply_slippage(intent.side, mid, self.cfg.market_slippage_bps);
+                let px = apply_slippage(intent.side, reference, self.cfg.market_slippage_bps);
                 return self.emit_fill_events(state, &o, meta, px, qty);
             }
         }
@@ -494,66 +554,59 @@ impl FillEngine {
     /// (limit cross via the configured [`crate::execution::FillModel`], stop trigger on bar
     /// high/low, then market/limit execution price).
     fn try_fill_resting(&self, state: &GlobalState, o: &OpenOrder, out: &mut AccountEvents) {
-        let meta = match Self::meta(state, &o.instrument) {
-            Ok(m) => m,
-            Err(_) => return,
+        let price = match o.order_type {
+            OrderType::Limit => self.resting_limit_price(state, o),
+            OrderType::StopMarket => self.resting_stop_market_price(state, o),
+            OrderType::StopLimit => self.resting_stop_limit_price(state, o),
+            OrderType::Market => None,
         };
-        let qty = o.remaining_qty;
-
-        match o.order_type {
-            OrderType::Limit => {
-                let Some(limit) = o.price else { return };
-                let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
-                    return;
-                };
-                let Some(px) =
-                    Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
-                else {
-                    return;
-                };
-                if let Ok(evs) = self.emit_fill_events(state, o, meta, px, qty) {
-                    out.extend(evs);
-                }
-            }
-            OrderType::StopMarket => {
-                let Some(stop) = o.stop_price else { return };
-                let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
-                    return;
-                };
-                if !Self::stop_triggered(o.side, stop, high, low) {
-                    return;
-                }
-                let Some(mid) = state.mid_or_last(&o.instrument) else {
-                    return;
-                };
-                let px = apply_slippage(o.side, mid, self.cfg.market_slippage_bps);
-                if let Ok(evs) = self.emit_fill_events(state, o, meta, px, qty) {
-                    out.extend(evs);
-                }
-            }
-            OrderType::StopLimit => {
-                let Some(stop) = o.stop_price else { return };
-                let Some(limit) = o.price else { return };
-                let Some((high, low)) = Self::bar_high_low(state, &o.instrument) else {
-                    return;
-                };
-                if !Self::stop_triggered(o.side, stop, high, low) {
-                    return;
-                }
-                let Some((bid, ask)) = Self::l1_bid_ask(state, &o.instrument) else {
-                    return;
-                };
-                let Some(px) =
-                    Self::crossing_limit(self.cfg.fill_model.as_ref(), o.side, limit, bid, ask)
-                else {
-                    return;
-                };
-                if let Ok(evs) = self.emit_fill_events(state, o, meta, px, qty) {
-                    out.extend(evs);
-                }
-            }
-            OrderType::Market => {}
+        let (Ok(meta), Some(price)) = (Self::meta(state, &o.instrument), price) else {
+            return;
+        };
+        match self.emit_fill_events(state, o, meta, price, o.remaining_qty) {
+            Ok(events) => out.extend(events),
+            Err(error) => Self::reject_resting_order(state, o, &error, out),
         }
+    }
+
+    fn resting_limit_price(&self, state: &GlobalState, order: &OpenOrder) -> Option<Decimal> {
+        let limit = order.price?;
+        let bar_touch =
+            Self::bar_high_low(state, &order.instrument).and_then(|(high, low)| match order.side {
+                Side::Buy if low <= limit => Some(limit),
+                Side::Sell if high >= limit => Some(limit),
+                _ => None,
+            });
+        bar_touch.or_else(|| {
+            Self::l1_bid_ask(state, &order.instrument).and_then(|(bid, ask)| {
+                Self::crossing_limit(self.cfg.fill_model.as_ref(), order.side, limit, bid, ask)
+            })
+        })
+    }
+
+    fn resting_stop_market_price(&self, state: &GlobalState, order: &OpenOrder) -> Option<Decimal> {
+        let stop = order.stop_price?;
+        let (high, low) = Self::bar_high_low(state, &order.instrument)?;
+        if !Self::stop_triggered(order.side, stop, high, low) {
+            return None;
+        }
+        let reference = Self::market_reference(state, &order.instrument, order.side)?;
+        Some(apply_slippage(
+            order.side,
+            reference,
+            self.cfg.market_slippage_bps,
+        ))
+    }
+
+    fn resting_stop_limit_price(&self, state: &GlobalState, order: &OpenOrder) -> Option<Decimal> {
+        let stop = order.stop_price?;
+        let limit = order.price?;
+        let (high, low) = Self::bar_high_low(state, &order.instrument)?;
+        if !Self::stop_triggered(order.side, stop, high, low) {
+            return None;
+        }
+        let (bid, ask) = Self::l1_bid_ask(state, &order.instrument)?;
+        Self::crossing_limit(self.cfg.fill_model.as_ref(), order.side, limit, bid, ask)
     }
 
     /// Sync passive limit fills after market data, scanning the whole book.
@@ -582,7 +635,7 @@ impl FillEngine {
         instrument: &crate::types::InstrumentId,
         out: &mut AccountEvents,
     ) -> Result<()> {
-        let (bid, ask) = match Self::l1_bid_ask(state, instrument) {
+        let (mut bid, mut ask) = match Self::l1_bid_ask(state, instrument) {
             Some((b, a)) => (Some(b), Some(a)),
             None => (None, None),
         };
@@ -590,15 +643,34 @@ impl FillEngine {
             Some((h, l)) => (Some(h), Some(l)),
             None => (None, None),
         };
+        // Bar limits are eligible on an intrabar touch even when the completed close is elsewhere.
+        bid = high.or(bid);
+        ask = low.or(ask);
         let mut candidate_ids = crate::oms::OrderIdBuffer::new();
         state
             .open_orders
             .pollable_ids_into(instrument, bid, ask, high, low, &mut candidate_ids);
+        let mut filled_oco_groups = rustc_hash::FxHashSet::default();
         for id in &candidate_ids {
             let Some(o) = state.open_orders.get(id) else {
                 continue;
             };
+            if o.oco_group
+                .as_ref()
+                .is_some_and(|group| filled_oco_groups.contains(group))
+            {
+                continue;
+            }
+            let before = out.len();
             self.try_fill_resting(state, o, out);
+            if out[before..]
+                .iter()
+                .any(|event| matches!(event, AccountEvent::Fill { .. }))
+            {
+                if let Some(group) = &o.oco_group {
+                    filled_oco_groups.insert(group.clone());
+                }
+            }
         }
         Ok(())
     }
@@ -648,6 +720,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::new(1, 2),
             client_order_id: None,
+            oco_group: None,
             source: crate::events::OrderIntentSource::User,
             strategy_id: None,
         };
@@ -685,6 +758,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
+            oco_group: None,
             source: crate::events::OrderIntentSource::User,
             strategy_id: None,
         };
@@ -720,6 +794,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
+            oco_group: None,
             source: crate::events::OrderIntentSource::User,
             strategy_id: None,
         };
@@ -756,6 +831,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::new(1, 2),
             client_order_id: None,
+            oco_group: None,
             source: crate::events::OrderIntentSource::User,
             strategy_id: None,
         };
@@ -790,10 +866,63 @@ mod tests {
             stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
+            oco_group: None,
             source: crate::events::OrderIntentSource::User,
             strategy_id: None,
         };
         let err = gw.place_market_sync(&state, &intent).unwrap_err();
         assert!(matches!(err, Error::ExecutionRejected(_)));
+    }
+
+    #[test]
+    fn oco_fill_cancels_sibling_and_prevents_double_fill() {
+        let (mut state, inst) = setup_l1(Decimal::new(100, 0), Decimal::new(101, 0));
+        let gateway = FillEngine::new(PaperConfig {
+            fee_bps: Decimal::ZERO,
+            market_slippage_bps: Decimal::ZERO,
+            ..PaperConfig::default()
+        });
+        for client_id in ["take-profit-a", "take-profit-b"] {
+            let intent = OrderIntent {
+                instrument: inst.clone(),
+                side: Side::Buy,
+                order_type: OrderType::Limit,
+                price: Some(Decimal::from(99u64)),
+                stop_price: None,
+                qty: Decimal::ONE,
+                client_order_id: Some(crate::types::ClientOrderId(client_id.into())),
+                oco_group: Some("bracket-1".into()),
+                source: crate::events::OrderIntentSource::User,
+                strategy_id: None,
+            };
+            for event in gateway.place_limit_sync(&state, &intent).unwrap() {
+                state.apply_account(&event);
+            }
+        }
+        state.apply_market(&MarketEvent::BookL1 {
+            instrument: inst.clone(),
+            ts: OffsetDateTime::now_utc(),
+            bid: Decimal::from(98u64),
+            ask: Decimal::from(99u64),
+        });
+
+        let events = gateway
+            .poll_after_market_instrument_sync(&state, &inst)
+            .unwrap();
+
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, AccountEvent::Fill { .. }))
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AccountEvent::OrderUpdate {
+                status: OrderStatus::Canceled,
+                ..
+            }
+        )));
     }
 }

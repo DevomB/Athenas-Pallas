@@ -3,7 +3,7 @@
 use crate::error::Result;
 use crate::events::Event;
 use crate::execution::SyncExecutionGateway;
-use crate::risk::RiskPipeline;
+use crate::risk::RiskEngine;
 use crate::state::GlobalState;
 use crate::strategy::Strategy;
 
@@ -13,7 +13,7 @@ use super::sync::dispatch_event_sync;
 pub fn replay_events_sync<S, E>(
     mut state: GlobalState,
     mut strategy: S,
-    risk: &RiskPipeline,
+    risk: &RiskEngine,
     exec: &E,
     events: Vec<Event>,
 ) -> Result<GlobalState>

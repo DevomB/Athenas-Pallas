@@ -128,38 +128,30 @@ impl RiskCheck for RejectShort {
     }
 }
 
-/// Holistic risk manager (barter-style); builds a [`RiskPipeline`].
-pub trait RiskManager: Send + Sync {
-    /// Compose checks for the engine.
-    fn pipeline(&self) -> RiskPipeline;
-}
-
-/// Default checks: pause, trading disabled, optional daily loss.
-#[derive(Clone, Debug, Default)]
-pub struct DefaultRiskManager {
-    /// Optional max daily loss in quote units.
-    pub max_daily_loss: Option<MaxDailyLossQuote>,
-}
-
-impl RiskManager for DefaultRiskManager {
-    fn pipeline(&self) -> RiskPipeline {
-        let mut checks: Vec<Box<dyn RiskCheck + Send + Sync>> =
-            vec![Box::new(PauseCheck), Box::new(TradingDisabledCheck)];
-        if let Some(rule) = &self.max_daily_loss {
-            checks.push(Box::new(rule.clone()));
-        }
-        RiskPipeline::new(checks)
-    }
-}
-
-/// Inline pause + reject-short (+ optional position cap) for synchronous backtest replay.
-#[derive(Clone, Debug, Default)]
-pub struct BacktestChecks {
+/// Ordered risk checks shared by replay and backtest execution.
+#[derive(Clone)]
+pub struct RiskEngine {
+    checks: std::sync::Arc<Vec<Box<dyn RiskCheck + Send + Sync>>>,
     max_positions: Vec<MaxPositionSize>,
     max_daily_loss: Option<MaxDailyLossQuote>,
 }
 
-impl BacktestChecks {
+impl Default for RiskEngine {
+    fn default() -> Self {
+        Self::new(vec![Box::new(PauseCheck), Box::new(RejectShort)])
+    }
+}
+
+impl RiskEngine {
+    /// Build an engine from ordered checks.
+    pub fn new(checks: Vec<Box<dyn RiskCheck + Send + Sync>>) -> Self {
+        Self {
+            checks: std::sync::Arc::new(checks),
+            max_positions: Vec::new(),
+            max_daily_loss: None,
+        }
+    }
+
     /// Attach a max-position rule for backtest replay.
     pub fn with_max_position(mut self, rule: MaxPositionSize) -> Self {
         self.max_positions.push(rule);
@@ -172,39 +164,17 @@ impl BacktestChecks {
         self
     }
 
-    /// Run standard backtest risk rules without dynamic dispatch.
+    /// Validate an order intent against all configured rules.
     #[inline]
     pub fn validate(&self, state: &GlobalState, intent: &OrderIntent) -> Result<()> {
-        PauseCheck.check(state, intent)?;
-        RejectShort.check(state, intent)?;
+        for check in self.checks.iter() {
+            check.check(state, intent)?;
+        }
         for rule in &self.max_positions {
             rule.check(state, intent)?;
         }
         if let Some(rule) = &self.max_daily_loss {
             rule.check(state, intent)?;
-        }
-        Ok(())
-    }
-}
-
-/// Ordered pipeline of checks.
-#[derive(Clone)]
-pub struct RiskPipeline {
-    checks: std::sync::Arc<Vec<Box<dyn RiskCheck + Send + Sync>>>,
-}
-
-impl RiskPipeline {
-    /// New pipeline.
-    pub fn new(checks: Vec<Box<dyn RiskCheck + Send + Sync>>) -> Self {
-        Self {
-            checks: std::sync::Arc::new(checks),
-        }
-    }
-
-    /// Run all checks.
-    pub fn validate(&self, state: &GlobalState, intent: &OrderIntent) -> Result<()> {
-        for c in self.checks.iter() {
-            c.check(state, intent)?;
         }
         Ok(())
     }
@@ -240,6 +210,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::from(5u64),
             client_order_id: None,
+            oco_group: None,
             source: OrderIntentSource::User,
             strategy_id: None,
         };
@@ -267,6 +238,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
+            oco_group: None,
             source: OrderIntentSource::User,
             strategy_id: None,
         };
@@ -296,6 +268,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
+            oco_group: None,
             source: OrderIntentSource::User,
             strategy_id: None,
         };
@@ -333,6 +306,7 @@ mod tests {
             stop_price: None,
             qty: Decimal::ONE,
             client_order_id: None,
+            oco_group: None,
             source: OrderIntentSource::User,
             strategy_id: None,
         };

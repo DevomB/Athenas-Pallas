@@ -67,10 +67,24 @@ mod tests {
             profit_factor: 2.0,
             closed_trades: 1,
             per_strategy: vec![],
+            parameters: crate::backtest::BacktestParameters::default(),
+            data: crate::backtest::DataMetadata::default(),
+            total_fees: "0".into(),
+            turnover: "0".into(),
+            risk_rejection_count: 0,
+            execution_rejection_count: 0,
+            rejections: vec![],
+            pending_orders: vec![],
+            final_positions: vec![],
         };
         append_results_jsonl(&ledger, &report).unwrap();
         append_results_jsonl(&ledger, &report).unwrap();
         let text = std::fs::read_to_string(&ledger).unwrap();
         assert_eq!(text.lines().count(), 2);
+        let first: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(
+            first["equity_curve"][0]["ts"],
+            serde_json::Value::String("2024-01-01T00:00:00Z".into())
+        );
     }
 }

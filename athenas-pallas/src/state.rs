@@ -1,10 +1,10 @@
 //! Authoritative in-memory book, balances, orders, and positions.
 
-pub use crate::instrument::{
-    InstrumentFilter, InstrumentIndex, InstrumentMeta, InstrumentRegistry,
-};
+pub use crate::instrument::{InstrumentIndex, InstrumentMeta, InstrumentRegistry};
 
-use crate::events::{AccountEvent, BookL2Snapshot, FillRecord, MarketEvent};
+use crate::events::{
+    AccountEvent, BookL2Snapshot, FillRecord, MarketEvent, RejectionKind, RejectionRecord,
+};
 use crate::oms::OrderStore;
 use crate::types::{Asset, InstrumentId, OpenOrder, Side, StrategyId};
 use rust_decimal::Decimal;
@@ -53,6 +53,12 @@ pub struct GlobalState {
     pub last_event_ts: Option<OffsetDateTime>,
     /// Fill blotter for JSON export.
     pub fill_log: Vec<FillRecord>,
+    /// Rejected order requests retained for strategy feedback and reporting.
+    pub rejection_log: Vec<RejectionRecord>,
+    /// Risk rejection count.
+    pub risk_rejection_count: u64,
+    /// Execution rejection count.
+    pub execution_rejection_count: u64,
     /// Half-spread for synthetic L1 from bar close (basis points).
     pub synthetic_half_spread_bps: Decimal,
 }
@@ -80,6 +86,9 @@ impl GlobalState {
             fill_count: 0,
             last_event_ts: None,
             fill_log: Vec::new(),
+            rejection_log: Vec::new(),
+            risk_rejection_count: 0,
+            execution_rejection_count: 0,
             synthetic_half_spread_bps: Decimal::from(5u64),
         }
     }
@@ -207,28 +216,70 @@ impl GlobalState {
         self.strategy_position_qty(inst, strategy_id)
     }
 
-    /// Update market state from a preloaded bar (tick-native replay).
-    pub fn apply_bar(
+    fn synthetic_bid_ask(mid: Decimal, half_spread_bps: Decimal) -> (Decimal, Decimal) {
+        let half_spread = mid * half_spread_bps / Decimal::from(10_000u64);
+        (mid - half_spread, mid + half_spread)
+    }
+
+    /// Set a preloaded bar's opening market, used to execute prior-bar orders without lookahead.
+    pub fn apply_bar_open(
         &mut self,
         ix: usize,
-        bar: &crate::backtest::Bar,
-        tick_size: rust_decimal::Decimal,
-        _half_spread_bps: rust_decimal::Decimal,
+        bar: &crate::bar::Bar,
+        tick_size: Decimal,
+        half_spread_bps: Decimal,
     ) {
         let Some(ts) = bar.timestamp() else {
             return;
         };
-        let open = crate::backtest::ticks_to_decimal(bar.open_ticks, tick_size);
-        let high = crate::backtest::ticks_to_decimal(bar.high_ticks, tick_size);
-        let low = crate::backtest::ticks_to_decimal(bar.low_ticks, tick_size);
-        let close = crate::backtest::ticks_to_decimal(bar.close_ticks, tick_size);
+        let open = crate::bar::ticks_to_decimal(bar.open_ticks, tick_size);
+        let (bid, ask) = Self::synthetic_bid_ask(open, half_spread_bps);
+        self.last_trade[ix] = Some((ts, open));
+        self.l1[ix] = Some((ts, bid, ask));
+        self.bar_high[ix] = None;
+        self.bar_low[ix] = None;
+        self.last_event_ts = Some(ts);
+    }
+
+    /// Set an owned bar event's opening market before applying its completed OHLC values.
+    pub fn apply_bar_event_open(
+        &mut self,
+        instrument: &InstrumentId,
+        ts: OffsetDateTime,
+        open: Decimal,
+    ) {
+        let Some(ix) = self.registry.index_of(instrument).map(|index| index.0) else {
+            return;
+        };
+        let (bid, ask) = Self::synthetic_bid_ask(open, self.synthetic_half_spread_bps);
+        self.last_trade[ix] = Some((ts, open));
+        self.l1[ix] = Some((ts, bid, ask));
+        self.bar_high[ix] = None;
+        self.bar_low[ix] = None;
+        self.last_event_ts = Some(ts);
+    }
+
+    /// Update market state from a completed preloaded bar (tick-native replay).
+    pub fn apply_bar(
+        &mut self,
+        ix: usize,
+        bar: &crate::bar::Bar,
+        tick_size: rust_decimal::Decimal,
+        half_spread_bps: rust_decimal::Decimal,
+    ) {
+        let Some(ts) = bar.timestamp() else {
+            return;
+        };
+        let high = crate::bar::ticks_to_decimal(bar.high_ticks, tick_size);
+        let low = crate::bar::ticks_to_decimal(bar.low_ticks, tick_size);
+        let close = crate::bar::ticks_to_decimal(bar.close_ticks, tick_size);
         self.last_trade[ix] = Some((ts, close));
         self.bar_close[ix] = Some(close);
         self.bar_high[ix] = Some(high);
         self.bar_low[ix] = Some(low);
         self.last_event_ts = Some(ts);
-        self.l1[ix] = Some((ts, low, high));
-        let _ = open;
+        let (bid, ask) = Self::synthetic_bid_ask(close, half_spread_bps);
+        self.l1[ix] = Some((ts, bid, ask));
     }
 
     /// Apply a market event (read-only book/trade updates).
@@ -242,6 +293,8 @@ impl GlobalState {
             } => {
                 if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
                     self.last_trade[ix] = Some((*ts, *price));
+                    self.bar_high[ix] = None;
+                    self.bar_low[ix] = None;
                     self.last_event_ts = Some(*ts);
                 }
             }
@@ -253,6 +306,8 @@ impl GlobalState {
             } => {
                 if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
                     self.l1[ix] = Some((*ts, *bid, *ask));
+                    self.bar_high[ix] = None;
+                    self.bar_low[ix] = None;
                     self.last_event_ts = Some(*ts);
                 }
             }
@@ -276,7 +331,9 @@ impl GlobalState {
                     self.bar_high[ix] = Some(*high);
                     self.bar_low[ix] = Some(*low);
                     self.last_event_ts = Some(*ts);
-                    self.l1[ix] = Some((*ts, *low, *high));
+                    let (bid, ask) =
+                        Self::synthetic_bid_ask(*close, self.synthetic_half_spread_bps);
+                    self.l1[ix] = Some((*ts, bid, ask));
                     let _ = open;
                 }
             }
@@ -322,68 +379,93 @@ impl GlobalState {
                 let entry = self.balances.entry(asset.clone()).or_insert(Decimal::ZERO);
                 *entry += *delta;
             }
-            AccountEvent::OrderUpdate {
-                id,
-                instrument,
-                side,
-                order_type,
-                price,
-                stop_price,
-                remaining_qty,
-                original_qty,
-                status,
-                strategy_id,
-            } => {
-                let o = OpenOrder {
-                    id: id.clone(),
-                    instrument: instrument.clone(),
-                    side: *side,
-                    order_type: *order_type,
-                    price: *price,
-                    stop_price: *stop_price,
-                    remaining_qty: *remaining_qty,
-                    original_qty: *original_qty,
-                    status: *status,
-                    strategy_id: strategy_id.clone(),
-                };
-                self.open_orders.apply_order_update(o);
-            }
-            AccountEvent::Fill {
-                instrument,
-                side,
-                price,
-                qty,
-                fee,
-                strategy_id,
-                ..
-            } => {
-                let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) else {
-                    return;
-                };
-                let sign = match side {
-                    Side::Buy => Decimal::ONE,
-                    Side::Sell => -Decimal::ONE,
-                };
-                let delta = sign * qty;
-                self.positions[ix] += delta;
-                if let Some(ref sid) = strategy_id {
-                    *self
-                        .strategy_positions
-                        .entry((ix, sid.clone()))
-                        .or_insert(Decimal::ZERO) += delta;
+            AccountEvent::OrderUpdate { .. } => self.apply_order_update(ev),
+            AccountEvent::Fill { .. } => self.apply_fill(ev),
+            AccountEvent::Rejection(rejection) => {
+                match rejection.kind {
+                    RejectionKind::Risk => self.risk_rejection_count += 1,
+                    RejectionKind::Execution => self.execution_rejection_count += 1,
                 }
-                self.fill_count += 1;
-                if let Some(ts) = self.last_event_ts {
-                    self.fill_log.push(FillRecord {
-                        ts,
-                        side: *side,
-                        qty: qty.to_string(),
-                        price: price.to_string(),
-                        fee: fee.to_string(),
-                        strategy_id: strategy_id.clone(),
-                    });
-                }
+                self.rejection_log.push(rejection.clone());
             }
+        }
+    }
+
+    fn apply_order_update(&mut self, event: &AccountEvent) {
+        let AccountEvent::OrderUpdate {
+            id,
+            instrument,
+            side,
+            order_type,
+            price,
+            stop_price,
+            remaining_qty,
+            original_qty,
+            status,
+            client_order_id,
+            oco_group,
+            strategy_id,
+        } = event
+        else {
+            return;
+        };
+        self.open_orders.apply_order_update(OpenOrder {
+            id: id.clone(),
+            instrument: instrument.clone(),
+            side: *side,
+            order_type: *order_type,
+            price: *price,
+            stop_price: *stop_price,
+            remaining_qty: *remaining_qty,
+            original_qty: *original_qty,
+            status: *status,
+            client_order_id: client_order_id.clone(),
+            oco_group: oco_group.clone(),
+            strategy_id: strategy_id.clone(),
+        });
+    }
+
+    fn apply_fill(&mut self, event: &AccountEvent) {
+        let AccountEvent::Fill {
+            order_id,
+            instrument,
+            side,
+            price,
+            qty,
+            fee,
+            client_order_id,
+            oco_group,
+            strategy_id,
+            ..
+        } = event
+        else {
+            return;
+        };
+        let Some(ix) = self.registry.index_of(instrument).map(|index| index.0) else {
+            return;
+        };
+        let delta = if *side == Side::Buy { *qty } else { -*qty };
+        self.positions[ix] += delta;
+        if let Some(strategy_id) = strategy_id {
+            *self
+                .strategy_positions
+                .entry((ix, strategy_id.clone()))
+                .or_insert(Decimal::ZERO) += delta;
+        }
+        self.fill_count += 1;
+        if let Some(ts) = self.last_event_ts {
+            self.fill_log.push(FillRecord {
+                ts,
+                order_id: order_id.clone(),
+                instrument: instrument.clone(),
+                side: *side,
+                qty: qty.to_string(),
+                price: price.to_string(),
+                fee: fee.to_string(),
+                client_order_id: client_order_id.clone(),
+                oco_group: oco_group.clone(),
+                strategy_id: strategy_id.clone(),
+            });
         }
     }
 
@@ -409,7 +491,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn apply_bar_sets_l1_from_high_low() {
+    fn apply_bar_uses_configured_synthetic_spread() {
         let i = crate::types::InstrumentId::new("test", "BTCUSDT");
         let mut inst = HashMap::new();
         inst.insert(
@@ -418,8 +500,8 @@ mod tests {
         );
         let reg = InstrumentRegistry::from_instruments(inst);
         let mut state = GlobalState::new(reg, HashMap::new());
-        let tick = crate::backtest::default_tick_size();
-        let bar = crate::backtest::Bar {
+        let tick = crate::bar::default_tick_size();
+        let bar = crate::bar::Bar {
             ts_unix_nanos: time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
             open_ticks: 9_900_000_000,
             high_ticks: 10_200_000_000,
@@ -429,8 +511,8 @@ mod tests {
         };
         state.apply_bar(0, &bar, tick, Decimal::from(100u64));
         let (_, bid, ask) = state.l1[0].unwrap();
-        assert_eq!(bid, Decimal::new(98, 0));
-        assert_eq!(ask, Decimal::new(102, 0));
+        assert_eq!(bid, Decimal::new(99, 0));
+        assert_eq!(ask, Decimal::new(101, 0));
     }
 
     #[test]
@@ -473,6 +555,8 @@ mod tests {
             qty: Decimal::new(1, 1),
             fee: Decimal::ZERO,
             fee_asset: Asset("USDT".into()),
+            client_order_id: None,
+            oco_group: None,
             strategy_id: Some(sid_a.clone()),
         });
         st.apply_account(&AccountEvent::Fill {
@@ -483,6 +567,8 @@ mod tests {
             qty: Decimal::new(5, 2),
             fee: Decimal::ZERO,
             fee_asset: Asset("USDT".into()),
+            client_order_id: None,
+            oco_group: None,
             strategy_id: Some(sid_b.clone()),
         });
         assert_eq!(st.position_qty(&i), Decimal::new(5, 2));

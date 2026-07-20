@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use super::bar::{default_tick_size, BarSeries, BarSeriesSource};
 use super::config::{BacktestConfig, DataFormat};
 use super::pbar::is_pbar_path;
 use super::sources::{FutureCsvSource, FxCsvSource, YahooCsvSource};
-use super::{CsvBarSource, HistoricalSource};
+use crate::bar::{default_tick_size, BarSeries, BarSeriesSource, CsvBarSource};
+use crate::source::HistoricalSource;
 use crate::types::{ExchangeId, Symbol};
 
 pub(crate) fn load_all_sources(

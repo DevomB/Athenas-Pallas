@@ -2,14 +2,15 @@
 
 mod common;
 
-use athenas_pallas::backtest::{BuyAndHold, CsvBarSource, HistoricalSource};
+use athenas_pallas::backtest::BuyAndHold;
 use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::events::Event;
-use athenas_pallas::execution::{PaperConfig, SimGateway};
+use athenas_pallas::execution::{PaperConfig, PaperExecution};
 use athenas_pallas::metrics::summarize;
-use athenas_pallas::risk::{PauseCheck, RiskPipeline};
+use athenas_pallas::risk::{PauseCheck, RiskEngine};
 use athenas_pallas::state::{GlobalState, InstrumentRegistry};
 use athenas_pallas::types::{EquityPoint, ExchangeId, Symbol};
+use athenas_pallas::{CsvBarSource, HistoricalSource};
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use std::path::PathBuf;
@@ -34,8 +35,8 @@ fn csv_replay_buy_and_hold() {
     let mut state = GlobalState::new(registry, balances);
     let qty = Decimal::from_f64(0.01).unwrap_or(Decimal::ZERO);
     let mut strategy = BuyAndHold::new(instrument.clone(), qty);
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = SimGateway::new(PaperConfig::default());
+    let risk = RiskEngine::new(vec![Box::new(PauseCheck)]);
+    let exec = PaperExecution::new(PaperConfig::default());
 
     let mut src = CsvBarSource::from_path(
         &sample_csv(),

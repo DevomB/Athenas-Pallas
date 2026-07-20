@@ -13,6 +13,8 @@ data_format = "yahoo"
 fee_bps = 10
 slippage_bps = 5
 half_spread_bps = 5
+# Optional; defaults to one configured lot (one share for equities).
+buy_and_hold_qty = 1
 periods_per_year = 252.0
 strategy = "simple_sma"
 python = "python"
@@ -21,6 +23,11 @@ output = "target/backtest_report.json"
 [[balances]]
 asset = "USD"
 amount = "10000"
+
+# Forwarded unchanged in the external strategy init message and report.
+[strategy_parameters]
+fast_window = 5
+slow_window = 20
 
 # Optional extra symbols for merged multi-instrument replay:
 # [[instruments]]

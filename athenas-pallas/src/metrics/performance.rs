@@ -318,6 +318,7 @@ pub fn trade_ledger_from_fills(fills: &[FillRecord]) -> TradeLedger {
 fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecord>) -> TradeLedger {
     let mut position = Decimal::ZERO;
     let mut entry_price = Decimal::ZERO;
+    let mut entry_fees = Decimal::ZERO;
     let mut gross_profit = Decimal::ZERO;
     let mut gross_loss = Decimal::ZERO;
     let mut wins = 0usize;
@@ -346,6 +347,7 @@ fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecor
         if position.is_zero() {
             position = delta;
             entry_price = price;
+            entry_fees = fee;
             continue;
         }
 
@@ -353,12 +355,16 @@ fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecor
             let new_abs = position.abs() + qty;
             entry_price = (entry_price * position.abs() + price * qty) / new_abs;
             position += delta;
+            entry_fees += fee;
             continue;
         }
 
-        let close_qty = qty.min(position.abs());
+        let old_abs = position.abs();
+        let close_qty = qty.min(old_abs);
         let pnl_per_unit = (price - entry_price) * position.signum();
-        let trade_pnl = pnl_per_unit * close_qty - fee;
+        let opening_fee = entry_fees * close_qty / old_abs;
+        let closing_fee = fee * close_qty / qty;
+        let trade_pnl = pnl_per_unit * close_qty - opening_fee - closing_fee;
         closed += 1;
         if trade_pnl > Decimal::ZERO {
             wins += 1;
@@ -368,34 +374,45 @@ fn trade_ledger_from_fill_iter<'a>(fills: impl IntoIterator<Item = &'a FillRecor
             gross_loss += trade_pnl.abs();
         }
         position += delta;
-        if !position.is_zero() {
-            entry_price = price;
-        } else {
+        if position.is_zero() {
             entry_price = Decimal::ZERO;
+            entry_fees = Decimal::ZERO;
+        } else if position.signum() == delta.signum() {
+            entry_price = price;
+            entry_fees = fee - closing_fee;
+        } else {
+            entry_fees -= opening_fee;
         }
     }
 
-    let win_rate = if closed == 0 {
-        0.0
-    } else {
-        wins as f64 / closed as f64
-    };
-    let profit_factor = if gross_loss.is_zero() {
-        if gross_profit.is_zero() {
-            0.0
-        } else {
-            f64::INFINITY
-        }
-    } else {
-        gross_profit.to_f64().unwrap_or(0.0) / gross_loss.to_f64().unwrap_or(1.0)
-    };
+    finish_trade_ledger(closed, wins, losses, gross_profit, gross_loss)
+}
 
+fn finish_trade_ledger(
+    closed: usize,
+    wins: usize,
+    losses: usize,
+    gross_profit: Decimal,
+    gross_loss: Decimal,
+) -> TradeLedger {
     TradeLedger {
         closed_trades: closed,
         wins,
         losses,
-        win_rate,
-        profit_factor,
+        win_rate: if closed == 0 {
+            0.0
+        } else {
+            wins as f64 / closed as f64
+        },
+        profit_factor: if gross_loss.is_zero() {
+            if gross_profit.is_zero() {
+                0.0
+            } else {
+                f64::INFINITY
+            }
+        } else {
+            gross_profit.to_f64().unwrap_or(0.0) / gross_loss.to_f64().unwrap_or(1.0)
+        },
         gross_profit,
         gross_loss,
     }
@@ -624,5 +641,30 @@ mod tests {
     fn pnl_matches() {
         let s = summarize(curve(), 252.0);
         assert_eq!(s.pnl, Decimal::from(20));
+    }
+
+    #[test]
+    fn trade_ledger_charges_opening_and_closing_fees() {
+        use crate::types::{InstrumentId, OrderId};
+
+        let instrument = InstrumentId::new("test", "ABC");
+        let fill = |side, price: &str| FillRecord {
+            ts: OffsetDateTime::UNIX_EPOCH,
+            order_id: OrderId::new_v4(),
+            instrument: instrument.clone(),
+            side,
+            qty: "1".into(),
+            price: price.into(),
+            fee: "1".into(),
+            client_order_id: None,
+            oco_group: None,
+            strategy_id: None,
+        };
+        let ledger = trade_ledger_from_fills(&[fill(Side::Buy, "100"), fill(Side::Sell, "102")]);
+
+        assert_eq!(ledger.closed_trades, 1);
+        assert_eq!(ledger.win_rate, 0.0);
+        assert_eq!(ledger.gross_profit, Decimal::ZERO);
+        assert_eq!(ledger.gross_loss, Decimal::ZERO);
     }
 }

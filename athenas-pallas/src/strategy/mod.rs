@@ -7,7 +7,7 @@ pub mod sizing;
 
 use crate::events::{Event, OrderIntent, ReplayEvent};
 use crate::state::GlobalState;
-use crate::types::InstrumentId;
+use crate::types::{ClientOrderId, InstrumentId, OrderId};
 use rust_decimal::Decimal;
 use time::OffsetDateTime;
 
@@ -18,6 +18,19 @@ pub use sizing::position_size_pct_equity;
 pub struct StrategyContext<'a> {
     pub now: OffsetDateTime,
     pub state: &'a GlobalState,
+}
+
+/// Non-placement actions a strategy can request alongside order intents.
+#[derive(Clone, Debug)]
+pub enum StrategyControl {
+    /// Cancel one engine order id.
+    CancelOrder(OrderId),
+    /// Cancel the working order carrying this client id.
+    CancelClientOrder(ClientOrderId),
+    /// Cancel every working order.
+    CancelAll,
+    /// Cancel every working order and close all positions at market.
+    Flatten,
 }
 
 impl StrategyContext<'_> {
@@ -56,10 +69,16 @@ pub trait Strategy: Send {
         self.on_event(ctx, &owned, out);
     }
 
-    /// When true, replay walks [`crate::backtest::BarSeries`] by index instead of allocating per-bar events.
+    /// When true, replay walks [`crate::BarSeries`] by index instead of allocating per-bar events.
     fn uses_tick_replay(&self) -> bool {
         false
     }
+
+    /// Append controls produced by the most recent strategy callback.
+    fn drain_controls(&mut self, _out: &mut Vec<StrategyControl>) {}
+
+    /// Final callback after replay, allowing cancellation or deterministic flattening.
+    fn on_finish(&mut self, _ctx: &StrategyContext<'_>, _out: &mut Vec<OrderIntent>) {}
 }
 
 /// No-op for benchmarks.
@@ -108,6 +127,18 @@ impl Strategy for CompositeStrategy {
     ) {
         for child in &mut self.children {
             child.on_replay_event(ctx, event, out);
+        }
+    }
+
+    fn drain_controls(&mut self, out: &mut Vec<StrategyControl>) {
+        for child in &mut self.children {
+            child.drain_controls(out);
+        }
+    }
+
+    fn on_finish(&mut self, ctx: &StrategyContext<'_>, out: &mut Vec<OrderIntent>) {
+        for child in &mut self.children {
+            child.on_finish(ctx, out);
         }
     }
 }

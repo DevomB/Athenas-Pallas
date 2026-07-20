@@ -1,8 +1,6 @@
-//! Instrument and configuration types (barter-instrument parity).
+//! Instrument identifiers, metadata, and dense indexing.
 
 mod asset;
-pub mod config;
-mod filter;
 mod index;
 mod kind;
 pub mod pricing;
@@ -10,12 +8,7 @@ mod registry;
 pub mod ticks;
 
 pub use asset::{Asset, ExchangeId, Symbol};
-pub use config::{
-    BalanceSnapshot, ExecutionConfig, InstrumentConfig, MockInitialState, MockInstrumentState,
-    SystemConfig,
-};
-pub use filter::InstrumentFilter;
-pub use index::{IndexedInstrument, IndexedInstruments, InstrumentIndex};
+pub use index::InstrumentIndex;
 pub use kind::{
     FutureContract, InstrumentId, InstrumentKind, OptionContract, OptionExercise, OptionKind,
     Underlying,

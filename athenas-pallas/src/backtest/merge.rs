@@ -5,7 +5,7 @@ use std::collections::BinaryHeap;
 
 use crate::events::Event;
 
-use super::HistoricalSource;
+use crate::source::HistoricalSource;
 
 fn event_ts(ev: &Event) -> time::OffsetDateTime {
     // Non-timestamped events sort to the front of the merge rather than reading wall-clock time.
@@ -87,16 +87,11 @@ pub fn merge_sources_iter(sources: &mut [Box<dyn HistoricalSource>]) -> MergedSo
     MergedSources::new(sources)
 }
 
-/// K-way merge events from multiple sources ordered by timestamp.
-pub fn merge_sources(sources: &mut [Box<dyn HistoricalSource>]) -> Vec<Event> {
-    merge_sources_iter(sources).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backtest::sources::YahooCsvSource;
-    use crate::backtest::CsvBarSource;
+    use crate::bar::CsvBarSource;
     use crate::events::MarketEvent;
     use crate::types::{ExchangeId, Symbol};
     use std::path::PathBuf;
@@ -117,7 +112,7 @@ mod tests {
         )
         .unwrap();
         let mut sources: Vec<Box<dyn HistoricalSource>> = vec![Box::new(a), Box::new(b)];
-        let merged = merge_sources(&mut sources);
+        let merged: Vec<_> = merge_sources_iter(&mut sources).collect();
         assert!(!merged.is_empty());
         for w in merged.windows(2) {
             let t0 = event_ts(&w[0]);

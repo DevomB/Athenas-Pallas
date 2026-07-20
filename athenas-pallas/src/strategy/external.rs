@@ -9,11 +9,11 @@ use crate::error::{Error, Result};
 use crate::events::{Event, OrderIntent};
 use crate::instrument::InstrumentMeta;
 use crate::strategy::protocol::{
-    intents_to_orders, snapshot_from, EventMsg, InitMsg, InstrumentInfo, IntentsMsg, ReadyMsg,
-    ShutdownMsg,
+    intents_to_orders, snapshot_from, EventMsg, FinishMsg, InitMsg, InstrumentInfo, IntentsMsg,
+    ReadyMsg, ShutdownMsg,
 };
-use crate::strategy::{Strategy, StrategyContext};
-use crate::types::InstrumentId;
+use crate::strategy::{Strategy, StrategyContext, StrategyControl};
+use crate::types::{ClientOrderId, InstrumentId};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -24,6 +24,10 @@ pub struct ExternalStrategy {
     lines: mpsc::Receiver<String>,
     seq: u64,
     instrument: InstrumentId,
+    controls: Vec<StrategyControl>,
+    fills_seen: usize,
+    rejections_seen: usize,
+    supports_finish: bool,
     protocol_error: Option<Error>,
 }
 
@@ -69,11 +73,15 @@ impl ExternalStrategy {
             lines: rx,
             seq: 0,
             instrument: InstrumentId::new("", ""),
+            controls: Vec::new(),
+            fills_seen: 0,
+            rejections_seen: 0,
+            supports_finish: false,
             protocol_error: None,
         })
     }
 
-    /// Init handshake with instrument metadata and balances.
+    /// Backward-compatible single-instrument handshake.
     pub fn handshake(
         &mut self,
         instrument: InstrumentId,
@@ -81,23 +89,57 @@ impl ExternalStrategy {
         balances: &std::collections::HashMap<crate::types::Asset, rust_decimal::Decimal>,
         fee_bps: rust_decimal::Decimal,
     ) -> Result<()> {
+        let instruments = std::collections::HashMap::from([(instrument.clone(), meta.clone())]);
+        self.handshake_with_context(
+            instrument,
+            &instruments,
+            balances,
+            fee_bps,
+            &std::collections::HashMap::new(),
+        )
+    }
+
+    /// Versioned handshake with complete instrument context and arbitrary strategy parameters.
+    pub fn handshake_with_context(
+        &mut self,
+        instrument: InstrumentId,
+        instruments: &std::collections::HashMap<InstrumentId, InstrumentMeta>,
+        balances: &std::collections::HashMap<crate::types::Asset, rust_decimal::Decimal>,
+        fee_bps: rust_decimal::Decimal,
+        parameters: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
         self.instrument = instrument.clone();
         let mut bal = std::collections::HashMap::new();
         for (a, v) in balances {
             bal.insert(a.0.to_string(), v.to_string());
         }
-        let init = InitMsg {
-            msg: "init".into(),
-            instruments: vec![InstrumentInfo {
+        let mut instrument_info: Vec<_> = instruments
+            .iter()
+            .map(|(instrument, meta)| InstrumentInfo {
                 exchange: instrument.exchange.clone(),
                 symbol: instrument.symbol.clone(),
                 base: meta.base.0.to_string(),
                 quote: meta.quote.0.to_string(),
-            }],
+                asset_class: format!("{:?}", meta.asset_class).to_ascii_lowercase(),
+                lot_size: meta.lot_size.map(|value| value.to_string()),
+                tick_size: meta.tick_size.map(|value| value.to_string()),
+                contract_multiplier: meta.contract_multiplier.map(|value| value.to_string()),
+                expiry: meta.expiry.clone(),
+                margin_initial_rate: meta.margin_initial_rate.map(|value| value.to_string()),
+            })
+            .collect();
+        instrument_info.sort_by(|left, right| {
+            (&left.exchange, &left.symbol).cmp(&(&right.exchange, &right.symbol))
+        });
+        let init = InitMsg {
+            msg: "init".into(),
+            protocol_version: 2,
+            instruments: instrument_info,
             balances: bal,
             config: [("fee_bps".into(), fee_bps.to_string())]
                 .into_iter()
                 .collect(),
+            parameters: parameters.clone(),
         };
         let line = serde_json::to_string(&init)?;
         writeln!(self.stdin, "{line}").map_err(Error::Io)?;
@@ -127,6 +169,10 @@ impl ExternalStrategy {
                 ready.msg
             )));
         }
+        self.supports_finish = ready
+            .capabilities
+            .iter()
+            .any(|capability| capability == "finish");
         Ok(())
     }
 
@@ -162,10 +208,45 @@ impl ExternalStrategy {
             msg: "event".into(),
             seq,
             event: event.clone(),
-            ctx: snapshot_from(ctx.state, &self.instrument),
+            ctx: snapshot_from(
+                ctx.state,
+                &self.instrument,
+                self.fills_seen,
+                self.rejections_seen,
+            ),
         };
         let line = serde_json::to_string(&msg)
             .map_err(|e| Error::StrategyProtocol(format!("serialize event: {e}")))?;
+        self.request_orders(ctx, seq, line)
+    }
+
+    fn orders_for_finish(&mut self, ctx: &StrategyContext) -> Result<Vec<OrderIntent>> {
+        if !self.supports_finish {
+            return Ok(Vec::new());
+        }
+        self.seq += 1;
+        let seq = self.seq;
+        let msg = FinishMsg {
+            msg: "finish".into(),
+            seq,
+            ctx: snapshot_from(
+                ctx.state,
+                &self.instrument,
+                self.fills_seen,
+                self.rejections_seen,
+            ),
+        };
+        let line = serde_json::to_string(&msg)
+            .map_err(|error| Error::StrategyProtocol(format!("serialize finish: {error}")))?;
+        self.request_orders(ctx, seq, line)
+    }
+
+    fn request_orders(
+        &mut self,
+        ctx: &StrategyContext,
+        seq: u64,
+        line: String,
+    ) -> Result<Vec<OrderIntent>> {
         writeln!(self.stdin, "{line}")
             .and_then(|_| self.stdin.flush())
             .map_err(|_| Error::StrategyProtocol("write to strategy failed".into()))?;
@@ -183,6 +264,28 @@ impl ExternalStrategy {
                 "seq mismatch expected {seq} got {}",
                 parsed.seq
             )));
+        }
+        self.fills_seen = ctx.state.fill_log.len();
+        self.rejections_seen = ctx.state.rejection_log.len();
+        self.controls.extend(
+            parsed
+                .cancel_order_ids
+                .iter()
+                .cloned()
+                .map(StrategyControl::CancelOrder),
+        );
+        self.controls.extend(
+            parsed
+                .cancel_client_order_ids
+                .iter()
+                .cloned()
+                .map(|id| StrategyControl::CancelClientOrder(ClientOrderId(id))),
+        );
+        if parsed.cancel_all {
+            self.controls.push(StrategyControl::CancelAll);
+        }
+        if parsed.flatten {
+            self.controls.push(StrategyControl::Flatten);
         }
         intents_to_orders(parsed.intents)
     }
@@ -212,6 +315,20 @@ impl Strategy for ExternalStrategy {
         match self.orders_for_event(ctx, event) {
             Ok(orders) => out.extend(orders),
             Err(e) => self.fail(e),
+        }
+    }
+
+    fn drain_controls(&mut self, out: &mut Vec<StrategyControl>) {
+        out.append(&mut self.controls);
+    }
+
+    fn on_finish(&mut self, ctx: &StrategyContext<'_>, out: &mut Vec<OrderIntent>) {
+        if self.protocol_error.is_some() {
+            return;
+        }
+        match self.orders_for_finish(ctx) {
+            Ok(orders) => out.extend(orders),
+            Err(error) => self.fail(error),
         }
     }
 }

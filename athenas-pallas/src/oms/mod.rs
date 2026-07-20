@@ -295,6 +295,8 @@ mod tests {
             remaining_qty: Decimal::ONE,
             original_qty: Decimal::ONE,
             status,
+            client_order_id: None,
+            oco_group: None,
             strategy_id: None,
         }
     }

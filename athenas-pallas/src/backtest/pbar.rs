@@ -6,7 +6,7 @@ use std::path::Path;
 
 use rust_decimal::Decimal;
 
-use super::bar::{Bar, BarSeries};
+use crate::bar::{Bar, BarSeries};
 
 const MAGIC: &[u8; 4] = b"PBAR";
 const VERSION: u32 = 1;
@@ -147,7 +147,7 @@ fn sidecar_is_fresh(csv_path: &Path, sidecar_path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backtest::bar::default_tick_size;
+    use crate::bar::default_tick_size;
     use std::path::PathBuf;
 
     #[test]

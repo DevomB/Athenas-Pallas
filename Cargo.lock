@@ -133,7 +133,6 @@ dependencies = [
  "csv",
  "databento",
  "dotenvy",
- "rayon",
  "reqwest",
  "rust_decimal",
  "rustc-hash",
@@ -159,7 +158,6 @@ dependencies = [
  "csv",
  "rust_decimal",
  "serde",
- "serde_json",
  "time",
  "toml",
 ]

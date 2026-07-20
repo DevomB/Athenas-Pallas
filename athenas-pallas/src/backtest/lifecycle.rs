@@ -37,72 +37,101 @@ pub fn apply_bar_lifecycle(state: &mut GlobalState, ts: OffsetDateTime) {
             continue;
         };
         let position = state.positions.get(ix).copied().unwrap_or(Decimal::ZERO);
+        if should_liquidate(state, ix, &meta, mid, position) {
+            liquidate_position(state, ix, &meta, mid);
+            continue;
+        }
+        apply_cash_flow(state, ts, ix, &meta, mid, position);
+    }
+}
 
-        // Maintenance-margin liquidation for leveraged derivatives: if mark-to-market equity for
-        // this row falls below the maintenance requirement, flatten it at the current mid before
-        // any further cash flows accrue. Spot/cash instruments (margin rate >= 1, or None) are
-        // never force-closed.
-        if matches!(meta.asset_class, AssetClass::Future | AssetClass::Perpetual)
-            && !position.is_zero()
-            && meta.margin_initial_rate.is_some_and(|r| r < Decimal::ONE)
+fn should_liquidate(
+    state: &GlobalState,
+    ix: usize,
+    meta: &InstrumentMeta,
+    mid: Decimal,
+    position: Decimal,
+) -> bool {
+    if !matches!(meta.asset_class, AssetClass::Future | AssetClass::Perpetual)
+        || position.is_zero()
+        || meta
+            .margin_initial_rate
+            .is_none_or(|rate| rate >= Decimal::ONE)
+    {
+        return false;
+    }
+    state
+        .mark_to_market_equity_ix(ix)
+        .is_some_and(|equity| equity < maintenance_margin_required(meta, mid, position))
+}
+
+fn apply_cash_flow(
+    state: &mut GlobalState,
+    ts: OffsetDateTime,
+    ix: usize,
+    meta: &InstrumentMeta,
+    mid: Decimal,
+    position: Decimal,
+) {
+    match meta.asset_class {
+        AssetClass::Perpetual if !position.is_zero() && is_funding_time(ts) => {
+            settle_funding(state, meta, mid, position);
+        }
+        AssetClass::Bond if is_coupon_date(ts, meta.coupon_payments_per_year.unwrap_or(2)) => {
+            settle_coupon(state, meta);
+        }
+        AssetClass::Option
+            if option_expired_on(ts, meta.expiry.as_deref()) && !position.is_zero() =>
         {
-            if let Some(equity) = state.mark_to_market_equity_ix(ix) {
-                if equity < maintenance_margin_required(&meta, mid, position) {
-                    liquidate_position(state, ix, &meta, mid);
-                    continue;
-                }
-            }
+            settle_option(state, ix, meta, mid, position);
         }
+        _ => {}
+    }
+}
 
-        match meta.asset_class {
-            AssetClass::Perpetual if !position.is_zero() && is_funding_time(ts) => {
-                let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
-                let notional = mid * position.abs() * mult;
-                let funding =
-                    apply_perp_funding(position, notional, default_perp_funding_rate_8h());
-                if !funding.is_zero() {
-                    state.apply_balance_delta(&meta.quote, funding);
-                }
-            }
-            AssetClass::Bond => {
-                if is_coupon_date(ts, meta.coupon_payments_per_year.unwrap_or(2)) {
-                    let face = meta.face_value.unwrap_or(Decimal::from(1000u64));
-                    let rate = meta.coupon_rate.unwrap_or(Decimal::new(5, 2));
-                    let ppy = meta.coupon_payments_per_year.unwrap_or(2);
-                    let coupon = bond_coupon_cash(rate, face, ppy);
-                    let held = state
-                        .balances
-                        .get(&meta.base)
-                        .copied()
-                        .unwrap_or(Decimal::ZERO);
-                    if held > Decimal::ZERO {
-                        state.apply_balance_delta(&meta.quote, coupon * held);
-                    }
-                }
-            }
-            AssetClass::Option
-                if option_expired_on(ts, meta.expiry.as_deref()) && !position.is_zero() =>
-            {
-                let strike = meta.face_value.unwrap_or(Decimal::ONE);
-                let call_itm = should_exercise_european(OptionKind::Call, mid, strike);
-                let put_itm = should_exercise_european(OptionKind::Put, mid, strike);
-                let intrinsic = if call_itm {
-                    (mid - strike).max(Decimal::ZERO)
-                } else if put_itm {
-                    (strike - mid).max(Decimal::ZERO)
-                } else {
-                    Decimal::ZERO
-                };
-                if !intrinsic.is_zero() {
-                    let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
-                    let payout = intrinsic * position.abs() * mult;
-                    state.apply_balance_delta(&meta.quote, payout);
-                    state.positions[ix] = Decimal::ZERO;
-                    state.balances.insert(meta.base.clone(), Decimal::ZERO);
-                }
-            }
-            _ => {}
-        }
+fn settle_funding(state: &mut GlobalState, meta: &InstrumentMeta, mid: Decimal, position: Decimal) {
+    let multiplier = meta.contract_multiplier.unwrap_or(Decimal::ONE);
+    let notional = mid * position.abs() * multiplier;
+    let funding = apply_perp_funding(position, notional, default_perp_funding_rate_8h());
+    if !funding.is_zero() {
+        state.apply_balance_delta(&meta.quote, funding);
+    }
+}
+
+fn settle_coupon(state: &mut GlobalState, meta: &InstrumentMeta) {
+    let face = meta.face_value.unwrap_or(Decimal::from(1000u64));
+    let rate = meta.coupon_rate.unwrap_or(Decimal::new(5, 2));
+    let payments = meta.coupon_payments_per_year.unwrap_or(2);
+    let held = state
+        .balances
+        .get(&meta.base)
+        .copied()
+        .unwrap_or(Decimal::ZERO);
+    if held > Decimal::ZERO {
+        state.apply_balance_delta(&meta.quote, bond_coupon_cash(rate, face, payments) * held);
+    }
+}
+
+fn settle_option(
+    state: &mut GlobalState,
+    ix: usize,
+    meta: &InstrumentMeta,
+    mid: Decimal,
+    position: Decimal,
+) {
+    let strike = meta.face_value.unwrap_or(Decimal::ONE);
+    let intrinsic = if should_exercise_european(OptionKind::Call, mid, strike) {
+        (mid - strike).max(Decimal::ZERO)
+    } else if should_exercise_european(OptionKind::Put, mid, strike) {
+        (strike - mid).max(Decimal::ZERO)
+    } else {
+        Decimal::ZERO
+    };
+    if !intrinsic.is_zero() {
+        let multiplier = meta.contract_multiplier.unwrap_or(Decimal::ONE);
+        state.apply_balance_delta(&meta.quote, intrinsic * position.abs() * multiplier);
+        state.positions[ix] = Decimal::ZERO;
+        state.balances.insert(meta.base.clone(), Decimal::ZERO);
     }
 }
 

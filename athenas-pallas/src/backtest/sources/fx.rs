@@ -7,8 +7,9 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use crate::backtest::{parse_ts, parse_ts_required_err, HistoricalSource};
+use crate::backtest::{parse_ts, parse_ts_required_err};
 use crate::events::{Event, MarketEvent};
+use crate::source::HistoricalSource;
 use crate::types::{ExchangeId, InstrumentId, Symbol};
 
 #[derive(Clone, Debug, Deserialize)]

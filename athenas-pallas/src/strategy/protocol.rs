@@ -8,20 +8,24 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 
-use crate::events::{Event, OrderIntent};
+use crate::events::{Event, FillRecord, OrderIntent, RejectionRecord};
 
-use crate::types::{ClientOrderId, InstrumentId, StrategyId};
+use crate::types::{ClientOrderId, InstrumentId, OpenOrder, OrderId, StrategyId};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 
 pub struct InitMsg {
     pub msg: String,
 
+    pub protocol_version: u32,
+
     pub instruments: Vec<InstrumentInfo>,
 
     pub balances: HashMap<String, String>,
 
     pub config: HashMap<String, String>,
+
+    pub parameters: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,15 +38,30 @@ pub struct InstrumentInfo {
     pub base: String,
 
     pub quote: String,
+
+    pub asset_class: String,
+
+    pub lot_size: Option<String>,
+
+    pub tick_size: Option<String>,
+
+    pub contract_multiplier: Option<String>,
+
+    pub expiry: Option<String>,
+
+    pub margin_initial_rate: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 
 pub struct ReadyMsg {
     pub msg: String,
+
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 
 pub struct StrategySnapshot {
     pub position_qty: String,
@@ -52,9 +71,26 @@ pub struct StrategySnapshot {
     pub equity: String,
 
     pub balances: HashMap<String, String>,
+
+    pub instruments: Vec<InstrumentSnapshot>,
+
+    pub pending_orders: Vec<OpenOrder>,
+
+    pub fills: Vec<FillRecord>,
+
+    pub rejections: Vec<RejectionRecord>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
+pub struct InstrumentSnapshot {
+    pub instrument: InstrumentId,
+
+    pub position_qty: String,
+
+    pub mid: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 
 pub struct EventMsg {
     pub msg: String,
@@ -87,6 +123,9 @@ pub struct IntentJson {
 
     #[serde(default)]
     pub client_order_id: Option<String>,
+
+    #[serde(default)]
+    pub oco_group: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -97,6 +136,27 @@ pub struct IntentsMsg {
     pub seq: u64,
 
     pub intents: Vec<IntentJson>,
+
+    #[serde(default)]
+    pub cancel_order_ids: Vec<OrderId>,
+
+    #[serde(default)]
+    pub cancel_client_order_ids: Vec<String>,
+
+    #[serde(default)]
+    pub cancel_all: bool,
+
+    #[serde(default)]
+    pub flatten: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FinishMsg {
+    pub msg: String,
+
+    pub seq: u64,
+
+    pub ctx: StrategySnapshot,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,6 +177,10 @@ pub fn snapshot_from(
     state: &crate::state::GlobalState,
 
     instrument: &InstrumentId,
+
+    fills_from: usize,
+
+    rejections_from: usize,
 ) -> StrategySnapshot {
     let mut balances = HashMap::new();
 
@@ -135,6 +199,22 @@ pub fn snapshot_from(
             .to_string(),
 
         balances,
+
+        instruments: state
+            .registry
+            .iter()
+            .map(|(index, instrument, _)| InstrumentSnapshot {
+                instrument: instrument.clone(),
+                position_qty: state.positions[index.0].to_string(),
+                mid: state.mid_or_last_ix(index.0).map(|value| value.to_string()),
+            })
+            .collect(),
+
+        pending_orders: state.open_orders.working_orders(),
+
+        fills: state.fill_log[fills_from.min(state.fill_log.len())..].to_vec(),
+
+        rejections: state.rejection_log[rejections_from.min(state.rejection_log.len())..].to_vec(),
     }
 }
 
@@ -163,6 +243,7 @@ fn intent_to_order(intent: IntentJson) -> crate::Result<OrderIntent> {
         stop_price,
         qty,
         client_order_id: intent.client_order_id.map(ClientOrderId),
+        oco_group: intent.oco_group,
         source: crate::events::OrderIntentSource::User,
         strategy_id: intent.strategy_id.map(StrategyId::new),
     })
@@ -188,6 +269,7 @@ mod tests {
     fn ready_roundtrip() {
         let j = serde_json::to_string(&ReadyMsg {
             msg: "ready".into(),
+            capabilities: Vec::new(),
         })
         .unwrap();
 
@@ -213,6 +295,8 @@ mod tests {
             strategy_id: Some("sleeve_a".into()),
 
             client_order_id: Some("cid-1".into()),
+
+            oco_group: Some("entry-bracket".into()),
         };
 
         let orders = intents_to_orders(vec![j]).unwrap();
@@ -228,5 +312,7 @@ mod tests {
             orders[0].client_order_id.as_ref().map(|c| c.0.as_str()),
             Some("cid-1")
         );
+
+        assert_eq!(orders[0].oco_group.as_deref(), Some("entry-bracket"));
     }
 }

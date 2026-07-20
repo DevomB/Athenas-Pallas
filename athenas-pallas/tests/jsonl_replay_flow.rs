@@ -3,9 +3,9 @@
 mod common;
 
 use athenas_pallas::backtest::{read_events_jsonl, replay_events_serial};
-use athenas_pallas::execution::{PaperConfig, SimGateway};
+use athenas_pallas::execution::{PaperConfig, PaperExecution};
 use athenas_pallas::instrument::InstrumentRegistry;
-use athenas_pallas::risk::{PauseCheck, RiskPipeline};
+use athenas_pallas::risk::{PauseCheck, RiskEngine};
 use athenas_pallas::state::GlobalState;
 use athenas_pallas::strategy::NoopStrategy;
 use athenas_pallas::types::Asset;
@@ -39,8 +39,8 @@ fn jsonl_replay_yields_ten_events() {
     balances.insert(Asset("USD".into()), Decimal::new(10_000, 0));
     let state = GlobalState::new(InstrumentRegistry::from_instruments(instruments), balances);
     let strategy = NoopStrategy;
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = SimGateway::new(PaperConfig::default());
+    let risk = RiskEngine::new(vec![Box::new(PauseCheck)]);
+    let exec = PaperExecution::new(PaperConfig::default());
     let final_state = replay_events_serial(state, strategy, &risk, &exec, events).expect("replay");
     assert_eq!(final_state.fill_count, 0);
 }

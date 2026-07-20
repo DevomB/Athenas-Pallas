@@ -56,12 +56,12 @@ pub trait SyncExecutionGateway: Send + Sync {
 
 /// Backtest gateway delegating to [`FillEngine`] sync fill rules.
 #[derive(Clone)]
-pub struct SyncPaperGateway {
+pub struct PaperExecution {
     inner: FillEngine,
 }
 
-impl SyncPaperGateway {
-    /// New sync paper gateway.
+impl PaperExecution {
+    /// New paper execution backend.
     pub fn new(cfg: super::PaperConfig) -> Self {
         Self {
             inner: FillEngine::new(cfg),
@@ -69,7 +69,13 @@ impl SyncPaperGateway {
     }
 }
 
-impl SyncExecutionGateway for SyncPaperGateway {
+impl Default for PaperExecution {
+    fn default() -> Self {
+        Self::new(super::PaperConfig::default())
+    }
+}
+
+impl SyncExecutionGateway for PaperExecution {
     fn place_limit(&self, state: &GlobalState, intent: &OrderIntent) -> Result<AccountEvents> {
         self.inner.place_limit_sync(state, intent)
     }

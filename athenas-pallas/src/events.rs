@@ -104,6 +104,12 @@ pub enum AccountEvent {
         original_qty: Decimal,
         /// Status.
         status: OrderStatus,
+        /// Client-supplied correlation id.
+        #[serde(default)]
+        client_order_id: Option<ClientOrderId>,
+        /// One-cancels-other group shared by sibling orders.
+        #[serde(default)]
+        oco_group: Option<String>,
         /// Sub-strategy attribution (if any).
         #[serde(default)]
         strategy_id: Option<StrategyId>,
@@ -124,10 +130,45 @@ pub enum AccountEvent {
         fee: Decimal,
         /// Fee asset.
         fee_asset: Asset,
+        /// Client-supplied correlation id.
+        #[serde(default)]
+        client_order_id: Option<ClientOrderId>,
+        /// One-cancels-other group shared by sibling orders.
+        #[serde(default)]
+        oco_group: Option<String>,
         /// Sub-strategy attribution when known (paper/sim propagate from working order).
         #[serde(default)]
         strategy_id: Option<StrategyId>,
     },
+    /// Risk or execution rejection retained for strategy feedback and reporting.
+    Rejection(RejectionRecord),
+}
+
+/// Stage at which an order request was rejected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RejectionKind {
+    /// Rejected before execution by a risk rule.
+    Risk,
+    /// Rejected by the execution simulator or venue adapter.
+    Execution,
+}
+
+/// Structured rejected-order record.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RejectionRecord {
+    /// Replay time at which the rejection occurred.
+    #[serde(with = "time::serde::rfc3339")]
+    pub ts: OffsetDateTime,
+    /// Risk or execution stage.
+    pub kind: RejectionKind,
+    /// Target instrument.
+    pub instrument: InstrumentId,
+    /// Client correlation id, if supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_order_id: Option<ClientOrderId>,
+    /// Human-readable rejection reason.
+    pub reason: String,
 }
 
 /// Control-plane commands (also used for in-process control).
@@ -160,7 +201,12 @@ pub struct TimerEvent {
 #[derive(Clone, Debug, Serialize)]
 pub struct FillRecord {
     /// When the fill occurred.
+    #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
+    /// Engine order id.
+    pub order_id: OrderId,
+    /// Filled instrument.
+    pub instrument: InstrumentId,
     /// Buy or sell.
     pub side: Side,
     /// Base quantity.
@@ -169,6 +215,12 @@ pub struct FillRecord {
     pub price: String,
     /// Fee paid.
     pub fee: String,
+    /// Client correlation id, if supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_order_id: Option<ClientOrderId>,
+    /// OCO group, if supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oco_group: Option<String>,
     /// Sub-strategy attribution when the originating order carried a [`StrategyId`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strategy_id: Option<StrategyId>,
@@ -197,6 +249,7 @@ impl Event {
             Event::Market(MarketEvent::Bar { instrument, .. }) => Some(instrument),
             Event::Account(AccountEvent::OrderUpdate { instrument, .. }) => Some(instrument),
             Event::Account(AccountEvent::Fill { instrument, .. }) => Some(instrument),
+            Event::Account(AccountEvent::Rejection(rejection)) => Some(&rejection.instrument),
             _ => None,
         }
     }
@@ -326,6 +379,9 @@ pub struct OrderIntent {
     pub qty: Decimal,
     /// Optional client id.
     pub client_order_id: Option<ClientOrderId>,
+    /// One-cancels-other group shared by sibling orders.
+    #[serde(default)]
+    pub oco_group: Option<String>,
     /// Source for risk rules (e.g. flatten bypasses [`crate::risk::PauseCheck`]).
     #[serde(default)]
     pub source: OrderIntentSource,

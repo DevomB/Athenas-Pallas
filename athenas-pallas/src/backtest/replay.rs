@@ -6,7 +6,7 @@ use crate::engine::replay_events_sync;
 use crate::error::Result;
 use crate::events::Event;
 use crate::execution::SyncExecutionGateway;
-use crate::risk::RiskPipeline;
+use crate::risk::RiskEngine;
 use crate::state::GlobalState;
 use crate::strategy::Strategy;
 
@@ -29,7 +29,7 @@ pub fn read_events_jsonl(r: impl Read) -> Result<Vec<Event>> {
 pub fn replay_events_serial<S, E>(
     state: GlobalState,
     strategy: S,
-    risk: &RiskPipeline,
+    risk: &RiskEngine,
     exec: &E,
     events: Vec<Event>,
 ) -> Result<GlobalState>

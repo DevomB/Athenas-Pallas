@@ -4,8 +4,9 @@
 use std::path::Path;
 
 use super::csv_common::{parse_yahoo_csv, YahooRow};
-use crate::backtest::{parse_ts, HistoricalSource};
+use crate::backtest::parse_ts;
 use crate::events::{Event, MarketEvent};
+use crate::source::HistoricalSource;
 use crate::types::{ExchangeId, InstrumentId, Symbol};
 
 /// Yahoo-format OHLCV file.

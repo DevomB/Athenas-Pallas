@@ -134,6 +134,12 @@ pub struct OpenOrder {
     pub original_qty: Decimal,
     /// Status.
     pub status: OrderStatus,
+    /// Client-supplied correlation id, if any.
+    #[serde(default)]
+    pub client_order_id: Option<ClientOrderId>,
+    /// One-cancels-other group shared by sibling orders.
+    #[serde(default)]
+    pub oco_group: Option<String>,
     /// Sub-strategy attribution (if any); copied from the originating [`crate::events::OrderIntent`].
     #[serde(default)]
     pub strategy_id: Option<StrategyId>,
@@ -143,6 +149,7 @@ pub struct OpenOrder {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EquityPoint {
     /// Timestamp.
+    #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
     /// Mark-to-market equity in quote (e.g. USDT).
     pub equity_quote: Decimal,

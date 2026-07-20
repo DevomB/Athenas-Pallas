@@ -36,6 +36,8 @@ mod tests {
             qty: Decimal::ONE,
             fee: Decimal::ZERO,
             fee_asset: Asset("USDT".into()),
+            client_order_id: None,
+            oco_group: None,
             strategy_id: Some(StrategyId::new("z")),
         });
         let rows = strategy_position_report(&s);

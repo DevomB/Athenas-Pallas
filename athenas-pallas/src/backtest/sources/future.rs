@@ -5,8 +5,10 @@ use std::io::Read;
 use std::path::Path;
 
 use super::csv_common::{headers_are_yahoo, read_yahoo_rows, YahooRow};
-use crate::backtest::{parse_ts, parse_ts_required_err, HistoricalSource, OhlcvRow};
+use crate::backtest::{parse_ts, parse_ts_required_err};
+use crate::bar::OhlcvRow;
 use crate::events::{Event, MarketEvent};
+use crate::source::HistoricalSource;
 use crate::types::{ExchangeId, InstrumentId, Symbol};
 
 enum FutureRow {

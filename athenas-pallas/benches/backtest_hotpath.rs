@@ -1,19 +1,17 @@
-use athenas_pallas::backtest::{
-    default_tick_size, run_backtest, BacktestConfig, BarSeries, BarSeriesSource, BuyAndHold,
-    DataFormat, HistoricalSource,
-};
+use athenas_pallas::backtest::{run_backtest, BacktestConfig, BuyAndHold, DataFormat};
 use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::dispatch_replay_sync;
-use athenas_pallas::execution::{PaperConfig, SimGateway};
-use athenas_pallas::risk::{BacktestChecks, PauseCheck, RiskPipeline};
+use athenas_pallas::execution::{PaperConfig, PaperExecution};
+use athenas_pallas::risk::{PauseCheck, RiskEngine};
 use athenas_pallas::state::{GlobalState, InstrumentRegistry};
 use athenas_pallas::strategy::NoopStrategy;
 use athenas_pallas::types::{Asset, ExchangeId, InstrumentId, Symbol};
+use athenas_pallas::{default_tick_size, BarSeries, BarSeriesSource, HistoricalSource};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
-fn setup_noop_replay(n_bars: usize) -> (GlobalState, BarSeriesSource, SimGateway) {
+fn setup_noop_replay(n_bars: usize) -> (GlobalState, BarSeriesSource, PaperExecution) {
     let inst = InstrumentId::new("test", "EXAMPLE");
     let mut map = HashMap::new();
     map.insert(
@@ -23,7 +21,7 @@ fn setup_noop_replay(n_bars: usize) -> (GlobalState, BarSeriesSource, SimGateway
     let mut balances = HashMap::new();
     balances.insert(Asset::new("USD"), Decimal::new(10_000, 0));
     let state = GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
-    let exec = SimGateway::new(PaperConfig::default());
+    let exec = PaperExecution::new(PaperConfig::default());
     let series = BarSeries::random_walk(n_bars, 42, Decimal::new(100, 0), default_tick_size());
     let src = BarSeriesSource::new(series, ExchangeId::new("test"), Symbol::new("EXAMPLE"));
     (state, src, exec)
@@ -32,8 +30,8 @@ fn setup_noop_replay(n_bars: usize) -> (GlobalState, BarSeriesSource, SimGateway
 fn replay_noop_loop(
     state: &mut GlobalState,
     src: &mut BarSeriesSource,
-    exec: &SimGateway,
-    risk: &RiskPipeline,
+    exec: &PaperExecution,
+    risk: &RiskEngine,
 ) {
     let mut strategy = NoopStrategy;
     let mut intents = Vec::with_capacity(4);
@@ -46,7 +44,7 @@ fn bench_noop(c: &mut Criterion) {
     c.bench_function("noop_100k_bars", |b| {
         b.iter(|| {
             let (mut state, mut src, exec) = setup_noop_replay(100_000);
-            let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
+            let risk = RiskEngine::new(vec![Box::new(PauseCheck)]);
             replay_noop_loop(black_box(&mut state), &mut src, &exec, &risk);
         });
     });
@@ -54,7 +52,7 @@ fn bench_noop(c: &mut Criterion) {
 
 fn bench_noop_amortized(c: &mut Criterion) {
     let (mut state, mut src, exec) = setup_noop_replay(100_000);
-    let checks = BacktestChecks::default();
+    let checks = RiskEngine::default();
     let mut strategy = NoopStrategy;
     let mut intents = Vec::with_capacity(4);
     c.bench_function("noop_100k_amortized", |b| {
@@ -97,8 +95,8 @@ fn bench_buy_and_hold(c: &mut Criterion) {
             balances.insert(Asset::new("USD"), Decimal::new(10_000, 0));
             let mut state = GlobalState::new(InstrumentRegistry::from_instruments(map), balances);
             let mut strategy = BuyAndHold::new(inst.clone(), Decimal::new(1, 2));
-            let checks = BacktestChecks::default();
-            let exec = SimGateway::new(PaperConfig::default());
+            let checks = RiskEngine::default();
+            let exec = PaperExecution::new(PaperConfig::default());
             let series =
                 BarSeries::random_walk(100_000, 42, Decimal::new(100, 0), default_tick_size());
             let mut src =
@@ -123,7 +121,7 @@ fn bench_equity_curve_toggle(c: &mut Criterion) {
             |b, &record| {
                 b.iter(|| {
                     let (mut state, mut src, exec) = setup_noop_replay(10_000);
-                    let checks = BacktestChecks::default();
+                    let checks = RiskEngine::default();
                     let mut strategy = NoopStrategy;
                     let mut intents = Vec::with_capacity(4);
                     let mut samples = 0usize;

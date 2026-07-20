@@ -2,8 +2,8 @@
 
 use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::events::{ControlEvent, Event, MarketEvent, OrderIntent};
-use athenas_pallas::execution::{PaperConfig, SimGateway};
-use athenas_pallas::risk::{PauseCheck, RiskPipeline};
+use athenas_pallas::execution::{PaperConfig, PaperExecution};
+use athenas_pallas::risk::{PauseCheck, RiskEngine};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::strategy::{Strategy, StrategyContext};
 use athenas_pallas::types::{Asset, InstrumentId};
@@ -37,8 +37,8 @@ fn flatten_closes_position_when_paused() {
     state.paused = true;
 
     let mut strat = Quiet;
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = SimGateway::new(PaperConfig::default());
+    let risk = RiskEngine::new(vec![Box::new(PauseCheck)]);
+    let exec = PaperExecution::new(PaperConfig::default());
     let mut intents = Vec::new();
 
     let ts = OffsetDateTime::now_utc();

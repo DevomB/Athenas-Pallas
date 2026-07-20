@@ -45,33 +45,35 @@ pub enum DataFormat {
 
 impl DataFormat {
     /// Parse user-facing data-format aliases.
-    pub fn parse(s: &str) -> Self {
+    pub fn parse(s: &str) -> Result<Self, String> {
         match s.to_ascii_lowercase().as_str() {
-            "ohlcv" => Self::Ohlcv,
-            "yahoo" => Self::Yahoo,
-            "fx" => Self::Fx,
-            "future" | "futures" => Self::Future,
-            _ => Self::Auto,
+            "auto" => Ok(Self::Auto),
+            "ohlcv" => Ok(Self::Ohlcv),
+            "yahoo" => Ok(Self::Yahoo),
+            "fx" => Ok(Self::Fx),
+            "future" | "futures" => Ok(Self::Future),
+            _ => Err(format!("unsupported data format `{s}`")),
         }
     }
 }
 
 /// Parse user-facing asset-class aliases.
-pub fn parse_asset_class(s: &str) -> AssetClass {
+pub fn parse_asset_class(s: &str) -> Result<AssetClass, String> {
     match s.to_ascii_lowercase().as_str() {
-        "equity" => AssetClass::Equity,
-        "forex" | "fx" => AssetClass::Forex,
-        "future" | "futures" => AssetClass::Future,
-        "option" | "options" => AssetClass::Option,
-        "perpetual" | "perp" => AssetClass::Perpetual,
-        "bond" | "bonds" => AssetClass::Bond,
-        "hybrid" => AssetClass::Hybrid,
-        _ => AssetClass::Crypto,
+        "crypto" | "crypto_spot" | "spot" => Ok(AssetClass::Crypto),
+        "equity" | "equities" => Ok(AssetClass::Equity),
+        "forex" | "fx" => Ok(AssetClass::Forex),
+        "future" | "futures" => Ok(AssetClass::Future),
+        "option" | "options" => Ok(AssetClass::Option),
+        "perpetual" | "perp" => Ok(AssetClass::Perpetual),
+        "bond" | "bonds" => Ok(AssetClass::Bond),
+        "hybrid" => Ok(AssetClass::Hybrid),
+        _ => Err(format!("unsupported asset class `{s}`")),
     }
 }
 
 /// Parse user-facing data-format aliases.
-pub fn parse_data_format(s: &str) -> DataFormat {
+pub fn parse_data_format(s: &str) -> Result<DataFormat, String> {
     DataFormat::parse(s)
 }
 
@@ -89,6 +91,8 @@ pub struct BacktestConfig {
     pub fee_bps: Decimal,
     pub slippage_bps: Decimal,
     pub half_spread_bps: Decimal,
+    /// Quantity used by the built-in buy-and-hold strategy; one instrument lot when omitted.
+    pub buy_and_hold_qty: Option<Decimal>,
     pub periods_per_year: f64,
     /// Declared bar interval (e.g. `30m`, `1d`) for Sharpe annualization when set.
     pub bar_interval: Option<String>,
@@ -102,6 +106,8 @@ pub struct BacktestConfig {
     pub expiry: Option<String>,
     pub record_equity_curve: bool,
     pub strategy_path: Option<PathBuf>,
+    /// Arbitrary JSON-compatible parameters forwarded to external strategy initialization.
+    pub strategy_parameters: HashMap<String, serde_json::Value>,
     pub python_exe: String,
     pub output_path: Option<PathBuf>,
     pub verbose: bool,
@@ -145,6 +151,7 @@ impl Default for BacktestConfig {
             fee_bps: Decimal::from(10u64),
             slippage_bps: Decimal::from(5u64),
             half_spread_bps: Decimal::from(5u64),
+            buy_and_hold_qty: None,
             periods_per_year: 365.0,
             bar_interval: None,
             session_filter: None,
@@ -155,6 +162,7 @@ impl Default for BacktestConfig {
             expiry: None,
             record_equity_curve: true,
             strategy_path: None,
+            strategy_parameters: HashMap::new(),
             python_exe: "python".into(),
             output_path: None,
             verbose: false,
@@ -215,55 +223,34 @@ pub fn parse_base_quote(symbol: &str, class: AssetClass) -> (String, String) {
 /// Build registry metadata from primary backtest config.
 pub fn instrument_meta_from_config(cfg: &BacktestConfig) -> InstrumentMeta {
     let (base, quote) = cfg.resolved_base_quote();
-    instrument_meta_from_fields_with_assets(
+    build_instrument_meta(MetaFields {
         base,
         quote,
-        cfg.asset_class,
-        cfg.lot_size,
-        cfg.tick_size,
-        cfg.contract_multiplier,
-        cfg.expiry.clone(),
-        cfg.margin_initial_rate,
-    )
+        asset_class: cfg.asset_class,
+        lot_size: cfg.lot_size,
+        tick_size: cfg.tick_size,
+        contract_multiplier: cfg.contract_multiplier,
+        expiry: cfg.expiry.clone(),
+        margin_initial_rate: cfg.margin_initial_rate,
+    })
 }
 
 /// Build metadata for an extra registered instrument.
 pub fn instrument_meta_from_extra(extra: &ExtraInstrument) -> InstrumentMeta {
-    instrument_meta_from_fields(
-        &extra.instrument.symbol,
-        extra.asset_class,
-        extra.lot_size,
-        extra.tick_size,
-        extra.contract_multiplier,
-        extra.expiry.clone(),
-        extra.margin_initial_rate,
-    )
-}
-
-fn instrument_meta_from_fields(
-    symbol: &str,
-    asset_class: AssetClass,
-    lot_size: Option<Decimal>,
-    tick_size: Option<Decimal>,
-    contract_multiplier: Option<Decimal>,
-    expiry: Option<String>,
-    margin_initial_rate: Option<Decimal>,
-) -> InstrumentMeta {
-    let (base, quote) = parse_base_quote(symbol, asset_class);
-    instrument_meta_from_fields_with_assets(
+    let (base, quote) = parse_base_quote(&extra.instrument.symbol, extra.asset_class);
+    build_instrument_meta(MetaFields {
         base,
         quote,
-        asset_class,
-        lot_size,
-        tick_size,
-        contract_multiplier,
-        expiry,
-        margin_initial_rate,
-    )
+        asset_class: extra.asset_class,
+        lot_size: extra.lot_size,
+        tick_size: extra.tick_size,
+        contract_multiplier: extra.contract_multiplier,
+        expiry: extra.expiry.clone(),
+        margin_initial_rate: extra.margin_initial_rate,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn instrument_meta_from_fields_with_assets(
+struct MetaFields {
     base: String,
     quote: String,
     asset_class: AssetClass,
@@ -272,35 +259,47 @@ fn instrument_meta_from_fields_with_assets(
     contract_multiplier: Option<Decimal>,
     expiry: Option<String>,
     margin_initial_rate: Option<Decimal>,
-) -> InstrumentMeta {
-    let mut meta = match asset_class {
-        AssetClass::Future => InstrumentMeta::future(
-            base,
-            quote,
-            contract_multiplier.unwrap_or(Decimal::ONE),
-            tick_size.unwrap_or(Decimal::new(25, 2)),
-            lot_size,
-            expiry.clone(),
-        ),
+}
+
+fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
+    let MetaFields {
+        base,
+        quote,
+        asset_class,
+        lot_size,
+        tick_size,
+        contract_multiplier,
+        expiry,
+        margin_initial_rate,
+    } = fields;
+    match asset_class {
+        AssetClass::Future => {
+            let mut meta = InstrumentMeta::future(
+                base,
+                quote,
+                contract_multiplier.unwrap_or(Decimal::ONE),
+                tick_size.unwrap_or(Decimal::new(25, 2)),
+                lot_size,
+                expiry,
+            );
+            meta.margin_initial_rate = margin_initial_rate;
+            meta
+        }
         AssetClass::Perpetual => InstrumentMeta::perpetual(
             base,
             quote,
             contract_multiplier,
             margin_initial_rate.or(Some(Decimal::new(1, 1))),
         ),
-        AssetClass::Option => {
-            // Until dedicated `strike` TOML field: use `tick_size` as strike price.
-            let strike = tick_size.unwrap_or(Decimal::from(100u64));
-            InstrumentMeta::option_meta(
-                base,
-                quote,
-                contract_multiplier.unwrap_or(Decimal::ONE),
-                Decimal::new(1, 2),
-                margin_initial_rate,
-                expiry.clone(),
-                strike,
-            )
-        }
+        AssetClass::Option => InstrumentMeta::option_meta(
+            base,
+            quote,
+            contract_multiplier.unwrap_or(Decimal::ONE),
+            Decimal::new(1, 2),
+            margin_initial_rate,
+            expiry.clone(),
+            tick_size.unwrap_or(Decimal::from(100u64)),
+        ),
         AssetClass::Bond => InstrumentMeta::bond(
             base,
             quote,
@@ -340,11 +339,7 @@ fn instrument_meta_from_fields_with_assets(
             coupon_payments_per_year: None,
             maturity: expiry,
         },
-    };
-    if meta.margin_initial_rate.is_none() {
-        meta.margin_initial_rate = margin_initial_rate;
     }
-    meta
 }
 
 #[cfg(test)]
@@ -353,9 +348,9 @@ mod tests {
 
     #[test]
     fn parses_user_facing_enums() {
-        assert_eq!(parse_asset_class("perp"), AssetClass::Perpetual);
-        assert_eq!(parse_asset_class("options"), AssetClass::Option);
-        assert_eq!(parse_data_format("futures"), DataFormat::Future);
-        assert_eq!(parse_data_format("unknown"), DataFormat::Auto);
+        assert_eq!(parse_asset_class("perp"), Ok(AssetClass::Perpetual));
+        assert_eq!(parse_asset_class("options"), Ok(AssetClass::Option));
+        assert_eq!(parse_data_format("futures"), Ok(DataFormat::Future));
+        assert!(parse_data_format("unknown").is_err());
     }
 }

@@ -5,14 +5,15 @@
 //! ```
 
 use athenas_pallas::backtest::sources::YahooCsvSource;
-use athenas_pallas::backtest::{BuyAndHold, HistoricalSource};
+use athenas_pallas::backtest::BuyAndHold;
 use athenas_pallas::dispatch_event_sync;
 use athenas_pallas::events::Event;
-use athenas_pallas::execution::{PaperConfig, SimGateway};
+use athenas_pallas::execution::{PaperConfig, PaperExecution};
 use athenas_pallas::metrics::summarize;
-use athenas_pallas::risk::{PauseCheck, RiskPipeline};
+use athenas_pallas::risk::{PauseCheck, RiskEngine};
 use athenas_pallas::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
 use athenas_pallas::types::{Asset, EquityPoint, ExchangeId, InstrumentId, Symbol};
+use athenas_pallas::HistoricalSource;
 use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
@@ -30,8 +31,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = GlobalState::new(registry, balances);
     let qty = Decimal::from_f64(10.0).unwrap_or(Decimal::ZERO);
     let mut strategy = BuyAndHold::new(instrument.clone(), qty);
-    let risk = RiskPipeline::new(vec![Box::new(PauseCheck)]);
-    let exec = SimGateway::new(PaperConfig::default());
+    let risk = RiskEngine::new(vec![Box::new(PauseCheck)]);
+    let exec = PaperExecution::new(PaperConfig::default());
 
     let csv = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/data/EXAMPLE_1d.csv");
     let mut src =
