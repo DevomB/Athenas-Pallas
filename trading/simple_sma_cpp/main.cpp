@@ -14,7 +14,7 @@ pallas::RollingSma g_fast(kFast);
 pallas::RollingSma g_slow(kSlow);
 int g_prev_sign = 0;
 
-std::vector<pallas::Intent> on_event(const pallas::Ctx& ctx, const pallas::json& event) {
+std::vector<pallas::Intent> on_event(const pallas::Ctx& ctx, const pallas::Event& event) {
     std::vector<pallas::Intent> intents;
     const auto close = pallas::bar_close(event);
     if (!close) {

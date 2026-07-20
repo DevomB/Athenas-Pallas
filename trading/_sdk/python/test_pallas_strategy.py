@@ -46,7 +46,9 @@ run(on_event, on_init=on_init)
             check=True,
         )
         lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
-        self.assertEqual(json.loads(lines[0]), {"msg": "ready"})
+        self.assertEqual(
+            json.loads(lines[0]), {"msg": "ready", "capabilities": ["finish"]}
+        )
 
     def test_position_size_pct_equity(self) -> None:
         sys.path.insert(0, str(SDK))

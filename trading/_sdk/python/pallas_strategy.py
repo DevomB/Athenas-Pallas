@@ -6,7 +6,7 @@ import json
 import sys
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 
 @dataclass
@@ -15,6 +15,10 @@ class Ctx:
     mid: Optional[str]
     equity: str
     balances: dict
+    instruments: list[dict] = field(default_factory=list)
+    pending_orders: list[dict] = field(default_factory=list)
+    fills: list[dict] = field(default_factory=list)
+    rejections: list[dict] = field(default_factory=list)
     instrument: Optional[dict] = field(default=None)
 
 
@@ -25,14 +29,26 @@ def _read_line() -> dict:
     return json.loads(line)
 
 
-def _write_intents(seq: int, intents: List[dict]) -> None:
-    sys.stdout.write(
-        json.dumps({"msg": "intents", "seq": seq, "intents": intents}) + "\n"
-    )
+def _write_intents(seq: int, intents: List[dict], actions: Optional[dict] = None) -> None:
+    response = {"msg": "intents", "seq": seq, "intents": intents}
+    if actions:
+        response.update(actions)
+    sys.stdout.write(json.dumps(response) + "\n")
     sys.stdout.flush()
 
 
-def run(on_event: Callable[[Ctx, dict], List[dict]], on_init: Optional[Callable[[dict], None]] = None) -> None:
+def _split_result(result: Union[List[dict], dict]) -> tuple[List[dict], dict]:
+    if isinstance(result, dict):
+        actions = dict(result)
+        return actions.pop("intents", []), actions
+    return result, {}
+
+
+def run(
+    on_event: Callable[[Ctx, dict], Union[List[dict], dict]],
+    on_init: Optional[Callable[[dict], None]] = None,
+    on_finish: Optional[Callable[[Ctx], dict]] = None,
+) -> None:
     msg = _read_line()
     if msg.get("msg") != "init":
         raise RuntimeError(f"expected init, got {msg}")
@@ -40,7 +56,7 @@ def run(on_event: Callable[[Ctx, dict], List[dict]], on_init: Optional[Callable[
     session_instrument: Optional[dict] = instruments[0] if instruments else None
     if on_init:
         on_init(msg)
-    sys.stdout.write(json.dumps({"msg": "ready"}) + "\n")
+    sys.stdout.write(json.dumps({"msg": "ready", "capabilities": ["finish"]}) + "\n")
     sys.stdout.flush()
 
     while True:
@@ -50,11 +66,16 @@ def run(on_event: Callable[[Ctx, dict], List[dict]], on_init: Optional[Callable[
         msg = json.loads(line)
         if msg.get("msg") == "shutdown":
             break
+        if msg.get("msg") == "finish":
+            ctx = Ctx(**msg["ctx"], instrument=session_instrument)
+            intents, actions = _split_result(on_finish(ctx) if on_finish else {})
+            _write_intents(msg["seq"], intents, actions)
+            continue
         if msg.get("msg") != "event":
             continue
         ctx = Ctx(**msg["ctx"], instrument=session_instrument)
-        intents = on_event(ctx, msg["event"])
-        _write_intents(msg["seq"], intents)
+        intents, actions = _split_result(on_event(ctx, msg["event"]))
+        _write_intents(msg["seq"], intents, actions)
 
 
 class RollingSma:
