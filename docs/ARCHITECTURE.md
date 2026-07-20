@@ -12,7 +12,7 @@ flowchart LR
     ST[GlobalState]
     STG[Strategy]
     RK[Risk checks]
-    EX[FillEngine / SimGateway]
+    EX[FillEngine / PaperExecution]
   end
   CSV --> EV
   EV --> ST
@@ -69,7 +69,6 @@ The resolver detects CMake C++ directories, Python directories/files, and compil
 |--------|-------|---------|
 | `pallas-backtest` | `athenas-pallas` | Run backtest from TOML/flags |
 | `pallas-resample` | `athenas-pallas-tools` | Offline bar aggregation |
-| `pallas-merge` | `athenas-pallas-tools` | K-way merge CSV streams by timestamp |
 | `pallas-sweep` | `athenas-pallas-tools` | Grid search over TOML parameters |
 
 See [PERFORMANCE.md](PERFORMANCE.md) for hot-path details and benchmark commands.

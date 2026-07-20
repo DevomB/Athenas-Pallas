@@ -14,7 +14,7 @@ Event-driven algorithmic **backtesting** in Rust. Replay CSV or pbar history, ru
 Current installed surface:
 
 - Workspace crates: `athenas-pallas` and `athenas-pallas-tools`
-- Rust binaries: `pallas-backtest`, `pallas-merge`, `pallas-resample`, and `pallas-sweep`
+- Rust binaries: `pallas-backtest`, `pallas-resample`, and `pallas-sweep`
 - Cargo features on `athenas-pallas`: `default`, `databento`, and `tracing-full`
 - Market data ingestion: local CSV/pbar files by default, plus an optional Databento OHLCV cache/export path behind `--features databento`. There is no installed Alpha Vantage, Binance-live, or generic fetch package in this checkout.
 
@@ -42,11 +42,19 @@ Built-in buy-and-hold over the committed EXAMPLE fixture:
 cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv --instrument test:EXAMPLE --initial-balance USD:10000
 ```
 
+The built-in strategy uses one configured instrument lot by default (one share for ordinary
+equities). Override it explicitly with `--buy-and-hold-qty QTY`.
+
 Direct strategy-name resolution:
 
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv --instrument test:EXAMPLE --initial-balance USD:10000 --strategy simple_sma
 ```
+
+External strategies receive arbitrary initialization parameters via repeated
+`--param KEY=JSON` arguments or the `[strategy_parameters]` TOML table. JSON reports include the
+effective parameters, source/time-range metadata, RFC3339 timestamps, fees, turnover, rejection
+counts/details, pending orders and client ids, and final positions.
 
 Or use the helper scripts:
 
@@ -64,12 +72,15 @@ trading/
   _sdk/
     python/pallas_strategy.py
     cpp/pallas_strategy.hpp
-    cpp/json.hpp
   simple_sma/
     strategy.py
   simple_sma_cpp/
     CMakeLists.txt
     main.cpp
+  pfe_fisher_cpp/
+    CMakeLists.txt
+    main.cpp
+    backtest.toml
 ```
 
 Detection order:
@@ -113,7 +124,7 @@ Set `DATABENTO_API_KEY` in the repo-root `.env` before fetching uncached data. U
 | Path | Purpose |
 |------|---------|
 | `athenas-pallas/` | Rust backtest engine and `pallas-backtest` CLI |
-| `tools/athenas-pallas-tools/` | Optional utilities: merge, sweep, resample |
+| `tools/athenas-pallas-tools/` | Optional utilities: sweep and resample |
 | `trading/` | Direct Python/C++ strategy folders plus shared SDKs in `_sdk/` |
 | `data/` | Your local CSVs (empty in git) |
 | `athenas-pallas/tests/fixtures/` | CI / golden test data only |
@@ -131,7 +142,6 @@ Parameter sweeps and CSV utilities live in a separate workspace crate:
 ```bash
 cargo build --release -p athenas-pallas-tools
 cargo run --release -p athenas-pallas-tools --bin pallas-sweep -- --help
-cargo run --release -p athenas-pallas-tools --bin pallas-merge -- --help
 cargo run --release -p athenas-pallas-tools --bin pallas-resample -- --help
 ```
 

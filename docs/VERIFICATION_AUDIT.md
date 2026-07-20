@@ -1,10 +1,10 @@
 # Verification audit
 
-## Current installed surface check (2026-06-22)
+## Current installed surface check (2026-07-19)
 
 This repo is currently CLI/Rust-only. Installed workspace crates are `athenas-pallas` and
-`athenas-pallas-tools`; binaries are `pallas-backtest`, `pallas-merge`, `pallas-resample`, and
-`pallas-sweep`. `athenas-pallas` currently exposes `default`, `databento`, and `tracing-full`
+`athenas-pallas-tools`; binaries are `pallas-backtest`, `pallas-resample`, and `pallas-sweep`.
+`athenas-pallas` currently exposes `default`, `databento`, and `tracing-full`
 features.
 
 Market data replay is local-file based: CSV/pbar via `pallas-backtest` and CSV utilities in
@@ -117,7 +117,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 | OHLC intrabar rules for stops | **DONE** | `stop_triggered` + bar high/low |
 | `pallas-resample` CLI | **DONE** | `bin/pallas-resample.rs` |
 | Equity RTH + **holidays** | **PARTIAL** | RTH in `calendar/mod.rs`; comment says "no holidays" |
-| MaxPositionSize in BacktestChecks | **DONE** | `runner.rs` wires `MaxPositionSize` |
+| MaxPositionSize in RiskEngine | **DONE** | `runner.rs` wires `MaxPositionSize` |
 | Position sizer (% equity) in strategy SDK | **NOT DONE** | No sizer helper in Python/Rust SDK |
 | Trade ledger + win rate + profit factor | **DONE** | `metrics.rs`, report fields |
 
@@ -125,7 +125,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 
 | Item | Status | Evidence / gap |
 |------|--------|----------------|
-| `pallas-merge` CLI | **DONE** | `bin/pallas-merge.rs` |
+| `pallas-merge` CLI | **removed** | Output was not replayable by the engine; multi-source runs stream internally. |
 | Multi-instrument TOML `[[instruments]]` | **DONE** | `session.rs`, `runner.rs`, `backtest.toml.example` |
 | FX CSV template + free sources | **DONE** | `data/README.md`, `FxCsvSource`, `fx_l1_backtest.rs` |
 | Forex 24/5 + pip/lot defaults | **DONE** | `calendar/mod.rs`, forex meta in `config.rs` |
@@ -161,7 +161,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 | Protocol strategy_id / client order id | **DONE** | `strategy/protocol.rs`, `trading/protocol.md` |
 | Sharpe/Sortino minus risk-free | **DONE** | `summarize_with_fills_and_rf` |
 | Yahoo Adj Close | **DONE** | `yahoo.rs` `effective_close()` |
-| IndexedInstruments meta for option/perp | **DONE** | `index.rs` (this pass) |
+| Disconnected IndexedInstruments API | **removed** | Runtime registry is the single dense instrument index. |
 | SQLite/JSON result persistence | **NOT DONE** | DSQL schema only; runner writes JSON report |
 | Extra gaps table closed | **NOT DONE** | See below |
 
@@ -175,7 +175,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 | Two limit-fill rules | **fixed** (unified model) |
 | lot/tick ignored | **fixed** |
 | L2 book unused for fills | **wontfix** (documented; spread model only) |
-| IndexedInstruments spot-only meta | **fixed** (this pass) |
+| Duplicate instrument indexing | **removed** | Runtime registry is canonical. |
 | Backtest subset of risk checks | **partial** - MaxPosition + MaxDailyLoss wired; not full `RiskEngine` |
 | Protocol drops strategy_id / client id | **fixed** |
 | Sharpe ignores risk-free | **fixed** |

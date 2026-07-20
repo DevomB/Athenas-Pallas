@@ -25,6 +25,10 @@ Set `DATABENTO_API_KEY` before fetching uncached data. The provider path writes 
 
 ## 2. Backtest (built-in buy-and-hold)
 
+Buy-and-hold uses one configured lot by default; pass `--buy-and-hold-qty` (or set
+`backtest.buy_and_hold_qty`) when a different quantity is intended. Bar-close signals are eligible
+on the next market update, never against the high/low of the submission bar.
+
 ```bash
 cargo run --release -p athenas-pallas --bin pallas-backtest -- \
   --data athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv \
@@ -74,18 +78,12 @@ cp backtest.toml.example backtest.toml
 cargo run --release -p athenas-pallas --bin pallas-backtest -- --config backtest.toml
 ```
 
-## 5. Merge, sweep, resample
+## 5. Sweep and resample
 
 These live in the separate tools crate:
 
 ```bash
 cargo build --release -p athenas-pallas-tools
-
-# Merge two CSV streams by timestamp
-cargo run --release -p athenas-pallas-tools --bin pallas-merge -- \
-  --source ohlcv:test:BTCUSDT:data/BTC.csv \
-  --source yahoo:test:AAPL:data/AAPL.csv \
-  -o data/merged.csv
 
 # Parameter grid from TOML (see sweep.toml.example)
 cargo run --release -p athenas-pallas-tools --bin pallas-sweep -- \
@@ -98,7 +96,7 @@ cargo run --release -p athenas-pallas-tools --bin pallas-resample -- \
 
 ## 6. JSONL event replay
 
-Record events with `backtest::write_events_jsonl`, then replay via `read_events_jsonl` + `replay_events_serial` for deterministic strategy debugging without reloading CSV.
+Replay an existing JSONL recording via `read_events_jsonl` and `replay_events_serial` for deterministic strategy debugging without reloading CSV.
 
 ## 7. Golden tests (CI)
 

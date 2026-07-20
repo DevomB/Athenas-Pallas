@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Breaking cleanup
+
+- Consolidated execution on `PaperExecution` and risk checks on `RiskEngine`.
+- Removed the disconnected Barter-style configuration/index API, generic batch replay wrappers,
+  and the non-replayable `pallas-merge` binary.
+- Replaced the vendored C++ JSON header with a protocol-specific standard-library SDK.
+
 ### Performance
 
 - Borrowed replay events: `ReplayEvent<'a>` + `Strategy::on_replay_event` remove the per-bar
@@ -24,6 +31,16 @@
 
 ### Features / correctness
 
+- Removed bar lookahead: orders emitted from a completed OHLCV bar wait for the next market update;
+  next-open execution now honors `half_spread_bps`, and unexecuted final-bar orders remain visible.
+- Trade ledgers allocate opening and closing fees; reports now include effective parameters, data
+  metadata, total fees, turnover, structured rejections, pending/client/OCO order details, final
+  positions, and RFC3339 timestamps.
+- External protocol v2 sends full multi-instrument metadata and arbitrary strategy parameters,
+  reports fills/rejections/working orders, and supports cancel-by-id, OCO groups, and a final
+  flatten callback while retaining the legacy single-instrument handshake.
+- Built-in buy-and-hold resolves quantity from explicit config or instrument lot semantics instead
+  of assuming fractional shares.
 - Per-strategy realized PnL section in the backtest report (`StrategyPnlRow`), attributed via the
   new `FillRecord.strategy_id`.
 - NYSE-style equity holiday calendar wired into `SessionFilter::EquityRth` (fixed + floating
