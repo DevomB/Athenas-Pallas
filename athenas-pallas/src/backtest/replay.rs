@@ -2,13 +2,8 @@
 
 use std::io::{BufRead, BufReader, Read};
 
-use crate::engine::replay_events_sync;
 use crate::error::Result;
 use crate::events::Event;
-use crate::execution::SyncExecutionGateway;
-use crate::risk::RiskEngine;
-use crate::state::GlobalState;
-use crate::strategy::Strategy;
 
 /// Parse one JSON object per line into engine events (blank lines skipped).
 pub fn read_events_jsonl(r: impl Read) -> Result<Vec<Event>> {
@@ -23,21 +18,6 @@ pub fn read_events_jsonl(r: impl Read) -> Result<Vec<Event>> {
         out.push(ev);
     }
     Ok(out)
-}
-
-/// Offline replay through the sync dispatch path.
-pub fn replay_events_serial<S, E>(
-    state: GlobalState,
-    strategy: S,
-    risk: &RiskEngine,
-    exec: &E,
-    events: Vec<Event>,
-) -> Result<GlobalState>
-where
-    S: Strategy,
-    E: SyncExecutionGateway,
-{
-    replay_events_sync(state, strategy, risk, exec, events)
 }
 
 #[cfg(test)]

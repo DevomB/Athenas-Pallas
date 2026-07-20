@@ -18,10 +18,10 @@ use super::report::{
 use super::source_loader::{load_all_sources, load_source, resolve_format};
 use crate::bar::{default_tick_size, BarSeries, BarSeriesSource};
 use crate::calendar::{is_session_open, SessionFilter};
-use crate::dispatch_replay_sync;
 use crate::engine::{
-    collect_replay_bar_intents_sync, collect_replay_event_intents_sync, finalize_strategy_sync,
-    poll_replay_market_instrument_sync, process_pending_intents_for_instrument_sync,
+    collect_replay_bar_intents_sync, collect_replay_event_intents_sync, dispatch_replay_sync,
+    finalize_strategy_sync, poll_replay_market_instrument_sync,
+    process_pending_intents_for_instrument_sync,
 };
 use crate::events::{Event, FillRecord, MarketEvent, OrderIntent};
 use crate::execution::{PaperConfig, PaperExecution};

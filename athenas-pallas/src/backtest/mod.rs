@@ -26,7 +26,7 @@ pub use config::{
 pub use cpp_build::build_cpp_strategy;
 pub use merge::{merge_sources_iter, MergedSources};
 pub use pbar::{is_pbar_path, read_pbar, write_pbar};
-pub use replay::{read_events_jsonl, replay_events_serial};
+pub use replay::read_events_jsonl;
 pub use report::{
     BacktestParameters, BacktestReport, DataMetadata, DataSourceMetadata, FinalPosition,
     PendingOrder,

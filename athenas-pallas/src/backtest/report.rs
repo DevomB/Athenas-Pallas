@@ -8,7 +8,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::events::{FillRecord, RejectionRecord};
-use crate::metrics::PerformanceSummary;
+use crate::metrics::{per_strategy_pnl, PerformanceSummary, StrategyPnlRow};
 use crate::types::{
     ClientOrderId, EquityPoint, InstrumentId, OrderId, OrderType, Side, StrategyId,
 };
@@ -118,7 +118,7 @@ pub struct BacktestReport {
     pub closed_trades: usize,
     /// Per-sub-strategy realized PnL when fills carry a `strategy_id` (empty otherwise).
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub per_strategy: Vec<crate::metrics::StrategyPnlRow>,
+    pub per_strategy: Vec<StrategyPnlRow>,
     /// Effective run settings, including arbitrary external-strategy parameters.
     pub parameters: BacktestParameters,
     /// Input source and observed replay-range metadata.
@@ -146,7 +146,7 @@ pub(crate) fn report_from_summary(
     wall_time_ms: u64,
     details: ReportDetails,
 ) -> BacktestReport {
-    let per_strategy = crate::metrics::per_strategy_pnl(&details.fills);
+    let per_strategy = per_strategy_pnl(&details.fills);
     let fill_count = details.fills.len() as u64;
     BacktestReport {
         pnl: s.pnl.to_string(),

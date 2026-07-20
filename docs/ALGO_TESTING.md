@@ -96,7 +96,7 @@ cargo run --release -p athenas-pallas-tools --bin pallas-resample -- \
 
 ## 6. JSONL event replay
 
-Replay an existing JSONL recording via `read_events_jsonl` and `replay_events_serial` for deterministic strategy debugging without reloading CSV.
+Replay an existing JSONL recording via `read_events_jsonl` and `replay_events_sync` for deterministic strategy debugging without reloading CSV.
 
 ## 7. Golden tests (CI)
 

@@ -1,4 +1,4 @@
-//! Performance metrics from an equity curve.
+//! Performance metrics from an equity curve and fill ledger.
 
 mod performance;
 mod positions;
@@ -11,7 +11,7 @@ pub use positions::{strategy_position_report, StrategyPositionRow};
 
 #[cfg(test)]
 mod tests {
-    use super::positions::strategy_position_report;
+    use super::strategy_position_report;
     use crate::events::AccountEvent;
     use crate::state::{GlobalState, InstrumentMeta, InstrumentRegistry};
     use crate::types::{Asset, InstrumentId, OrderId, Side, StrategyId};
@@ -20,16 +20,18 @@ mod tests {
 
     #[test]
     fn strategy_position_report_rows() {
-        let i = InstrumentId::new("test", "BTCUSDT");
-        let mut inst = HashMap::new();
-        inst.insert(
-            i.clone(),
+        let instrument = InstrumentId::new("test", "BTCUSDT");
+        let instruments = HashMap::from([(
+            instrument.clone(),
             InstrumentMeta::spot(Asset("BTC".into()), Asset("USDT".into())),
+        )]);
+        let mut state = GlobalState::new(
+            InstrumentRegistry::from_instruments(instruments),
+            HashMap::new(),
         );
-        let mut s = GlobalState::new(InstrumentRegistry::from_instruments(inst), HashMap::new());
-        s.apply_account(&AccountEvent::Fill {
+        state.apply_account(&AccountEvent::Fill {
             order_id: OrderId::new_v4(),
-            instrument: i.clone(),
+            instrument: instrument.clone(),
             side: Side::Buy,
             price: Decimal::ONE,
             qty: Decimal::ONE,
@@ -39,9 +41,10 @@ mod tests {
             oco_group: None,
             strategy_id: Some(StrategyId::new("z")),
         });
-        let rows = strategy_position_report(&s);
+
+        let rows = strategy_position_report(&state);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].instrument, i);
+        assert_eq!(rows[0].instrument, instrument);
         assert_eq!(rows[0].strategy_id, StrategyId::new("z"));
         assert_eq!(rows[0].net_base_qty, Decimal::ONE);
     }

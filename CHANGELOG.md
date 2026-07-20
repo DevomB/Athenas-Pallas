@@ -12,6 +12,8 @@
   contract, while futures economics remain instrument-metadata driven.
 - Removed the unused `TradingSummary` facade; reports and metric summaries are the maintained
   output APIs.
+- Removed uncalled result-persistence wrappers and the duplicate serial replay forwarder; callers
+  use `BacktestReport::write_json` and `replay_events_sync` directly.
 
 ### Performance
 
