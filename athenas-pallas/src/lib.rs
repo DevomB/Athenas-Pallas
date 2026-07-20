@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 
 pub mod backtest;
+mod bar;
 pub mod calendar;
 #[cfg(feature = "databento")]
 pub mod data;
@@ -18,10 +19,12 @@ pub mod error;
 pub mod events;
 pub mod execution;
 pub mod instrument;
+mod interval;
 pub mod metrics;
 pub mod oms;
 pub mod results;
 pub mod risk;
+mod source;
 pub mod state;
 pub mod strategy;
 pub mod types;
