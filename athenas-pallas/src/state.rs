@@ -195,7 +195,7 @@ impl GlobalState {
             .unwrap_or(Decimal::ZERO)
     }
 
-    /// Attributed net base position for a sub-strategy on an instrument (barter-style `strategy_id` slice).
+    /// Attributed net base position for a sub-strategy on an instrument.
     pub fn strategy_position_qty(&self, inst: &InstrumentId, strategy_id: &StrategyId) -> Decimal {
         let Some(ix) = self.registry.index_of(inst).map(|i| i.0) else {
             return Decimal::ZERO;
@@ -204,16 +204,6 @@ impl GlobalState {
             .get(&(ix, strategy_id.clone()))
             .copied()
             .unwrap_or(Decimal::ZERO)
-    }
-
-    /// Alias for [`Self::strategy_position_qty`] (keyword-style naming for future bindings).
-    #[inline]
-    pub fn position_qty_for_strategy(
-        &self,
-        inst: &InstrumentId,
-        strategy_id: &StrategyId,
-    ) -> Decimal {
-        self.strategy_position_qty(inst, strategy_id)
     }
 
     fn synthetic_bid_ask(mid: Decimal, half_spread_bps: Decimal) -> (Decimal, Decimal) {
@@ -574,10 +564,5 @@ mod tests {
         assert_eq!(st.position_qty(&i), Decimal::new(5, 2));
         assert_eq!(st.strategy_position_qty(&i, &sid_a), Decimal::new(1, 1));
         assert_eq!(st.strategy_position_qty(&i, &sid_b), -Decimal::new(5, 2));
-        assert_eq!(st.position_qty_for_strategy(&i, &sid_a), Decimal::new(1, 1));
-        assert_eq!(
-            st.position_qty_for_strategy(&i, &sid_b),
-            -Decimal::new(5, 2)
-        );
     }
 }

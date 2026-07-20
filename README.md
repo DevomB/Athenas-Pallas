@@ -90,8 +90,6 @@ Detection order:
 3. `.py` file: run with Python.
 4. Other file path: run as a binary.
 
-Legacy paths such as `trading/strategies/simple_sma/strategy.py` are still resolved for compatibility, but new configs should use `strategy = "simple_sma"`.
-
 ## Market Data
 
 Put local CSV exports into `data/` (gitignored local workspace), then point the backtest at the file:

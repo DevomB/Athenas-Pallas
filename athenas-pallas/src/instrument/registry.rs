@@ -56,23 +56,9 @@ pub struct InstrumentMeta {
     pub maturity: Option<String>,
 }
 
-type EmptyExtensions = (
-    Option<rust_decimal::Decimal>,
-    Option<rust_decimal::Decimal>,
-    Option<rust_decimal::Decimal>,
-    Option<u32>,
-    Option<String>,
-);
-
 impl InstrumentMeta {
-    fn empty_extensions() -> EmptyExtensions {
-        (None, None, None, None, None)
-    }
-
     /// Crypto-style spot pair.
     pub fn spot(base: impl Into<Asset>, quote: impl Into<Asset>) -> Self {
-        let (margin_initial_rate, face_value, coupon_rate, coupon_payments_per_year, maturity) =
-            Self::empty_extensions();
         Self {
             base: base.into(),
             quote: quote.into(),
@@ -81,11 +67,11 @@ impl InstrumentMeta {
             contract_multiplier: None,
             tick_size: None,
             expiry: None,
-            margin_initial_rate,
-            face_value,
-            coupon_rate,
-            coupon_payments_per_year,
-            maturity,
+            margin_initial_rate: None,
+            face_value: None,
+            coupon_rate: None,
+            coupon_payments_per_year: None,
+            maturity: None,
         }
     }
 
@@ -98,8 +84,6 @@ impl InstrumentMeta {
         lot_size: Option<rust_decimal::Decimal>,
         expiry: Option<String>,
     ) -> Self {
-        let (margin_initial_rate, face_value, coupon_rate, coupon_payments_per_year, maturity) =
-            Self::empty_extensions();
         Self {
             base: base.into(),
             quote: quote.into(),
@@ -108,11 +92,11 @@ impl InstrumentMeta {
             contract_multiplier: Some(contract_multiplier),
             tick_size: Some(tick_size),
             expiry,
-            margin_initial_rate,
-            face_value,
-            coupon_rate,
-            coupon_payments_per_year,
-            maturity,
+            margin_initial_rate: None,
+            face_value: None,
+            coupon_rate: None,
+            coupon_payments_per_year: None,
+            maturity: None,
         }
     }
 
@@ -123,8 +107,6 @@ impl InstrumentMeta {
         contract_multiplier: Option<rust_decimal::Decimal>,
         margin_initial_rate: Option<rust_decimal::Decimal>,
     ) -> Self {
-        let (_, face_value, coupon_rate, coupon_payments_per_year, maturity) =
-            Self::empty_extensions();
         Self {
             base: base.into(),
             quote: quote.into(),
@@ -134,10 +116,10 @@ impl InstrumentMeta {
             tick_size: None,
             expiry: None,
             margin_initial_rate,
-            face_value,
-            coupon_rate,
-            coupon_payments_per_year,
-            maturity,
+            face_value: None,
+            coupon_rate: None,
+            coupon_payments_per_year: None,
+            maturity: None,
         }
     }
 
@@ -150,7 +132,6 @@ impl InstrumentMeta {
         coupon_payments_per_year: u32,
         maturity: Option<String>,
     ) -> Self {
-        let (margin_initial_rate, _, _, _, _) = Self::empty_extensions();
         Self {
             base: base.into(),
             quote: quote.into(),
@@ -159,7 +140,7 @@ impl InstrumentMeta {
             contract_multiplier: None,
             tick_size: None,
             expiry: None,
-            margin_initial_rate,
+            margin_initial_rate: None,
             face_value: Some(face_value),
             coupon_rate: Some(coupon_rate),
             coupon_payments_per_year: Some(coupon_payments_per_year),
@@ -177,7 +158,6 @@ impl InstrumentMeta {
         expiry: Option<String>,
         strike: rust_decimal::Decimal,
     ) -> Self {
-        let (_, _, coupon_rate, coupon_payments_per_year, maturity) = Self::empty_extensions();
         Self {
             base: base.into(),
             quote: quote.into(),
@@ -188,31 +168,31 @@ impl InstrumentMeta {
             expiry,
             margin_initial_rate,
             face_value: Some(strike),
-            coupon_rate,
-            coupon_payments_per_year,
-            maturity,
+            coupon_rate: None,
+            coupon_payments_per_year: None,
+            maturity: None,
         }
     }
 }
 
-/// Legacy instrument key for engine state vectors.
+/// Exchange and symbol key used by engine state vectors.
 #[derive(
     Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
-pub struct LegacyInstrumentId {
+pub struct InstrumentId {
     /// Exchange.
     pub exchange: String,
     /// Symbol.
     pub symbol: String,
 }
 
-impl std::fmt::Display for LegacyInstrumentId {
+impl std::fmt::Display for InstrumentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.exchange, self.symbol)
     }
 }
 
-impl LegacyInstrumentId {
+impl InstrumentId {
     /// Construct from exchange and symbol strings.
     pub fn new(exchange: impl Into<String>, symbol: impl Into<String>) -> Self {
         Self {
@@ -222,18 +202,18 @@ impl LegacyInstrumentId {
     }
 }
 
-/// O(1) lookup from legacy id to dense index.
+/// O(1) lookup from instrument id to dense index.
 #[derive(Clone, Debug)]
 pub struct InstrumentRegistry {
-    ids: Vec<LegacyInstrumentId>,
+    ids: Vec<InstrumentId>,
     metas: Vec<InstrumentMeta>,
     // Internal, trusted, small-key map: a faster non-DoS-resistant hasher is fine here.
-    by_id: FxHashMap<LegacyInstrumentId, InstrumentIndex>,
+    by_id: FxHashMap<InstrumentId, InstrumentIndex>,
 }
 
 impl InstrumentRegistry {
     /// Build from a map (sorted for determinism).
-    pub fn from_instruments(map: HashMap<LegacyInstrumentId, InstrumentMeta>) -> Self {
+    pub fn from_instruments(map: HashMap<InstrumentId, InstrumentMeta>) -> Self {
         let mut pairs: Vec<_> = map.into_iter().collect();
         pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
         let mut ids = Vec::with_capacity(pairs.len());
@@ -259,19 +239,17 @@ impl InstrumentRegistry {
     }
 
     /// Index lookup.
-    pub fn index_of(&self, id: &LegacyInstrumentId) -> Option<InstrumentIndex> {
+    pub fn index_of(&self, id: &InstrumentId) -> Option<InstrumentIndex> {
         self.by_id.get(id).copied()
     }
 
     /// Id at index.
-    pub fn id(&self, ix: InstrumentIndex) -> Option<&LegacyInstrumentId> {
+    pub fn id(&self, ix: InstrumentIndex) -> Option<&InstrumentId> {
         self.ids.get(ix.0)
     }
 
     /// Dense id/meta rows in index order.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (InstrumentIndex, &LegacyInstrumentId, &InstrumentMeta)> {
+    pub fn iter(&self) -> impl Iterator<Item = (InstrumentIndex, &InstrumentId, &InstrumentMeta)> {
         self.ids
             .iter()
             .zip(&self.metas)
@@ -285,7 +263,7 @@ impl InstrumentRegistry {
     }
 
     /// Meta by id.
-    pub fn meta_by_id(&self, id: &LegacyInstrumentId) -> Option<&InstrumentMeta> {
+    pub fn meta_by_id(&self, id: &InstrumentId) -> Option<&InstrumentMeta> {
         let ix = self.index_of(id)?;
         self.meta(ix)
     }

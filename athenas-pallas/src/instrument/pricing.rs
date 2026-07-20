@@ -3,8 +3,19 @@
 use rust_decimal::prelude::Signed;
 use rust_decimal::Decimal;
 
-use super::kind::OptionKind;
 use super::registry::{AssetClass, InstrumentMeta};
+
+/// Option call vs put.
+#[derive(
+    Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum OptionKind {
+    /// Call.
+    Call,
+    /// Put.
+    Put,
+}
 
 /// Maintenance margin is modeled as this fraction of initial margin when not separately configured.
 ///

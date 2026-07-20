@@ -12,7 +12,7 @@ pub enum TradingState {
     /// Algorithmic order flow from [`crate::strategy::Strategy`] is allowed (subject to risk).
     #[default]
     Enabled,
-    /// Strategy hook is skipped; market and account updates still apply (barter-style “trading off”).
+    /// Strategy hook is skipped; market and account updates still run.
     Disabled,
 }
 
@@ -23,7 +23,7 @@ pub use crate::instrument::Asset;
 pub use crate::instrument::{ExchangeId, Symbol};
 
 /// Instrument = exchange + symbol (engine hot path).
-pub use crate::instrument::LegacyInstrumentId as InstrumentId;
+pub use crate::instrument::InstrumentId;
 
 /// Order side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,7 +77,8 @@ impl OrderId {
 ///
 /// When [`OrderIntent::strategy_id`](crate::events::OrderIntent) is `None`, fills update aggregate
 /// [`crate::state::GlobalState::positions`] only. When `Some`, fills also update
-/// [`crate::state::GlobalState::strategy_positions`] (see [`GlobalState::strategy_position_qty`](crate::state::GlobalState::strategy_position_qty) and [`GlobalState::position_qty_for_strategy`](crate::state::GlobalState::position_qty_for_strategy)).
+/// [`crate::state::GlobalState::strategy_positions`] (see
+/// [`GlobalState::strategy_position_qty`](crate::state::GlobalState::strategy_position_qty)).
 /// Bindings (e.g. Python) can expose this as a `strategy_id=` keyword on order requests.
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct StrategyId(pub String);

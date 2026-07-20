@@ -34,8 +34,7 @@ pub use bar::{
     BarSeriesSource, OhlcvRow,
 };
 pub use engine::{
-    dispatch_event_sync, dispatch_replay_bar_sync, dispatch_replay_sync, dispatch_strategy_sync,
-    replay_events_sync,
+    dispatch_event_sync, dispatch_replay_sync, dispatch_strategy_sync, replay_events_sync,
 };
 pub use error::{Error, Result};
 pub use events::{BookL2Snapshot, Event, OrderIntentSource};

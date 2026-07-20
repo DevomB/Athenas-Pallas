@@ -76,7 +76,6 @@ struct ExtraInstrumentConfig {
     contract_multiplier: Option<DecimalValue>,
     expiry: Option<String>,
     margin_initial_rate: Option<DecimalValue>,
-    #[serde(alias = "data_path")]
     data: Option<String>,
     data_format: Option<String>,
 }

@@ -1,7 +1,7 @@
 //! Resolve external strategy paths into runnable strategy kinds.
 
 use std::collections::HashSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 
@@ -104,9 +104,6 @@ fn strategy_candidates(strategy: &Path) -> Vec<PathBuf> {
                 push(parent.join("trading").join(name));
             }
         }
-        for legacy in legacy_candidates(&root, strategy) {
-            push(legacy);
-        }
     }
 
     out
@@ -140,43 +137,8 @@ fn project_roots() -> Vec<PathBuf> {
     roots
 }
 
-fn legacy_candidates(root: &Path, strategy: &Path) -> Vec<PathBuf> {
-    let parts: Vec<String> = strategy
-        .components()
-        .filter_map(component_str)
-        .map(str::to_string)
-        .collect();
-    let Some(trading_ix) = parts.iter().position(|part| part == "trading") else {
-        return Vec::new();
-    };
-
-    let tail = &parts[trading_ix + 1..];
-    match tail {
-        [scope, name] if scope == "strategies" => {
-            vec![root.join("trading").join(name)]
-        }
-        [scope, name, file] if scope == "strategies" => {
-            vec![root.join("trading").join(name).join(file)]
-        }
-        [cpp, scope, name] if cpp == "cpp" && scope == "strategies" => {
-            vec![root.join("trading").join(format!("{name}_cpp"))]
-        }
-        [cpp, scope, name, file] if cpp == "cpp" && scope == "strategies" => {
-            vec![root.join("trading").join(format!("{name}_cpp")).join(file)]
-        }
-        _ => Vec::new(),
-    }
-}
-
 fn is_strategy_name(path: &Path) -> bool {
     path.is_relative() && path.components().count() == 1
-}
-
-fn component_str(component: Component<'_>) -> Option<&str> {
-    match component {
-        Component::Normal(s) => s.to_str(),
-        _ => None,
-    }
 }
 
 fn normalize_for_dedup(path: &Path) -> String {
@@ -209,22 +171,6 @@ mod tests {
     #[test]
     fn resolves_cmake_cpp_directory() {
         let resolved = resolve_strategy_path(Path::new("simple_sma_cpp")).unwrap();
-        assert!(matches!(resolved, ResolvedStrategy::CmakeCpp(_)));
-        assert!(resolved.path().ends_with("trading/simple_sma_cpp"));
-    }
-
-    #[test]
-    fn resolves_legacy_python_path() {
-        let resolved =
-            resolve_strategy_path(Path::new("trading/strategies/simple_sma/strategy.py")).unwrap();
-        assert!(matches!(resolved, ResolvedStrategy::Python(_)));
-        assert!(resolved.path().ends_with("trading/simple_sma/strategy.py"));
-    }
-
-    #[test]
-    fn resolves_legacy_cpp_path() {
-        let resolved =
-            resolve_strategy_path(Path::new("trading/cpp/strategies/simple_sma")).unwrap();
         assert!(matches!(resolved, ResolvedStrategy::CmakeCpp(_)));
         assert!(resolved.path().ends_with("trading/simple_sma_cpp"));
     }

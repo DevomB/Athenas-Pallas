@@ -200,43 +200,6 @@ where
     Ok(())
 }
 
-/// Zero-allocation tick-replay dispatch using a borrowed [`ReplayEvent`].
-pub fn dispatch_replay_bar_sync<S>(
-    state: &mut GlobalState,
-    strategy: &mut S,
-    risk: &RiskEngine,
-    exec: &impl SyncExecutionGateway,
-    ev: &crate::events::ReplayEvent<'_>,
-    intents: &mut Vec<OrderIntent>,
-) -> Result<()>
-where
-    S: Strategy,
-{
-    let mut ready = Vec::new();
-    process_pending_intents_for_instrument_sync(
-        state,
-        risk,
-        exec,
-        ev.instrument(),
-        intents,
-        &mut ready,
-    );
-    let passive = exec.poll_after_market_instrument(state, ev.instrument())?;
-    for a in passive {
-        state.apply_account(&a);
-    }
-
-    let now = ev.timestamp();
-    state.refresh_daily_risk_anchor(now);
-
-    if state.paused || state.trading_state == TradingState::Disabled {
-        return Ok(());
-    }
-
-    let mut submitted = Vec::new();
-    collect_replay_bar_intents_sync(state, strategy, risk, exec, ev, &mut submitted, intents)
-}
-
 pub(crate) fn process_intents_sync(
     state: &mut GlobalState,
     risk: &RiskEngine,

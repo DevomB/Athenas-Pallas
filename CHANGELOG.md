@@ -12,8 +12,7 @@
 ### Performance
 
 - Borrowed replay events: `ReplayEvent<'a>` + `Strategy::on_replay_event` remove the per-bar
-  `Event::Market(Bar)` allocation and `InstrumentId` clone from the hottest tick-replay loop, via
-  the new `dispatch_replay_bar_sync`.
+  `Event::Market(Bar)` allocation and `InstrumentId` clone from the hottest tick-replay loop.
 - Instrument-scoped passive fills: `OrderStore` keeps per-instrument **price-indexed** books
   (`BTreeMap` by limit/stop price per side) and `pollable_ids` so the paper gateway visits only
   orders whose cross/trigger could be satisfied by the current L1 or bar high/low
@@ -38,7 +37,7 @@
   positions, and RFC3339 timestamps.
 - External protocol v2 sends full multi-instrument metadata and arbitrary strategy parameters,
   reports fills/rejections/working orders, and supports cancel-by-id, OCO groups, and a final
-  flatten callback while retaining the legacy single-instrument handshake.
+  flatten callback while retaining a single-instrument initialization helper.
 - Built-in buy-and-hold resolves quantity from explicit config or instrument lot semantics instead
   of assuming fractional shares.
 - Per-strategy realized PnL section in the backtest report (`StrategyPnlRow`), attributed via the

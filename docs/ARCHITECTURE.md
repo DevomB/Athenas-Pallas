@@ -61,7 +61,7 @@ trading/
     main.cpp
 ```
 
-The resolver detects CMake C++ directories, Python directories/files, and compiled binaries. Legacy `trading/strategies/...` and `trading/cpp/strategies/...` paths are mapped to the new layout for compatibility.
+The resolver detects CMake C++ directories, Python directories/files, and compiled binaries.
 
 ## CLI Tools
 

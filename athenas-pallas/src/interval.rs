@@ -1,7 +1,6 @@
 //! Bar interval helpers for Sharpe/Sortino annualization.
 
 use crate::instrument::AssetClass;
-use time::OffsetDateTime;
 
 /// Map a resample interval label to periods per year (crypto-style 24/7 unless noted).
 pub fn periods_per_year_from_interval(interval: &str) -> Option<f64> {
@@ -55,27 +54,6 @@ pub fn infer_periods_per_year_from_spacing(median_secs: f64, class: AssetClass) 
     }
     let trading_secs_per_year = trading_seconds_per_year(class);
     (trading_secs_per_year / median_secs).max(1.0)
-}
-
-/// Infer from consecutive bar timestamps (uses median spacing).
-pub fn infer_periods_per_year_from_timestamps(
-    timestamps: &[OffsetDateTime],
-    class: AssetClass,
-) -> f64 {
-    if timestamps.len() < 2 {
-        return default_periods_per_year(class);
-    }
-    let mut deltas: Vec<i64> = timestamps
-        .windows(2)
-        .map(|w| (w[1] - w[0]).whole_seconds())
-        .filter(|&s| s > 0)
-        .collect();
-    if deltas.is_empty() {
-        return default_periods_per_year(class);
-    }
-    deltas.sort_unstable();
-    let median = deltas[deltas.len() / 2] as f64;
-    infer_periods_per_year_from_spacing(median, class)
 }
 
 fn trading_seconds_per_year(class: AssetClass) -> f64 {

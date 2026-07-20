@@ -6,9 +6,9 @@ This is a backlog of performance work that would make the engine stronger techni
 
 ### 1. Store Bar Replay Events as Borrowed Views — DONE
 
-Implemented as `ReplayEvent<'a>` in `events.rs`, `Strategy::on_replay_event`, and
-`dispatch_replay_bar_sync`. The tick-replay loop calls `BarSeriesSource::bar_to_replay_event`
-instead of materializing `Event::Market(Bar)` each bar.
+Implemented as `ReplayEvent<'a>` in `events.rs` and `Strategy::on_replay_event`. The tick-replay
+loop calls `BarSeriesSource::bar_to_replay_event` instead of materializing `Event::Market(Bar)`
+each bar.
 
 ### 2. Replace Passive Order Polling Scan with Price-Indexed Resting Orders — DONE
 

@@ -47,7 +47,7 @@ Gaps closed since pass 1:
 | Phase 2: per-strategy PnL in report | **done** - `FillRecord.strategy_id` + `metrics::per_strategy_pnl` -> `BacktestReport.per_strategy`. |
 | Phase 3: maintenance margin + liquidation | **done** - `maintenance_margin_required` + mid-price liquidation of underwater leveraged derivatives in `lifecycle.rs`. |
 | Phase 3: scheduled perp funding | **done** - funding settles only on 00:00/08:00/16:00 UTC boundaries, not every bar. |
-| Hot loop per-bar allocation | **done** - `ReplayEvent<'a>` + `on_replay_event` + `dispatch_replay_bar_sync` remove the per-bar `Event` alloc and `InstrumentId` clone. |
+| Hot loop per-bar allocation | **done** - `ReplayEvent<'a>` + `on_replay_event` remove the per-bar `Event` allocation and `InstrumentId` clone. |
 | Streaming metrics / startup Vec alloc | **done** - O(1) `RollingMetrics` summary when the curve is off; `BarSeries::infer_periods_per_year`. |
 
 Still open (deferred, not regressions): mmap `.pbar`; 10M-bar stress + peak RSS;
@@ -193,7 +193,7 @@ sections above supersede stale pass-1 status rows where they conflict.
 
 ## Actions taken this pass
 
-1. Fixed compile: `InstrumentKind::Option` strike `String` -> `Decimal` in `index.rs`
+1. Removed the disconnected structured instrument identity; runtime `InstrumentId` + metadata is canonical
 2. Fixed option TOML meta: strike vs tick increment in `config.rs`
 3. Corrected `docs/PERFORMANCE.md` (removed false CI regression claim)
 4. Updated `data/README.md` (canonical bars, FX, bonds)

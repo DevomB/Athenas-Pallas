@@ -16,8 +16,7 @@ pub mod strategy_resolver;
 
 pub(crate) use crate::bar::{parse_ts, parse_ts_required_err};
 pub use crate::interval::{
-    default_periods_per_year, infer_periods_per_year_from_spacing,
-    infer_periods_per_year_from_timestamps, periods_per_year_from_interval,
+    default_periods_per_year, infer_periods_per_year_from_spacing, periods_per_year_from_interval,
     periods_per_year_from_interval_for_class,
 };
 pub use config::{

@@ -81,7 +81,7 @@ impl ExternalStrategy {
         })
     }
 
-    /// Backward-compatible single-instrument handshake.
+    /// Initialize a strategy with one instrument and no custom parameters.
     pub fn handshake(
         &mut self,
         instrument: InstrumentId,

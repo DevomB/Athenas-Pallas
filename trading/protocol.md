@@ -73,7 +73,7 @@ working orders and market-closes every final position before the report is built
 {"msg":"ready","capabilities":["finish"]}
 ```
 
-Omit `finish` for legacy behavior; the engine will not send a final callback.
+Omit the `finish` capability when the strategy does not need a final callback.
 
 **intents** (response to each event; `seq` must match)
 ```json
