@@ -1,18 +1,18 @@
 //! Sync event dispatch for backtest replay.
 
-use crate::error::Result;
-use crate::events::{
-    AccountEvent, ControlEvent, Event, MarketEvent, OrderIntent, OrderIntentSource, RejectionKind,
-    RejectionRecord,
+use super::commands::{
+    apply_account_events, apply_control_sync, process_controls_sync, process_intents_sync,
+    record_rejection,
 };
-use crate::execution::{AccountEvents, SyncExecutionGateway};
+use crate::error::Result;
+use crate::events::{Event, MarketEvent, OrderIntent, RejectionKind};
+use crate::execution::SyncExecutionGateway;
 use crate::risk::RiskEngine;
-use crate::state::{GlobalState, InstrumentIndex};
+use crate::state::GlobalState;
 use crate::strategy::{Strategy, StrategyContext, StrategyControl};
-use crate::types::{InstrumentId, OrderType, Side, TradingState};
-use rust_decimal::Decimal;
+use crate::types::{InstrumentId, TradingState};
 use time::OffsetDateTime;
-use tracing::{error, warn};
+use tracing::warn;
 
 /// Sync event dispatch for backtest replay (no async executor on the hot path).
 pub fn dispatch_event_sync<S, E>(
@@ -157,28 +157,6 @@ where
     dispatch_strategy_sync(state, strategy, risk, exec, &ev, intents)
 }
 
-pub(crate) fn process_intents_sync(
-    state: &mut GlobalState,
-    risk: &RiskEngine,
-    exec: &impl SyncExecutionGateway,
-    intents: &mut Vec<OrderIntent>,
-) {
-    for intent in intents.drain(..) {
-        if let Err(e) = risk.validate(state, &intent) {
-            warn!(target: "athenas_pallas::engine", "risk: {e}");
-            record_rejection(state, RejectionKind::Risk, &intent, e.to_string());
-            continue;
-        }
-        match dispatch_intent_sync(exec, state, &intent) {
-            Ok(events) => apply_account_events(state, events),
-            Err(e) => {
-                error!(target: "athenas_pallas::engine", "execution: {e}");
-                record_rejection(state, RejectionKind::Execution, &intent, e.to_string());
-            }
-        }
-    }
-}
-
 /// Run a bar strategy after the completed bar is visible, retaining accepted orders for the next
 /// market update of their target instrument.
 pub(crate) fn collect_replay_bar_intents_sync<S: Strategy>(
@@ -301,165 +279,6 @@ pub(crate) fn finalize_strategy_sync<S: Strategy>(
         before != (state.fill_count, state.open_orders.len()),
         cancel_deferred,
     ))
-}
-
-fn record_rejection(
-    state: &mut GlobalState,
-    kind: RejectionKind,
-    intent: &OrderIntent,
-    reason: String,
-) {
-    state.apply_account(&AccountEvent::Rejection(RejectionRecord {
-        ts: state.last_event_ts.unwrap_or(OffsetDateTime::UNIX_EPOCH),
-        kind,
-        instrument: intent.instrument.clone(),
-        client_order_id: intent.client_order_id.clone(),
-        reason,
-    }));
-}
-
-fn process_controls_sync(
-    state: &mut GlobalState,
-    exec: &impl SyncExecutionGateway,
-    risk: &RiskEngine,
-    controls: &mut Vec<StrategyControl>,
-) -> Result<()> {
-    for control in controls.drain(..) {
-        match control {
-            StrategyControl::CancelOrder(order_id) => {
-                cancel_order_sync(state, exec, order_id)?;
-            }
-            StrategyControl::CancelClientOrder(client_id) => {
-                let order_ids: Vec<_> = state
-                    .open_orders
-                    .values()
-                    .filter(|order| order.client_order_id.as_ref() == Some(&client_id))
-                    .map(|order| order.id.clone())
-                    .collect();
-                if order_ids.is_empty() {
-                    return Err(crate::Error::Invalid(format!(
-                        "unknown client order id {}",
-                        client_id.0
-                    )));
-                }
-                for order_id in order_ids {
-                    cancel_order_sync(state, exec, order_id)?;
-                }
-            }
-            StrategyControl::CancelAll => {
-                apply_control_sync(state, exec, risk, &ControlEvent::CancelAll)?;
-            }
-            StrategyControl::Flatten => {
-                apply_control_sync(state, exec, risk, &ControlEvent::Flatten)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn apply_control_sync<E: SyncExecutionGateway>(
-    state: &mut GlobalState,
-    exec: &E,
-    risk: &RiskEngine,
-    c: &ControlEvent,
-) -> Result<()> {
-    match c {
-        ControlEvent::Pause => state.paused = true,
-        ControlEvent::Resume => state.paused = false,
-        ControlEvent::DisableTrading => state.trading_state = TradingState::Disabled,
-        ControlEvent::EnableTrading => state.trading_state = TradingState::Enabled,
-        ControlEvent::CancelAll => cancel_all_sync(state, exec)?,
-        ControlEvent::Flatten => {
-            cancel_all_sync(state, exec)?;
-            let insts: Vec<_> = state
-                .positions
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| !p.is_zero())
-                .filter_map(|(ix, _)| state.registry.id(InstrumentIndex(ix)).cloned())
-                .collect();
-            for inst in insts {
-                close_position_with_flatten_source_sync(state, exec, risk, inst);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn close_position_with_flatten_source_sync<E: SyncExecutionGateway>(
-    state: &mut GlobalState,
-    exec: &E,
-    risk: &RiskEngine,
-    inst: InstrumentId,
-) {
-    let snap = state.snapshot();
-    let pos = snap.position_qty(&inst);
-    if pos.is_zero() {
-        return;
-    }
-    let intent = OrderIntent {
-        instrument: inst,
-        side: if pos > Decimal::ZERO {
-            Side::Sell
-        } else {
-            Side::Buy
-        },
-        order_type: OrderType::Market,
-        price: None,
-        stop_price: None,
-        qty: pos.abs(),
-        client_order_id: None,
-        oco_group: None,
-        source: OrderIntentSource::Flatten,
-        strategy_id: None,
-    };
-    if let Err(e) = risk.validate(&snap, &intent) {
-        warn!(target: "athenas_pallas::engine", "flatten risk: {e}");
-        record_rejection(state, RejectionKind::Risk, &intent, e.to_string());
-        return;
-    }
-    match dispatch_intent_sync(exec, &snap, &intent) {
-        Ok(events) => apply_account_events(state, events),
-        Err(e) => {
-            error!(target: "athenas_pallas::engine", "flatten execution: {e}");
-            record_rejection(state, RejectionKind::Execution, &intent, e.to_string());
-        }
-    }
-}
-
-fn apply_account_events(state: &mut GlobalState, events: AccountEvents) {
-    for event in events {
-        state.apply_account(&event);
-    }
-}
-
-fn cancel_order_sync(
-    state: &mut GlobalState,
-    exec: &impl SyncExecutionGateway,
-    order_id: crate::types::OrderId,
-) -> Result<()> {
-    let events = exec.cancel(state, order_id)?;
-    apply_account_events(state, events);
-    Ok(())
-}
-
-fn cancel_all_sync(state: &mut GlobalState, exec: &impl SyncExecutionGateway) -> Result<()> {
-    let events = exec.cancel_all(&state.snapshot())?;
-    apply_account_events(state, events);
-    Ok(())
-}
-
-fn dispatch_intent_sync<E: SyncExecutionGateway>(
-    exec: &E,
-    state: &GlobalState,
-    intent: &OrderIntent,
-) -> Result<crate::execution::AccountEvents> {
-    match intent.order_type {
-        OrderType::Limit => exec.place_limit(state, intent),
-        OrderType::Market => exec.place_market(state, intent),
-        OrderType::StopMarket => exec.place_stop_market(state, intent),
-        OrderType::StopLimit => exec.place_stop_limit(state, intent),
-    }
 }
 
 pub(crate) fn event_time(ev: &Event) -> OffsetDateTime {

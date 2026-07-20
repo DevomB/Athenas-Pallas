@@ -1,5 +1,6 @@
 //! Engine: sync dispatch for backtest replay.
 
+mod commands;
 mod replay;
 mod sync;
 

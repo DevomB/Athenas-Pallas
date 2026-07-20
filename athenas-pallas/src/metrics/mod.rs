@@ -1,11 +1,13 @@
 //! Performance metrics from an equity curve and fill ledger.
 
+mod ledger;
 mod performance;
 mod positions;
 
+pub use ledger::{per_strategy_pnl, trade_ledger_from_fills, StrategyPnlRow, TradeLedger};
 pub use performance::{
-    per_strategy_pnl, summarize, summarize_with_fills, summarize_with_fills_and_rf,
-    trade_ledger_from_fills, PerformanceSummary, RollingMetrics, StrategyPnlRow, TradeLedger,
+    summarize, summarize_with_fills, summarize_with_fills_and_rf, PerformanceSummary,
+    RollingMetrics,
 };
 pub use positions::{strategy_position_report, StrategyPositionRow};
 
