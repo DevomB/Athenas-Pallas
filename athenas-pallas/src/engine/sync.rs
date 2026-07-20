@@ -47,20 +47,7 @@ where
     }
 
     match &ev {
-        Event::Market(m) => {
-            state.apply_market(m);
-            if let Some(instrument) = ev.instrument() {
-                let mut ready = Vec::new();
-                process_pending_intents_for_instrument_sync(
-                    state, risk, exec, instrument, intents, &mut ready,
-                );
-            }
-            let passive = match ev.instrument() {
-                Some(inst) => exec.poll_after_market_instrument(state, inst)?,
-                None => exec.poll_after_market(state)?,
-            };
-            apply_account_events(state, passive);
-        }
+        Event::Market(_) => process_live_market_sync(state, risk, exec, &ev, intents)?,
         Event::Account(a) => state.apply_account(a),
         Event::Control(c) => apply_control_sync(state, exec, risk, c)?,
         Event::Timer(_) => {}
@@ -68,6 +55,31 @@ where
 
     let mut submitted = Vec::new();
     dispatch_strategy_sync(state, strategy, risk, exec, &ev, &mut submitted)
+}
+
+fn process_live_market_sync(
+    state: &mut GlobalState,
+    risk: &RiskEngine,
+    exec: &impl SyncExecutionGateway,
+    event: &Event,
+    pending: &mut Vec<OrderIntent>,
+) -> Result<()> {
+    let Event::Market(market) = event else {
+        return Ok(());
+    };
+    state.apply_market(market);
+    if let Some(instrument) = event.instrument() {
+        let mut ready = Vec::new();
+        process_pending_intents_for_instrument_sync(
+            state,
+            risk,
+            exec,
+            instrument,
+            pending,
+            &mut ready,
+        );
+    }
+    poll_market_sync(state, exec, event.instrument())
 }
 
 /// Run strategy, risk, and execution against live state (no snapshot clones).
@@ -143,18 +155,25 @@ where
     }
 
     match &ev {
-        Event::Market(_) => {
-            let passive = match ev.instrument() {
-                Some(inst) => exec.poll_after_market_instrument(state, inst)?,
-                None => exec.poll_after_market(state)?,
-            };
-            apply_account_events(state, passive);
-        }
+        Event::Market(_) => poll_market_sync(state, exec, ev.instrument())?,
         Event::Account(a) => state.apply_account(a),
         Event::Control(_) | Event::Timer(_) => {}
     }
 
     dispatch_strategy_sync(state, strategy, risk, exec, &ev, intents)
+}
+
+fn poll_market_sync(
+    state: &mut GlobalState,
+    exec: &impl SyncExecutionGateway,
+    instrument: Option<&InstrumentId>,
+) -> Result<()> {
+    let events = match instrument {
+        Some(instrument) => exec.poll_after_market_instrument(state, instrument)?,
+        None => exec.poll_after_market(state)?,
+    };
+    apply_account_events(state, events);
+    Ok(())
 }
 
 /// Run a bar strategy after the completed bar is visible, retaining accepted orders for the next
@@ -247,9 +266,7 @@ pub(crate) fn poll_replay_market_instrument_sync(
     exec: &impl SyncExecutionGateway,
     instrument: &InstrumentId,
 ) -> Result<()> {
-    let events = exec.poll_after_market_instrument(state, instrument)?;
-    apply_account_events(state, events);
-    Ok(())
+    poll_market_sync(state, exec, Some(instrument))
 }
 
 /// Give a strategy a final callback, then apply its final intents and controls.

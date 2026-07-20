@@ -1,12 +1,13 @@
 //! Authoritative in-memory book, balances, orders, and positions.
 
+mod account;
+mod market;
+
 pub use crate::instrument::{InstrumentIndex, InstrumentMeta, InstrumentRegistry};
 
-use crate::events::{
-    AccountEvent, BookL2Snapshot, FillRecord, MarketEvent, RejectionKind, RejectionRecord,
-};
+use crate::events::{BookL2Snapshot, FillRecord, RejectionRecord};
 use crate::oms::OrderStore;
-use crate::types::{Asset, InstrumentId, OpenOrder, Side, StrategyId};
+use crate::types::{Asset, InstrumentId, StrategyId};
 use rust_decimal::Decimal;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
@@ -206,130 +207,6 @@ impl GlobalState {
             .unwrap_or(Decimal::ZERO)
     }
 
-    fn synthetic_bid_ask(mid: Decimal, half_spread_bps: Decimal) -> (Decimal, Decimal) {
-        let half_spread = mid * half_spread_bps / Decimal::from(10_000u64);
-        (mid - half_spread, mid + half_spread)
-    }
-
-    /// Set a preloaded bar's opening market, used to execute prior-bar orders without lookahead.
-    pub fn apply_bar_open(
-        &mut self,
-        ix: usize,
-        bar: &crate::bar::Bar,
-        tick_size: Decimal,
-        half_spread_bps: Decimal,
-    ) {
-        let Some(ts) = bar.timestamp() else {
-            return;
-        };
-        let open = crate::bar::ticks_to_decimal(bar.open_ticks, tick_size);
-        let (bid, ask) = Self::synthetic_bid_ask(open, half_spread_bps);
-        self.last_trade[ix] = Some((ts, open));
-        self.l1[ix] = Some((ts, bid, ask));
-        self.bar_high[ix] = None;
-        self.bar_low[ix] = None;
-        self.last_event_ts = Some(ts);
-    }
-
-    /// Set an owned bar event's opening market before applying its completed OHLC values.
-    pub fn apply_bar_event_open(
-        &mut self,
-        instrument: &InstrumentId,
-        ts: OffsetDateTime,
-        open: Decimal,
-    ) {
-        let Some(ix) = self.registry.index_of(instrument).map(|index| index.0) else {
-            return;
-        };
-        let (bid, ask) = Self::synthetic_bid_ask(open, self.synthetic_half_spread_bps);
-        self.last_trade[ix] = Some((ts, open));
-        self.l1[ix] = Some((ts, bid, ask));
-        self.bar_high[ix] = None;
-        self.bar_low[ix] = None;
-        self.last_event_ts = Some(ts);
-    }
-
-    /// Update market state from a completed preloaded bar (tick-native replay).
-    pub fn apply_bar(
-        &mut self,
-        ix: usize,
-        bar: &crate::bar::Bar,
-        tick_size: rust_decimal::Decimal,
-        half_spread_bps: rust_decimal::Decimal,
-    ) {
-        let Some(ts) = bar.timestamp() else {
-            return;
-        };
-        let high = crate::bar::ticks_to_decimal(bar.high_ticks, tick_size);
-        let low = crate::bar::ticks_to_decimal(bar.low_ticks, tick_size);
-        let close = crate::bar::ticks_to_decimal(bar.close_ticks, tick_size);
-        self.last_trade[ix] = Some((ts, close));
-        self.bar_close[ix] = Some(close);
-        self.bar_high[ix] = Some(high);
-        self.bar_low[ix] = Some(low);
-        self.last_event_ts = Some(ts);
-        let (bid, ask) = Self::synthetic_bid_ask(close, half_spread_bps);
-        self.l1[ix] = Some((ts, bid, ask));
-    }
-
-    /// Apply a market event (read-only book/trade updates).
-    pub fn apply_market(&mut self, ev: &MarketEvent) {
-        match ev {
-            MarketEvent::Trade {
-                instrument,
-                ts,
-                price,
-                ..
-            } => {
-                if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
-                    self.last_trade[ix] = Some((*ts, *price));
-                    self.bar_high[ix] = None;
-                    self.bar_low[ix] = None;
-                    self.last_event_ts = Some(*ts);
-                }
-            }
-            MarketEvent::BookL1 {
-                instrument,
-                ts,
-                bid,
-                ask,
-            } => {
-                if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
-                    self.l1[ix] = Some((*ts, *bid, *ask));
-                    self.bar_high[ix] = None;
-                    self.bar_low[ix] = None;
-                    self.last_event_ts = Some(*ts);
-                }
-            }
-            MarketEvent::BookL2Snapshot(snap) => {
-                if let Some(ix) = self.registry.index_of(&snap.instrument).map(|i| i.0) {
-                    self.l2[ix] = Some(snap.clone());
-                }
-            }
-            MarketEvent::Bar {
-                instrument,
-                ts,
-                open,
-                high,
-                low,
-                close,
-                ..
-            } => {
-                if let Some(ix) = self.registry.index_of(instrument).map(|i| i.0) {
-                    self.last_trade[ix] = Some((*ts, *close));
-                    self.bar_close[ix] = Some(*close);
-                    self.bar_high[ix] = Some(*high);
-                    self.bar_low[ix] = Some(*low);
-                    self.last_event_ts = Some(*ts);
-                    let (bid, ask) =
-                        Self::synthetic_bid_ask(*close, self.synthetic_half_spread_bps);
-                    self.l1[ix] = Some((*ts, bid, ask));
-                    let _ = open;
-                }
-            }
-        }
-    }
-
     /// Mid price for a dense instrument row (no hash lookup).
     pub fn mid_or_last_ix(&self, ix: usize) -> Option<Decimal> {
         if let Some(Some((_, bid, ask))) = self.l1.get(ix) {
@@ -357,112 +234,6 @@ impl GlobalState {
             .unwrap_or(Decimal::ZERO);
         let notional = Self::position_exposure(meta, base, mid);
         Some(quote + notional)
-    }
-
-    /// Apply account event (balances, orders, fills).
-    pub fn apply_account(&mut self, ev: &AccountEvent) {
-        match ev {
-            AccountEvent::Balance { asset, free } => {
-                self.balances.insert(asset.clone(), *free);
-            }
-            AccountEvent::BalanceDelta { asset, delta } => {
-                let entry = self.balances.entry(asset.clone()).or_insert(Decimal::ZERO);
-                *entry += *delta;
-            }
-            AccountEvent::OrderUpdate { .. } => self.apply_order_update(ev),
-            AccountEvent::Fill { .. } => self.apply_fill(ev),
-            AccountEvent::Rejection(rejection) => {
-                match rejection.kind {
-                    RejectionKind::Risk => self.risk_rejection_count += 1,
-                    RejectionKind::Execution => self.execution_rejection_count += 1,
-                }
-                self.rejection_log.push(rejection.clone());
-            }
-        }
-    }
-
-    fn apply_order_update(&mut self, event: &AccountEvent) {
-        let AccountEvent::OrderUpdate {
-            id,
-            instrument,
-            side,
-            order_type,
-            price,
-            stop_price,
-            remaining_qty,
-            original_qty,
-            status,
-            client_order_id,
-            oco_group,
-            strategy_id,
-        } = event
-        else {
-            return;
-        };
-        self.open_orders.apply_order_update(OpenOrder {
-            id: id.clone(),
-            instrument: instrument.clone(),
-            side: *side,
-            order_type: *order_type,
-            price: *price,
-            stop_price: *stop_price,
-            remaining_qty: *remaining_qty,
-            original_qty: *original_qty,
-            status: *status,
-            client_order_id: client_order_id.clone(),
-            oco_group: oco_group.clone(),
-            strategy_id: strategy_id.clone(),
-        });
-    }
-
-    fn apply_fill(&mut self, event: &AccountEvent) {
-        let AccountEvent::Fill {
-            order_id,
-            instrument,
-            side,
-            price,
-            qty,
-            fee,
-            client_order_id,
-            oco_group,
-            strategy_id,
-            ..
-        } = event
-        else {
-            return;
-        };
-        let Some(ix) = self.registry.index_of(instrument).map(|index| index.0) else {
-            return;
-        };
-        let delta = if *side == Side::Buy { *qty } else { -*qty };
-        self.positions[ix] += delta;
-        if let Some(strategy_id) = strategy_id {
-            *self
-                .strategy_positions
-                .entry((ix, strategy_id.clone()))
-                .or_insert(Decimal::ZERO) += delta;
-        }
-        self.fill_count += 1;
-        if let Some(ts) = self.last_event_ts {
-            let contract_multiplier = self
-                .registry
-                .meta(InstrumentIndex(ix))
-                .and_then(|meta| meta.contract_multiplier)
-                .map(|value| value.to_string());
-            self.fill_log.push(FillRecord {
-                ts,
-                order_id: order_id.clone(),
-                instrument: instrument.clone(),
-                side: *side,
-                qty: qty.to_string(),
-                price: price.to_string(),
-                fee: fee.to_string(),
-                contract_multiplier,
-                client_order_id: client_order_id.clone(),
-                oco_group: oco_group.clone(),
-                strategy_id: strategy_id.clone(),
-            });
-        }
     }
 
     /// Mark-to-market equity in quote using mid or last trade.

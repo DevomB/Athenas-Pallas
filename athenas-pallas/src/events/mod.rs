@@ -1,5 +1,7 @@
 //! Normalized events fed into the engine.
 
+mod metadata;
+
 use crate::types::{
     Asset, ClientOrderId, InstrumentId, OrderId, OrderStatus, OrderType, Side, StrategyId,
 };
@@ -240,50 +242,6 @@ pub enum Event {
     Control(ControlEvent),
     /// Timer.
     Timer(TimerEvent),
-}
-
-impl Event {
-    /// Extract instrument from market events if present.
-    pub fn instrument(&self) -> Option<&InstrumentId> {
-        match self {
-            Event::Market(MarketEvent::Trade { instrument, .. }) => Some(instrument),
-            Event::Market(MarketEvent::BookL1 { instrument, .. }) => Some(instrument),
-            Event::Market(MarketEvent::BookL2Snapshot(s)) => Some(&s.instrument),
-            Event::Market(MarketEvent::Bar { instrument, .. }) => Some(instrument),
-            Event::Account(AccountEvent::OrderUpdate { instrument, .. }) => Some(instrument),
-            Event::Account(AccountEvent::Fill { instrument, .. }) => Some(instrument),
-            Event::Account(AccountEvent::Rejection(rejection)) => Some(&rejection.instrument),
-            _ => None,
-        }
-    }
-
-    /// Timestamp carried by market and timer events.
-    ///
-    /// Returns `None` for account and control events, which have no intrinsic event time.
-    /// Replay paths use this to avoid accidental wall-clock (`now_utc`) reads.
-    pub fn timestamp(&self) -> Option<OffsetDateTime> {
-        match self {
-            Event::Market(MarketEvent::Trade { ts, .. }) => Some(*ts),
-            Event::Market(MarketEvent::BookL1 { ts, .. }) => Some(*ts),
-            Event::Market(MarketEvent::BookL2Snapshot(s)) => Some(s.ts),
-            Event::Market(MarketEvent::Bar { ts, .. }) => Some(*ts),
-            Event::Timer(t) => Some(t.ts),
-            _ => None,
-        }
-    }
-
-    /// [`Event::timestamp`], falling back to wall-clock `now` for events without an intrinsic time.
-    ///
-    /// Prefer [`Event::timestamp`] in deterministic replay paths; use this only where a concrete
-    /// timestamp is required for live/async ingestion.
-    pub fn timestamp_or_now(&self) -> OffsetDateTime {
-        self.timestamp().unwrap_or_else(OffsetDateTime::now_utc)
-    }
-
-    /// [`Event::timestamp`] as Unix nanoseconds (for compact audit records).
-    pub fn timestamp_unix_nanos(&self) -> Option<i128> {
-        self.timestamp().map(|ts| ts.unix_timestamp_nanos())
-    }
 }
 
 /// Borrowed market event for the zero-allocation tick-replay fast path.
