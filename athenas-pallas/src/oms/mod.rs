@@ -31,52 +31,34 @@ struct InstrumentBooks {
 
 impl InstrumentBooks {
     fn insert(&mut self, o: &OpenOrder) {
-        match o.order_type {
-            OrderType::Limit => {
-                let Some(px) = o.price else { return };
-                match o.side {
-                    Side::Buy => self.buy_limits.entry(px).or_default().push(o.id.clone()),
-                    Side::Sell => self.sell_limits.entry(px).or_default().push(o.id.clone()),
-                }
-            }
-            OrderType::StopMarket | OrderType::StopLimit => {
-                let Some(stop) = o.stop_price else { return };
-                match o.side {
-                    Side::Buy => self.buy_stops.entry(stop).or_default().push(o.id.clone()),
-                    Side::Sell => self.sell_stops.entry(stop).or_default().push(o.id.clone()),
-                }
-            }
-            OrderType::Market => {}
+        if let Some((book, price)) = self.book_mut(o) {
+            book.entry(price).or_default().push(o.id.clone());
         }
     }
 
     fn remove(&mut self, o: &OpenOrder) {
-        let remove_from = |map: &mut BTreeMap<Decimal, Level>, key: Decimal, id: &OrderId| {
-            if let Some(level) = map.get_mut(&key) {
-                level.retain(|existing| existing != id);
-                if level.is_empty() {
-                    map.remove(&key);
-                }
-            }
+        let Some((book, price)) = self.book_mut(o) else {
+            return;
         };
-        match o.order_type {
-            OrderType::Limit => {
-                if let Some(px) = o.price {
-                    match o.side {
-                        Side::Buy => remove_from(&mut self.buy_limits, px, &o.id),
-                        Side::Sell => remove_from(&mut self.sell_limits, px, &o.id),
-                    }
-                }
+        if let Some(level) = book.get_mut(&price) {
+            level.retain(|existing| existing != &o.id);
+            if level.is_empty() {
+                book.remove(&price);
             }
-            OrderType::StopMarket | OrderType::StopLimit => {
-                if let Some(stop) = o.stop_price {
-                    match o.side {
-                        Side::Buy => remove_from(&mut self.buy_stops, stop, &o.id),
-                        Side::Sell => remove_from(&mut self.sell_stops, stop, &o.id),
-                    }
-                }
+        }
+    }
+
+    fn book_mut(&mut self, order: &OpenOrder) -> Option<(&mut BTreeMap<Decimal, Level>, Decimal)> {
+        match (order.order_type, order.side) {
+            (OrderType::Limit, Side::Buy) => Some((&mut self.buy_limits, order.price?)),
+            (OrderType::Limit, Side::Sell) => Some((&mut self.sell_limits, order.price?)),
+            (OrderType::StopMarket | OrderType::StopLimit, Side::Buy) => {
+                Some((&mut self.buy_stops, order.stop_price?))
             }
-            OrderType::Market => {}
+            (OrderType::StopMarket | OrderType::StopLimit, Side::Sell) => {
+                Some((&mut self.sell_stops, order.stop_price?))
+            }
+            (OrderType::Market, _) => None,
         }
     }
 
@@ -157,12 +139,7 @@ impl OrderStore {
         let id = o.id.clone();
         let instrument = o.instrument.clone();
         if let Some(prev) = self.orders.insert(id.clone(), o) {
-            if let Some(book) = self.books.get_mut(&prev.instrument) {
-                book.remove(&prev);
-                if book.is_empty() {
-                    self.books.remove(&prev.instrument);
-                }
-            }
+            self.unindex_order(&prev);
         }
         if let Some(stored) = self.orders.get(&id) {
             self.books.entry(instrument).or_default().insert(stored);
@@ -171,12 +148,21 @@ impl OrderStore {
 
     fn remove_order(&mut self, id: &OrderId) {
         if let Some(o) = self.orders.remove(id) {
-            if let Some(book) = self.books.get_mut(&o.instrument) {
-                book.remove(&o);
-                if book.is_empty() {
-                    self.books.remove(&o.instrument);
-                }
-            }
+            self.unindex_order(&o);
+        }
+    }
+
+    fn unindex_order(&mut self, order: &OpenOrder) {
+        let remove_book = self
+            .books
+            .get_mut(&order.instrument)
+            .map(|book| {
+                book.remove(order);
+                book.is_empty()
+            })
+            .unwrap_or(false);
+        if remove_book {
+            self.books.remove(&order.instrument);
         }
     }
 
@@ -418,5 +404,95 @@ mod tests {
         let low = Decimal::new(97, 0);
         let ids = store.pollable_ids(&a, None, None, Some(high), Some(low));
         assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn price_index_covers_limit_and_stop_boundaries() {
+        let instrument = InstrumentId::new("test", "ABC");
+        let mut store = OrderStore::new();
+        let price = Decimal::from(100);
+        for (id, order_type, side) in [
+            (1, OrderType::Limit, Side::Buy),
+            (2, OrderType::Limit, Side::Sell),
+            (3, OrderType::StopMarket, Side::Buy),
+            (4, OrderType::StopMarket, Side::Sell),
+            (5, OrderType::StopLimit, Side::Buy),
+        ] {
+            let (limit, stop) = match order_type {
+                OrderType::Limit => (Some(price), None),
+                _ => (None, Some(price)),
+            };
+            store.apply_order_update(order(
+                id,
+                &instrument,
+                OrderStatus::Open,
+                order_type,
+                side,
+                limit,
+                stop,
+            ));
+        }
+
+        let exact = store.pollable_ids(
+            &instrument,
+            Some(price),
+            Some(price),
+            Some(price),
+            Some(price),
+        );
+        assert_eq!(exact.len(), 5);
+
+        let miss = store.pollable_ids(
+            &instrument,
+            Some(price - Decimal::ONE),
+            Some(price + Decimal::ONE),
+            Some(price - Decimal::ONE),
+            Some(price + Decimal::ONE),
+        );
+        assert!(miss.is_empty());
+    }
+
+    #[test]
+    fn replacing_order_id_reindexes_instrument_and_book() {
+        let a = InstrumentId::new("test", "ABC");
+        let b = InstrumentId::new("test", "XYZ");
+        let mut store = OrderStore::new();
+        store.apply_order_update(order(
+            1,
+            &a,
+            OrderStatus::Open,
+            OrderType::Limit,
+            Side::Buy,
+            Some(Decimal::from(100)),
+            None,
+        ));
+        store.apply_order_update(order(
+            1,
+            &b,
+            OrderStatus::Open,
+            OrderType::StopMarket,
+            Side::Sell,
+            None,
+            Some(Decimal::from(90)),
+        ));
+
+        assert_eq!(store.instrument_order_count(&a), 0);
+        assert_eq!(store.instrument_order_count(&b), 1);
+        assert_eq!(
+            store.pollable_ids(&b, None, None, None, Some(Decimal::from(90))),
+            vec![OrderId::from_venue_u64(1)]
+        );
+
+        store.apply_order_update(order(
+            1,
+            &b,
+            OrderStatus::Canceled,
+            OrderType::StopMarket,
+            Side::Sell,
+            None,
+            Some(Decimal::from(90)),
+        ));
+        assert!(store.is_empty());
+        assert_eq!(store.instrument_order_count(&b), 0);
     }
 }

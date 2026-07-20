@@ -2,10 +2,10 @@
 
 use crate::error::Result;
 use crate::events::{
-    AccountEvent, ControlEvent, Event, OrderIntent, OrderIntentSource, RejectionKind,
+    AccountEvent, ControlEvent, Event, MarketEvent, OrderIntent, OrderIntentSource, RejectionKind,
     RejectionRecord,
 };
-use crate::execution::SyncExecutionGateway;
+use crate::execution::{AccountEvents, SyncExecutionGateway};
 use crate::risk::RiskEngine;
 use crate::state::{GlobalState, InstrumentIndex};
 use crate::strategy::{Strategy, StrategyContext, StrategyControl};
@@ -42,33 +42,8 @@ where
     S: Strategy,
     E: SyncExecutionGateway,
 {
-    if let Event::Market(crate::events::MarketEvent::Bar {
-        instrument,
-        ts,
-        open,
-        ..
-    }) = &ev
-    {
-        state.apply_bar_event_open(instrument, *ts, *open);
-        let mut ready = Vec::new();
-        process_pending_intents_for_instrument_sync(
-            state, risk, exec, instrument, intents, &mut ready,
-        );
-        if let Event::Market(market) = &ev {
-            state.apply_market(market);
-        }
-        poll_replay_market_instrument_sync(state, exec, instrument)?;
-        let mut submitted = Vec::new();
-        collect_replay_event_intents_sync(
-            state,
-            strategy,
-            risk,
-            exec,
-            &ev,
-            &mut submitted,
-            intents,
-        )?;
-        return Ok(());
+    if matches!(&ev, Event::Market(MarketEvent::Bar { .. })) {
+        return dispatch_replay_sync(state, strategy, risk, exec, ev, intents);
     }
 
     match &ev {
@@ -84,9 +59,7 @@ where
                 Some(inst) => exec.poll_after_market_instrument(state, inst)?,
                 None => exec.poll_after_market(state)?,
             };
-            for a in passive {
-                state.apply_account(&a);
-            }
+            apply_account_events(state, passive);
         }
         Event::Account(a) => state.apply_account(a),
         Event::Control(c) => apply_control_sync(state, exec, risk, c)?,
@@ -140,21 +113,21 @@ pub fn dispatch_replay_sync<S>(
 where
     S: Strategy,
 {
-    if let Event::Market(crate::events::MarketEvent::Bar {
-        instrument,
-        ts,
-        open,
-        ..
-    }) = &ev
+    if let Event::Market(
+        market @ MarketEvent::Bar {
+            instrument,
+            ts,
+            open,
+            ..
+        },
+    ) = &ev
     {
         state.apply_bar_event_open(instrument, *ts, *open);
         let mut ready = Vec::new();
         process_pending_intents_for_instrument_sync(
             state, risk, exec, instrument, intents, &mut ready,
         );
-        if let Event::Market(market) = &ev {
-            state.apply_market(market);
-        }
+        state.apply_market(market);
         poll_replay_market_instrument_sync(state, exec, instrument)?;
         let mut submitted = Vec::new();
         collect_replay_event_intents_sync(
@@ -175,29 +148,13 @@ where
                 Some(inst) => exec.poll_after_market_instrument(state, inst)?,
                 None => exec.poll_after_market(state)?,
             };
-            for a in passive {
-                state.apply_account(&a);
-            }
+            apply_account_events(state, passive);
         }
         Event::Account(a) => state.apply_account(a),
         Event::Control(_) | Event::Timer(_) => {}
     }
 
-    let now = event_time(&ev);
-    state.refresh_daily_risk_anchor(now);
-
-    if state.paused || state.trading_state == TradingState::Disabled {
-        return Ok(());
-    }
-
-    let ctx = StrategyContext { now, state };
-    intents.clear();
-    strategy.on_event(&ctx, &ev, intents);
-    let mut controls = Vec::new();
-    strategy.drain_controls(&mut controls);
-    process_controls_sync(state, exec, risk, &mut controls)?;
-    process_intents_sync(state, risk, exec, intents);
-    Ok(())
+    dispatch_strategy_sync(state, strategy, risk, exec, &ev, intents)
 }
 
 pub(crate) fn process_intents_sync(
@@ -213,11 +170,7 @@ pub(crate) fn process_intents_sync(
             continue;
         }
         match dispatch_intent_sync(exec, state, &intent) {
-            Ok(evs) => {
-                for a in evs {
-                    state.apply_account(&a);
-                }
-            }
+            Ok(events) => apply_account_events(state, events),
             Err(e) => {
                 error!(target: "athenas_pallas::engine", "execution: {e}");
                 record_rejection(state, RejectionKind::Execution, &intent, e.to_string());
@@ -317,9 +270,7 @@ pub(crate) fn poll_replay_market_instrument_sync(
     instrument: &InstrumentId,
 ) -> Result<()> {
     let events = exec.poll_after_market_instrument(state, instrument)?;
-    for event in events {
-        state.apply_account(&event);
-    }
+    apply_account_events(state, events);
     Ok(())
 }
 
@@ -376,10 +327,7 @@ fn process_controls_sync(
     for control in controls.drain(..) {
         match control {
             StrategyControl::CancelOrder(order_id) => {
-                let events = exec.cancel(state, order_id)?;
-                for event in events {
-                    state.apply_account(&event);
-                }
+                cancel_order_sync(state, exec, order_id)?;
             }
             StrategyControl::CancelClientOrder(client_id) => {
                 let order_ids: Vec<_> = state
@@ -395,10 +343,7 @@ fn process_controls_sync(
                     )));
                 }
                 for order_id in order_ids {
-                    let events = exec.cancel(state, order_id)?;
-                    for event in events {
-                        state.apply_account(&event);
-                    }
+                    cancel_order_sync(state, exec, order_id)?;
                 }
             }
             StrategyControl::CancelAll => {
@@ -423,17 +368,9 @@ fn apply_control_sync<E: SyncExecutionGateway>(
         ControlEvent::Resume => state.paused = false,
         ControlEvent::DisableTrading => state.trading_state = TradingState::Disabled,
         ControlEvent::EnableTrading => state.trading_state = TradingState::Enabled,
-        ControlEvent::CancelAll => {
-            let evs = exec.cancel_all(&state.snapshot())?;
-            for a in evs {
-                state.apply_account(&a);
-            }
-        }
+        ControlEvent::CancelAll => cancel_all_sync(state, exec)?,
         ControlEvent::Flatten => {
-            let evs = exec.cancel_all(&state.snapshot())?;
-            for a in evs {
-                state.apply_account(&a);
-            }
+            cancel_all_sync(state, exec)?;
             let insts: Vec<_> = state
                 .positions
                 .iter()
@@ -482,16 +419,34 @@ fn close_position_with_flatten_source_sync<E: SyncExecutionGateway>(
         return;
     }
     match dispatch_intent_sync(exec, &snap, &intent) {
-        Ok(evs) => {
-            for a in evs {
-                state.apply_account(&a);
-            }
-        }
+        Ok(events) => apply_account_events(state, events),
         Err(e) => {
             error!(target: "athenas_pallas::engine", "flatten execution: {e}");
             record_rejection(state, RejectionKind::Execution, &intent, e.to_string());
         }
     }
+}
+
+fn apply_account_events(state: &mut GlobalState, events: AccountEvents) {
+    for event in events {
+        state.apply_account(&event);
+    }
+}
+
+fn cancel_order_sync(
+    state: &mut GlobalState,
+    exec: &impl SyncExecutionGateway,
+    order_id: crate::types::OrderId,
+) -> Result<()> {
+    let events = exec.cancel(state, order_id)?;
+    apply_account_events(state, events);
+    Ok(())
+}
+
+fn cancel_all_sync(state: &mut GlobalState, exec: &impl SyncExecutionGateway) -> Result<()> {
+    let events = exec.cancel_all(&state.snapshot())?;
+    apply_account_events(state, events);
+    Ok(())
 }
 
 fn dispatch_intent_sync<E: SyncExecutionGateway>(
