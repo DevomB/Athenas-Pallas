@@ -30,6 +30,7 @@ pub struct ExternalStrategy {
     fills_seen: usize,
     rejections_seen: usize,
     supports_finish: bool,
+    diagnostics: serde_json::Map<String, serde_json::Value>,
     protocol_error: Option<Error>,
 }
 
@@ -83,6 +84,7 @@ impl ExternalStrategy {
             fills_seen: 0,
             rejections_seen: 0,
             supports_finish: false,
+            diagnostics: serde_json::Map::new(),
             protocol_error: None,
         })
     }
@@ -293,6 +295,7 @@ impl ExternalStrategy {
         if parsed.flatten {
             self.controls.push(StrategyControl::Flatten);
         }
+        self.diagnostics.extend(parsed.diagnostics);
         intents_to_orders(parsed.intents)
     }
 }
@@ -380,6 +383,10 @@ impl Strategy for ExternalStrategy {
             Ok(orders) => out.extend(orders),
             Err(error) => self.fail(error),
         }
+    }
+
+    fn diagnostics(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.diagnostics.clone()
     }
 }
 

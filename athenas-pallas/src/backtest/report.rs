@@ -86,6 +86,9 @@ pub(crate) struct ReportDetails {
     pub rejections: Vec<RejectionRecord>,
     pub pending_orders: Vec<PendingOrder>,
     pub final_positions: Vec<FinalPosition>,
+    pub first_fill_event: Option<u64>,
+    pub first_fill_ts: Option<time::OffsetDateTime>,
+    pub strategy_diagnostics: serde_json::Map<String, serde_json::Value>,
 }
 
 /// JSON-serializable run output.
@@ -139,6 +142,14 @@ pub struct BacktestReport {
     pub pending_orders: Vec<PendingOrder>,
     /// Final net positions for every registered instrument.
     pub final_positions: Vec<FinalPosition>,
+    /// One-based accepted event index where the first fill occurred.
+    pub first_fill_event: Option<u64>,
+    /// Timestamp of the first fill, when any fill occurred.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub first_fill_ts: Option<time::OffsetDateTime>,
+    /// Latest structured diagnostics reported by an external strategy.
+    #[serde(skip_serializing_if = "serde_json::Map::is_empty")]
+    pub strategy_diagnostics: serde_json::Map<String, serde_json::Value>,
 }
 
 pub(crate) fn report_from_summary(
@@ -171,6 +182,9 @@ pub(crate) fn report_from_summary(
         rejections: details.rejections,
         pending_orders: details.pending_orders,
         final_positions: details.final_positions,
+        first_fill_event: details.first_fill_event,
+        first_fill_ts: details.first_fill_ts,
+        strategy_diagnostics: details.strategy_diagnostics,
     }
 }
 

@@ -66,6 +66,7 @@ struct Response {
     std::vector<std::string> cancel_client_order_ids;
     bool cancel_all = false;
     bool flatten = false;
+    std::string diagnostics_json = "{}";
 
     Response() = default;
     Response(std::vector<Intent> orders) : intents(std::move(orders)) {}
@@ -359,7 +360,8 @@ inline void write_response(
         std::cout << '"' << detail::escape(response.cancel_client_order_ids[index]) << '"';
     }
     std::cout << "],\"cancel_all\":" << (response.cancel_all ? "true" : "false")
-              << ",\"flatten\":" << (response.flatten ? "true" : "false") << "}\n";
+              << ",\"flatten\":" << (response.flatten ? "true" : "false")
+              << ",\"diagnostics\":" << response.diagnostics_json << "}\n";
     std::cout.flush();
 }
 

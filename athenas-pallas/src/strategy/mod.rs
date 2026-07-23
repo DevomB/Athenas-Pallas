@@ -79,6 +79,11 @@ pub trait Strategy: Send {
 
     /// Final callback after replay, allowing cancellation or deterministic flattening.
     fn on_finish(&mut self, _ctx: &StrategyContext<'_>, _out: &mut Vec<OrderIntent>) {}
+
+    /// Final structured research diagnostics collected during the run.
+    fn diagnostics(&self) -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
 }
 
 /// No-op for benchmarks.

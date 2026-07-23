@@ -144,7 +144,16 @@ while True:
                 "qty": "0.01",
                 "client_order_id": "entry-1"
             }]
-        sys.stdout.write(json.dumps({"msg": "intents", "seq": message["seq"], "intents": intents}) + "\n")
+        sys.stdout.write(json.dumps({
+            "msg": "intents",
+            "seq": message["seq"],
+            "intents": intents,
+            "diagnostics": {
+                "warmup_bars_remaining": 0,
+                "session_invalid_days": 2,
+                "gate_open_rate": 0.25
+            }
+        }) + "\n")
         sys.stdout.flush()
     elif message["msg"] == "finish":
         assert saw_fill
@@ -174,6 +183,11 @@ while True:
     let report = run_external_backtest(&config, &script).expect("versioned protocol run");
 
     assert_eq!(report.fill_count, 2);
+    assert!(report.first_fill_event.is_some());
+    assert!(report.first_fill_ts.is_some());
+    assert_eq!(report.strategy_diagnostics["warmup_bars_remaining"], 0);
+    assert_eq!(report.strategy_diagnostics["session_invalid_days"], 2);
+    assert_eq!(report.strategy_diagnostics["gate_open_rate"], 0.25);
     assert_eq!(
         report
             .final_positions

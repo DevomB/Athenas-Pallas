@@ -148,6 +148,9 @@ pub struct IntentsMsg {
 
     #[serde(default)]
     pub flatten: bool,
+
+    #[serde(default)]
+    pub diagnostics: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -164,7 +164,7 @@ impl BacktestRunner {
             }
         }
         run.finish_strategy(strategy)?;
-        Ok(run.finish())
+        Ok(run.finish(strategy.diagnostics()))
     }
 }
 
@@ -189,6 +189,8 @@ struct ReplayRun<'a> {
     processed_events: u64,
     first_event_ts: Option<time::OffsetDateTime>,
     last_event_ts: Option<time::OffsetDateTime>,
+    first_fill_event: Option<u64>,
+    first_fill_ts: Option<time::OffsetDateTime>,
     started: Instant,
 }
 
@@ -253,6 +255,8 @@ impl<'a> ReplayRun<'a> {
             processed_events: 0,
             first_event_ts: None,
             last_event_ts: None,
+            first_fill_event: None,
+            first_fill_ts: None,
             started: Instant::now(),
         })
     }
@@ -427,6 +431,10 @@ impl<'a> ReplayRun<'a> {
     }
 
     fn record_equity(&mut self, ts: time::OffsetDateTime) {
+        if self.first_fill_event.is_none() && !self.state.fill_log.is_empty() {
+            self.first_fill_event = Some(self.processed_events);
+            self.first_fill_ts = Some(ts);
+        }
         let Some(equity) = record_equity(&self.state, self.multi_instrument, self.primary_ix)
         else {
             return;
@@ -440,7 +448,10 @@ impl<'a> ReplayRun<'a> {
         }
     }
 
-    fn finish(mut self) -> BacktestReport {
+    fn finish(
+        mut self,
+        strategy_diagnostics: serde_json::Map<String, serde_json::Value>,
+    ) -> BacktestReport {
         let fills = self.state.take_fill_log();
         let details = build_report_details(
             self.cfg,
@@ -451,6 +462,9 @@ impl<'a> ReplayRun<'a> {
             &self.state,
             &self.pending_bar_intents,
             fills,
+            self.first_fill_event,
+            self.first_fill_ts,
+            strategy_diagnostics,
         );
         finalize_report(
             self.cfg,
@@ -529,6 +543,9 @@ fn build_report_details(
     state: &GlobalState,
     deferred: &[OrderIntent],
     fills: Vec<FillRecord>,
+    first_fill_event: Option<u64>,
+    first_fill_ts: Option<time::OffsetDateTime>,
+    strategy_diagnostics: serde_json::Map<String, serde_json::Value>,
 ) -> ReportDetails {
     let (total_fees, turnover) = report_costs(&fills, state);
     ReportDetails {
@@ -542,6 +559,9 @@ fn build_report_details(
         rejections: state.rejection_log.clone(),
         pending_orders: report_pending_orders(state, deferred),
         final_positions: report_final_positions(state),
+        first_fill_event,
+        first_fill_ts,
+        strategy_diagnostics,
     }
 }
 

@@ -108,7 +108,12 @@ Omit the `finish` capability when the strategy does not need a final callback.
   "cancel_order_ids": [],
   "cancel_client_order_ids": ["old-order"],
   "cancel_all": false,
-  "flatten": false
+  "flatten": false,
+  "diagnostics": {
+    "warmup_bars_remaining": 42,
+    "session_invalid_days": 1,
+    "gate_open_rate": 0.18
+  }
 }
 ```
 
@@ -117,6 +122,12 @@ Decimal fields are strings. `side` is `Buy` or `Sell`. `order_type` is `Market`,
 Orders sharing a non-null `oco_group` are one-cancels-other siblings: the first fill cancels the
 remaining working siblings. Cancellation may target an engine UUID in `cancel_order_ids` or a
 strategy-owned id in `cancel_client_order_ids`.
+
+`diagnostics` is an optional JSON object. The engine retains the latest value for each key and
+writes the result to `strategy_diagnostics` in the final report. Use it for warmup progress,
+session-invalid counts, gate-open rates, and numerical-abort flags; it is observability only and
+does not alter order handling. The engine also reports `first_fill_event` and `first_fill_ts`, so a
+long warmup can be distinguished from a strategy that warmed up but never produced a fill.
 
 For OHLCV replay, a strategy sees a completed bar before submitting its response. Those orders are
 therefore held until the next market update for their instrument; market orders execute from the
