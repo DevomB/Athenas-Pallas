@@ -17,6 +17,7 @@ pub enum MarketEvent {
         /// Instrument.
         instrument: InstrumentId,
         /// When.
+        #[serde(with = "rfc3339_compat")]
         ts: OffsetDateTime,
         /// Price.
         price: Decimal,
@@ -28,6 +29,7 @@ pub enum MarketEvent {
         /// Instrument.
         instrument: InstrumentId,
         /// When.
+        #[serde(with = "rfc3339_compat")]
         ts: OffsetDateTime,
         /// Best bid.
         bid: Decimal,
@@ -41,6 +43,7 @@ pub enum MarketEvent {
         /// Instrument.
         instrument: InstrumentId,
         /// When.
+        #[serde(with = "rfc3339_compat")]
         ts: OffsetDateTime,
         /// Open.
         open: Decimal,
@@ -61,6 +64,7 @@ pub struct BookL2Snapshot {
     /// Instrument.
     pub instrument: InstrumentId,
     /// When.
+    #[serde(with = "rfc3339_compat")]
     pub ts: OffsetDateTime,
     /// Bid levels, best first.
     pub bids: Vec<(Decimal, Decimal)>,
@@ -160,7 +164,7 @@ pub enum RejectionKind {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RejectionRecord {
     /// Replay time at which the rejection occurred.
-    #[serde(with = "time::serde::rfc3339")]
+    #[serde(with = "rfc3339_compat")]
     pub ts: OffsetDateTime,
     /// Risk or execution stage.
     pub kind: RejectionKind,
@@ -194,6 +198,7 @@ pub enum ControlEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimerEvent {
     /// Wall clock (UTC recommended).
+    #[serde(with = "rfc3339_compat")]
     pub ts: OffsetDateTime,
     /// Schedule identifier from [`crate::engine::TimerSchedule`].
     pub id: u32,
@@ -203,7 +208,7 @@ pub struct TimerEvent {
 #[derive(Clone, Debug, Serialize)]
 pub struct FillRecord {
     /// When the fill occurred.
-    #[serde(with = "time::serde::rfc3339")]
+    #[serde(with = "rfc3339_compat")]
     pub ts: OffsetDateTime,
     /// Engine order id.
     pub order_id: OrderId,
@@ -349,4 +354,68 @@ pub struct OrderIntent {
     /// Optional sub-strategy label for attributed position tracking (see [`crate::state::GlobalState::strategy_position_qty`] and [`crate::metrics::strategy_position_report`]).
     #[serde(default)]
     pub strategy_id: Option<StrategyId>,
+}
+
+mod rfc3339_compat {
+    use serde::{de::Error as _, Deserialize, Deserializer, Serializer};
+    use time::OffsetDateTime;
+
+    pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        time::serde::rfc3339::serialize(value, serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::String(text) => {
+                OffsetDateTime::parse(&text, &time::format_description::well_known::Rfc3339)
+                    .map_err(D::Error::custom)
+            }
+            legacy => OffsetDateTime::deserialize(legacy).map_err(D::Error::custom),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::macros::datetime;
+
+    #[test]
+    fn market_event_timestamps_are_rfc3339_strings() {
+        let event = Event::Market(MarketEvent::Bar {
+            instrument: InstrumentId::new("test", "ES"),
+            ts: datetime!(2025-01-02 14:30:00 UTC),
+            open: Decimal::ONE,
+            high: Decimal::ONE,
+            low: Decimal::ONE,
+            close: Decimal::ONE,
+            volume: Decimal::ONE,
+        });
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(
+            json["Market"]["Bar"]["ts"],
+            serde_json::Value::String("2025-01-02T14:30:00Z".into())
+        );
+        assert_eq!(
+            serde_json::from_value::<Event>(json).unwrap().timestamp(),
+            Some(datetime!(2025-01-02 14:30:00 UTC))
+        );
+    }
+
+    #[test]
+    fn market_events_accept_legacy_timestamp_arrays() {
+        let json = r#"{"Market":{"Bar":{"instrument":{"exchange":"test","symbol":"ES"},"ts":[2025,2,14,30,0,0,0,0,0],"open":"1","high":"1","low":"1","close":"1","volume":"1"}}}"#;
+        assert_eq!(
+            serde_json::from_str::<Event>(json).unwrap().timestamp(),
+            Some(datetime!(2025-01-02 14:30:00 UTC))
+        );
+    }
 }

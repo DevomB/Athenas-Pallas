@@ -36,7 +36,19 @@ is the arbitrary JSON-compatible `[strategy_parameters]` TOML table (or repeated
 {
   "msg": "event",
   "seq": 1,
-  "event": {...},
+  "event": {
+    "Market": {
+      "Bar": {
+        "instrument": {"exchange": "binance", "symbol": "BTCUSDT"},
+        "ts": "2025-01-02T14:30:00Z",
+        "open": "40000",
+        "high": "40100",
+        "low": "39900",
+        "close": "40050",
+        "volume": "125"
+      }
+    }
+  },
   "ctx": {
     "position_qty": "0",
     "mid": "40000",
@@ -52,6 +64,9 @@ is the arbitrary JSON-compatible `[strategy_parameters]` TOML table (or repeated
 
 `fills` and `rejections` contain updates since the preceding callback. `pending_orders` is the
 current working-order snapshot, including engine order ids, client ids, and OCO groups.
+Every market/timer event timestamp is an RFC 3339 string normalized to UTC (`Z`). Exchange session
+logic must use that instant with an explicit venue calendar; the engine never treats a naive local
+timestamp as New York time.
 
 **finish** (only when `ready.capabilities` contains `finish`)
 ```json
