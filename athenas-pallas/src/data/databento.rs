@@ -492,6 +492,54 @@ fn definitions_path(cfg: &DatabentoFetchConfig) -> PathBuf {
 
 /// Resolve or fetch the cached Databento CSV.
 pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheResult> {
+    validate_fetch_config(cfg)?;
+
+    let raw_path = raw_cache_path(cfg);
+    let path = cache_path(cfg);
+    let raw_valid = !cfg.refresh_data && cached_request_is_valid(cfg, &raw_path)?;
+    let definitions_ready = !cfg.import_definitions || definitions_path(cfg).is_file();
+    if reusable_adjusted_cache(cfg, &raw_path, &path, raw_valid, definitions_ready)? {
+        return Ok(DatabentoCacheResult {
+            cache_path: path,
+            estimated_cost_usd: None,
+            fetched: false,
+            definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
+        });
+    }
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| Error::Invalid(format!("databento async runtime failure: {err}")))?;
+    let estimated_cost_usd = ensure_raw_cache(cfg, &raw_path, &path, raw_valid, &rt)?;
+    if cfg.estimate_only {
+        return Ok(DatabentoCacheResult {
+            cache_path: path,
+            estimated_cost_usd,
+            fetched: false,
+            definitions_path: None,
+        });
+    }
+    ensure_definitions(cfg, definitions_ready, &rt)?;
+
+    if cfg.adjustment_mode == AdjustmentMode::Raw {
+        return Ok(DatabentoCacheResult {
+            cache_path: raw_path,
+            estimated_cost_usd,
+            fetched: !raw_valid,
+            definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
+        });
+    }
+    materialize_adjusted_cache(cfg, &raw_path, &path, &rt)?;
+    Ok(DatabentoCacheResult {
+        cache_path: path,
+        estimated_cost_usd,
+        fetched: true,
+        definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
+    })
+}
+
+fn validate_fetch_config(cfg: &DatabentoFetchConfig) -> Result<()> {
     if cfg.end <= cfg.start {
         return Err(Error::Invalid(
             "invalid databento range: --end must be after --start".to_string(),
@@ -515,35 +563,34 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
             "continuous/parent symbols require an explicit engine roll policy and ledger; request a dated raw symbol instead".into(),
         ));
     }
+    Ok(())
+}
 
-    let raw_path = raw_cache_path(cfg);
-    let path = cache_path(cfg);
-    let raw_valid = !cfg.refresh_data && cached_request_is_valid(cfg, &raw_path)?;
-    let definitions_ready = !cfg.import_definitions || definitions_path(cfg).is_file();
-    if raw_valid
+fn reusable_adjusted_cache(
+    cfg: &DatabentoFetchConfig,
+    raw_path: &Path,
+    path: &Path,
+    raw_valid: bool,
+    definitions_ready: bool,
+) -> Result<bool> {
+    Ok(raw_valid
         && definitions_ready
         && cfg.adjustment_mode != AdjustmentMode::Raw
         && !cfg.estimate_only
-        && adjusted_request_is_valid(cfg, &raw_path, &path)?
-    {
-        return Ok(DatabentoCacheResult {
-            cache_path: path,
-            estimated_cost_usd: None,
-            fetched: false,
-            definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
-        });
-    }
+        && adjusted_request_is_valid(cfg, raw_path, path)?)
+}
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| Error::Invalid(format!("databento async runtime failure: {err}")))?;
-    let mut estimated_cost_usd = None;
+fn ensure_raw_cache(
+    cfg: &DatabentoFetchConfig,
+    raw_path: &Path,
+    path: &Path,
+    raw_valid: bool,
+    rt: &tokio::runtime::Runtime,
+) -> Result<Option<f64>> {
     if !raw_valid || cfg.estimate_only {
         dotenvy::dotenv().ok();
         require_api_key()?;
         let inspection = rt.block_on(inspect_request(cfg))?;
-        estimated_cost_usd = Some(inspection.estimated_cost_usd);
         println!(
             "Databento estimated cost: ${:.6}; cache: {}",
             inspection.estimated_cost_usd,
@@ -552,36 +599,38 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
 
         if cfg.estimate_only {
             write_json_atomic(&inspection_path(cfg), &inspection)?;
-            return Ok(DatabentoCacheResult {
-                cache_path: path,
-                estimated_cost_usd,
-                fetched: false,
-                definitions_path: None,
-            });
+            return Ok(Some(inspection.estimated_cost_usd));
         }
 
         confirm_cost(cfg, inspection.estimated_cost_usd)?;
-        let source_row_count = rt.block_on(fetch_to_cache(cfg, &raw_path))?;
-        let manifest = cache_manifest(cfg, &raw_path, source_row_count)?;
+        let source_row_count = rt.block_on(fetch_to_cache(cfg, raw_path))?;
+        let manifest = cache_manifest(cfg, raw_path, source_row_count)?;
         write_json_atomic(&raw_manifest_path(cfg), &manifest)?;
+        return Ok(Some(inspection.estimated_cost_usd));
     }
+    Ok(None)
+}
 
+fn ensure_definitions(
+    cfg: &DatabentoFetchConfig,
+    definitions_ready: bool,
+    rt: &tokio::runtime::Runtime,
+) -> Result<()> {
     if cfg.import_definitions && (!definitions_ready || cfg.refresh_data) {
         dotenvy::dotenv().ok();
         require_api_key()?;
         let definitions = rt.block_on(fetch_definitions(cfg))?;
         write_json_atomic(&definitions_path(cfg), &definitions)?;
     }
+    Ok(())
+}
 
-    if cfg.adjustment_mode == AdjustmentMode::Raw {
-        return Ok(DatabentoCacheResult {
-            cache_path: raw_path,
-            estimated_cost_usd,
-            fetched: !raw_valid,
-            definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
-        });
-    }
-
+fn materialize_adjusted_cache(
+    cfg: &DatabentoFetchConfig,
+    raw_path: &Path,
+    path: &Path,
+    rt: &tokio::runtime::Runtime,
+) -> Result<()> {
     dotenvy::dotenv().ok();
     require_api_key()?;
     let factors = if !cfg.refresh_data && factors_path(cfg).is_file() {
@@ -591,17 +640,10 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
         write_json_atomic(&factors_path(cfg), &factors)?;
         factors
     };
-    let source_row_count =
-        materialize_adjusted_csv(&raw_path, &path, &factors, cfg.adjustment_mode)?;
-    let manifest = adjusted_manifest(cfg, &raw_path, &path, source_row_count, factors)?;
+    let source_row_count = materialize_adjusted_csv(raw_path, path, &factors, cfg.adjustment_mode)?;
+    let manifest = adjusted_manifest(cfg, raw_path, path, source_row_count, factors)?;
     write_json_atomic(&manifest_path(cfg), &manifest)?;
-
-    Ok(DatabentoCacheResult {
-        cache_path: path,
-        estimated_cost_usd,
-        fetched: true,
-        definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
-    })
+    Ok(())
 }
 
 async fn inspect_request(cfg: &DatabentoFetchConfig) -> Result<DatabentoInspection> {
@@ -1235,88 +1277,23 @@ async fn fetch_definitions(
 fn map_definition(
     record: &databento::dbn::InstrumentDefMsg,
 ) -> Result<DatabentoInstrumentDefinition> {
-    use databento::dbn::{InstrumentClass, SecurityUpdateAction};
+    use databento::dbn::InstrumentClass;
 
     let instrument_class = record.instrument_class().map_err(map_dbn_error)?;
-    let asset_class = match instrument_class {
-        InstrumentClass::Stock => "equity",
-        InstrumentClass::Future => "future",
-        InstrumentClass::Call | InstrumentClass::Put => "option",
-        InstrumentClass::Bond => "bond",
-        InstrumentClass::FxSpot => "forex",
-        other => {
-            return Err(Error::Invalid(format!(
-                "unsupported Databento instrument class {other:?}"
-            )))
-        }
-    };
+    let asset_class = definition_asset_class(instrument_class)?;
     let raw_symbol = nonempty_definition(record.raw_symbol(), "raw_symbol")?;
     let currency = nonempty_definition(record.currency(), "currency")?;
     let tick_size = positive_fixed(record.min_price_increment, "min_price_increment")?;
-    let round_lot = if record.min_lot_size_round_lot > 0 {
-        record.min_lot_size_round_lot
-    } else {
-        record.min_lot_size
-    };
-    if round_lot <= 0 {
-        return Err(Error::Invalid(format!(
-            "unsupported instrument '{raw_symbol}': missing positive round lot"
-        )));
-    }
+    let round_lot = definition_round_lot(record, &raw_symbol)?;
     let derivative = matches!(
         instrument_class,
         InstrumentClass::Future | InstrumentClass::Call | InstrumentClass::Put
     );
-    let contract_multiplier = derivative
-        .then(|| {
-            if record.unit_of_measure_qty != databento::dbn::UNDEF_PRICE
-                && record.unit_of_measure_qty > 0
-            {
-                positive_fixed(record.unit_of_measure_qty, "unit_of_measure_qty")
-            } else if record.contract_multiplier > 0 {
-                Ok(record.contract_multiplier.to_string())
-            } else {
-                Err(Error::Invalid(format!(
-                    "unsupported derivative '{raw_symbol}': missing contract multiplier"
-                )))
-            }
-        })
-        .transpose()?;
-    let expiration = derivative
-        .then(|| {
-            record.expiration().ok_or_else(|| {
-                Error::Invalid(format!(
-                    "unsupported derivative '{raw_symbol}': missing expiration"
-                ))
-            })
-        })
-        .transpose()?
-        .map(format_utc)
-        .transpose()?;
-    let option_kind = match instrument_class {
-        InstrumentClass::Call => Some("call".into()),
-        InstrumentClass::Put => Some("put".into()),
-        _ => None,
-    };
-    let option_strike = option_kind
-        .as_ref()
-        .map(|_| positive_fixed(record.strike_price, "strike_price"))
-        .transpose()?;
-    let option_underlying = option_kind
-        .as_ref()
-        .map(|_| nonempty_definition(record.underlying(), "underlying"))
-        .transpose()?;
-    let update_action = match record.security_update_action().map_err(map_dbn_error)? {
-        SecurityUpdateAction::Add => "add",
-        SecurityUpdateAction::Modify => "modify",
-        SecurityUpdateAction::Delete => "delete",
-        #[allow(deprecated)]
-        SecurityUpdateAction::Invalid => {
-            return Err(Error::Invalid(format!(
-                "invalid definition update action for '{raw_symbol}'"
-            )))
-        }
-    };
+    let contract_multiplier = definition_multiplier(record, &raw_symbol, derivative)?;
+    let expiration = definition_expiration(record, &raw_symbol, derivative)?;
+    let (option_kind, option_strike, option_underlying) =
+        definition_option_fields(record, instrument_class)?;
+    let update_action = definition_update_action(record, &raw_symbol)?;
     Ok(DatabentoInstrumentDefinition {
         ts_recv: format_utc(record.ts_recv().ok_or_else(|| {
             Error::Invalid(format!("definition '{raw_symbol}' missing ts_recv"))
@@ -1333,8 +1310,113 @@ fn map_definition(
         option_kind,
         option_strike,
         option_underlying,
-        update_action: update_action.into(),
+        update_action,
     })
+}
+
+fn definition_asset_class(class: databento::dbn::InstrumentClass) -> Result<&'static str> {
+    use databento::dbn::InstrumentClass;
+    match class {
+        InstrumentClass::Stock => Ok("equity"),
+        InstrumentClass::Future => Ok("future"),
+        InstrumentClass::Call | InstrumentClass::Put => Ok("option"),
+        InstrumentClass::Bond => Ok("bond"),
+        InstrumentClass::FxSpot => Ok("forex"),
+        other => Err(Error::Invalid(format!(
+            "unsupported Databento instrument class {other:?}"
+        ))),
+    }
+}
+
+fn definition_round_lot(
+    record: &databento::dbn::InstrumentDefMsg,
+    raw_symbol: &str,
+) -> Result<i32> {
+    let round_lot = if record.min_lot_size_round_lot > 0 {
+        record.min_lot_size_round_lot
+    } else {
+        record.min_lot_size
+    };
+    (round_lot > 0).then_some(round_lot).ok_or_else(|| {
+        Error::Invalid(format!(
+            "unsupported instrument '{raw_symbol}': missing positive round lot"
+        ))
+    })
+}
+
+fn definition_multiplier(
+    record: &databento::dbn::InstrumentDefMsg,
+    raw_symbol: &str,
+    derivative: bool,
+) -> Result<Option<String>> {
+    if !derivative {
+        return Ok(None);
+    }
+    if record.unit_of_measure_qty != databento::dbn::UNDEF_PRICE && record.unit_of_measure_qty > 0 {
+        return positive_fixed(record.unit_of_measure_qty, "unit_of_measure_qty").map(Some);
+    }
+    if record.contract_multiplier > 0 {
+        return Ok(Some(record.contract_multiplier.to_string()));
+    }
+    Err(Error::Invalid(format!(
+        "unsupported derivative '{raw_symbol}': missing contract multiplier"
+    )))
+}
+
+fn definition_expiration(
+    record: &databento::dbn::InstrumentDefMsg,
+    raw_symbol: &str,
+    derivative: bool,
+) -> Result<Option<String>> {
+    if !derivative {
+        return Ok(None);
+    }
+    let expiration = record.expiration().ok_or_else(|| {
+        Error::Invalid(format!(
+            "unsupported derivative '{raw_symbol}': missing expiration"
+        ))
+    })?;
+    format_utc(expiration).map(Some)
+}
+
+fn definition_option_fields(
+    record: &databento::dbn::InstrumentDefMsg,
+    class: databento::dbn::InstrumentClass,
+) -> Result<(Option<String>, Option<String>, Option<String>)> {
+    use databento::dbn::InstrumentClass;
+    let kind = match class {
+        InstrumentClass::Call => Some("call".into()),
+        InstrumentClass::Put => Some("put".into()),
+        _ => None,
+    };
+    let strike = kind
+        .as_ref()
+        .map(|_| positive_fixed(record.strike_price, "strike_price"))
+        .transpose()?;
+    let underlying = kind
+        .as_ref()
+        .map(|_| nonempty_definition(record.underlying(), "underlying"))
+        .transpose()?;
+    Ok((kind, strike, underlying))
+}
+
+fn definition_update_action(
+    record: &databento::dbn::InstrumentDefMsg,
+    raw_symbol: &str,
+) -> Result<String> {
+    use databento::dbn::SecurityUpdateAction;
+    let action = match record.security_update_action().map_err(map_dbn_error)? {
+        SecurityUpdateAction::Add => "add",
+        SecurityUpdateAction::Modify => "modify",
+        SecurityUpdateAction::Delete => "delete",
+        #[allow(deprecated)]
+        SecurityUpdateAction::Invalid => {
+            return Err(Error::Invalid(format!(
+                "invalid definition update action for '{raw_symbol}'"
+            )))
+        }
+    };
+    Ok(action.into())
 }
 
 fn nonempty_definition(
