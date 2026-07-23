@@ -137,17 +137,28 @@ impl DecimalValue {
 impl BacktestConfig {
     /// Load settings from a TOML file into a new config.
     pub fn load_toml(path: &Path) -> crate::Result<Self> {
+        let text = std::fs::read_to_string(path)?;
+        Self::load_toml_text(&text, path.parent())
+    }
+
+    /// Load settings from TOML text, resolving relative paths against `base_dir`.
+    pub fn load_toml_text(text: &str, base_dir: Option<&Path>) -> crate::Result<Self> {
         let mut config = Self::default();
-        config.apply_toml(path)?;
+        config.apply_toml_text(text, base_dir)?;
         Ok(config)
     }
 
     /// Merge TOML values into this config.
     pub fn apply_toml(&mut self, path: &Path) -> crate::Result<()> {
         let text = std::fs::read_to_string(path)?;
+        self.apply_toml_text(&text, path.parent())
+    }
+
+    /// Merge TOML text, resolving relative paths against `base_dir`.
+    pub fn apply_toml_text(&mut self, text: &str, base_dir: Option<&Path>) -> crate::Result<()> {
         let file: FileConfig =
-            toml::from_str(&text).map_err(|error| crate::Error::Invalid(error.to_string()))?;
-        file.apply(self, path.parent())
+            toml::from_str(text).map_err(|error| crate::Error::Invalid(error.to_string()))?;
+        file.apply(self, base_dir)
     }
 }
 
@@ -414,5 +425,21 @@ mod tests {
     fn rejects_invalid_decimal() {
         let value = DecimalValue::String("ten".into());
         assert!(value.parse("fee_bps").is_err());
+    }
+
+    #[test]
+    fn toml_text_resolves_paths_from_supplied_directory() {
+        let base = Path::new("catalog");
+        let config = BacktestConfig::load_toml_text(
+            "[backtest]\ndata = \"bars.csv\"\nstrategy = \"strategy.py\"\n",
+            Some(base),
+        )
+        .unwrap();
+
+        assert_eq!(config.data_path, base.join("bars.csv"));
+        assert_eq!(
+            config.strategy_path.as_deref(),
+            Some(base.join("strategy.py").as_path())
+        );
     }
 }

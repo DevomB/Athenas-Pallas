@@ -159,6 +159,7 @@ dependencies = [
  "csv",
  "rust_decimal",
  "serde",
+ "serde_json",
  "time",
  "toml",
 ]

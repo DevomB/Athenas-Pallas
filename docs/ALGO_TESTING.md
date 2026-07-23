@@ -94,10 +94,23 @@ cargo build --release -p athenas-pallas-tools
 cargo run --release -p athenas-pallas-tools --bin pallas-sweep -- \
   --config backtest.toml --sweep sweep.toml.example -o target/sweep.csv
 
+# Strategy catalog (see catalog.toml.example), with bounded parallel workers
+cargo run --release -p athenas-pallas-tools --bin pallas-sweep -- \
+  --config backtest.toml --catalog catalog.toml.example --jobs 4 -o target/catalog.csv
+
 # Resample bars offline
 cargo run --release -p athenas-pallas-tools --bin pallas-resample -- \
   --input data/BTCUSDT_1m.csv --to 30m -o data/BTCUSDT_30m.csv
 ```
+
+Catalog paths are resolved relative to the catalog file. Each `parameters` table is merged over
+the base config's `[strategy_parameters]`. The CSV retains one row per strategy in manifest order,
+including failures; the command exits nonzero after all rows finish if any backtest failed.
+
+Use `pallas-resample` to materialize a coarser immutable input before sweeping computationally
+heavy research estimators. A generic engine feature cache is intentionally not provided: external
+strategies do not yet share a stable feature ABI, so the engine cannot safely identify equivalent
+features from strategy name and parameters alone.
 
 ## 6. JSONL event replay
 

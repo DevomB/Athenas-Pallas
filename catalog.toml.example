@@ -1,0 +1,12 @@
+# Run multiple external strategies against the same backtest.toml data/config.
+# Paths are resolved relative to this catalog file.
+
+[[strategy]]
+name = "simple_sma_fast"
+path = "trading/simple_sma/strategy.py"
+parameters = { fast_window = 5, slow_window = 20 }
+
+[[strategy]]
+name = "simple_sma_slow"
+path = "trading/simple_sma/strategy.py"
+parameters = { fast_window = 20, slow_window = 50 }
