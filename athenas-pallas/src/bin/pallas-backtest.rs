@@ -48,6 +48,8 @@ struct Args {
         help = "OHLCV adjustment policy: raw, split-adjusted, or total-return-adjusted"
     )]
     adjustment: String,
+    #[arg(long, help = "Fetch and apply point-in-time instrument definitions")]
+    import_definitions: bool,
     #[arg(long, default_value = "data/databento")]
     cache_dir: PathBuf,
     #[arg(long)]
@@ -266,6 +268,12 @@ fn configure_databento(
     }
     cfg.data_path = result.cache_path;
     cfg.data_format = DataFormat::Ohlcv;
+    if let Some(path) = result.definitions_path {
+        apply_databento_definition(
+            cfg,
+            athenas_pallas::data::databento::load_definition_for_symbol(&path, &fetch.symbol)?,
+        )?;
+    }
     if args.instrument == "test:EXAMPLE" {
         cfg.instrument = parse_instrument(&format!("databento:{}", fetch.symbol))?;
     }
@@ -304,7 +312,41 @@ fn databento_config(
         yes: args.yes,
         estimate_only: args.estimate_only,
         adjustment_mode: AdjustmentMode::parse(&args.adjustment)?,
+        import_definitions: args.import_definitions,
     })
+}
+
+#[cfg(feature = "databento")]
+fn apply_databento_definition(
+    cfg: &mut BacktestConfig,
+    definition: athenas_pallas::data::databento::DatabentoInstrumentDefinition,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use athenas_pallas::backtest::config::parse_option_kind;
+
+    cfg.asset_class = parse_asset_class(&definition.asset_class)?;
+    cfg.instrument =
+        athenas_pallas::types::InstrumentId::new("databento", definition.raw_symbol.clone());
+    cfg.base_asset = Some(definition.raw_symbol);
+    cfg.quote_asset = Some(definition.currency);
+    cfg.tick_size = Some(definition.tick_size.parse()?);
+    cfg.lot_size = Some(definition.lot_size.parse()?);
+    cfg.contract_multiplier = definition
+        .contract_multiplier
+        .map(|value| value.parse())
+        .transpose()?;
+    cfg.expiry = definition.expiration;
+    cfg.option_kind = definition
+        .option_kind
+        .map(|value| parse_option_kind(&value).map_err(athenas_pallas::Error::Invalid))
+        .transpose()?;
+    cfg.option_strike = definition
+        .option_strike
+        .map(|value| value.parse())
+        .transpose()?;
+    cfg.option_underlying = definition
+        .option_underlying
+        .map(|symbol| athenas_pallas::types::InstrumentId::new("databento", symbol));
+    Ok(())
 }
 
 fn run(cfg: &BacktestConfig) -> Result<BacktestReport, Box<dyn std::error::Error>> {

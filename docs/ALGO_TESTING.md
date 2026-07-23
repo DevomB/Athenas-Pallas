@@ -29,6 +29,8 @@ the same backtest replay path as local files. A paid fetch also writes a version
 and the backtest report records that manifest path. `--adjustment split-adjusted` and
 `--adjustment total-return-adjusted` preserve the raw CSV and write a separate adjusted cache whose
 manifest binds the raw data, complete factor response, selected policy, and derived checksum.
+For a dated derivative, add `--import-definitions`; inspection includes its cost and the run uses
+the persisted point-in-time definition rather than inferring contract economics from the symbol.
 
 ## 2. Backtest (built-in buy-and-hold)
 

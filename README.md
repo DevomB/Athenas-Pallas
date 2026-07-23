@@ -167,6 +167,12 @@ treated as complete. Backtest reports link the manifest from `data.sources[].man
 Adjusted manifests additionally bind the raw checksum, complete factor response, selected policy,
 and derived checksum; reports expose the policy at `data.sources[].adjustment_mode`.
 
+Add `--import-definitions` for dated futures/options. The cost inspection then includes the
+definition request, the typed point-in-time records are saved beside the raw cache, and the selected
+raw symbol supplies tick size, round lot, multiplier, currency, expiration, and explicit
+call/put/strike/underlying metadata. Missing economic fields and ambiguous parent symbols fail
+instead of receiving guessed defaults.
+
 ## Project Layout
 
 | Path | Purpose |

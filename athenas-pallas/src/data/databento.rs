@@ -202,6 +202,8 @@ pub struct DatabentoFetchConfig {
     pub estimate_only: bool,
     /// Raw, split-adjusted, or total-return-adjusted materialization.
     pub adjustment_mode: AdjustmentMode,
+    /// Fetch and persist point-in-time instrument definitions.
+    pub import_definitions: bool,
 }
 
 /// Result of resolving a Databento cache request.
@@ -213,6 +215,8 @@ pub struct DatabentoCacheResult {
     pub estimated_cost_usd: Option<f64>,
     /// Whether data was fetched during this call.
     pub fetched: bool,
+    /// Persisted typed point-in-time definitions when requested.
+    pub definitions_path: Option<PathBuf>,
 }
 
 /// Versioned provenance for a materialized raw Databento CSV.
@@ -284,6 +288,65 @@ pub struct DatabentoAdjustedManifest {
     pub factors: Vec<AdjustmentFactorRecord>,
 }
 
+/// Engine-relevant point-in-time fields mapped from a Databento definition record.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DatabentoInstrumentDefinition {
+    /// Capture time of this definition version.
+    pub ts_recv: String,
+    /// Publisher and numeric instrument identity.
+    pub publisher_id: u16,
+    /// Publisher instrument id.
+    pub instrument_id: u32,
+    /// Publisher raw symbol.
+    pub raw_symbol: String,
+    /// Engine asset class.
+    pub asset_class: String,
+    /// Quote/settlement currency.
+    pub currency: String,
+    /// Minimum price increment.
+    pub tick_size: String,
+    /// Minimum round-lot quantity.
+    pub lot_size: String,
+    /// Economic contract multiplier for derivatives.
+    pub contract_multiplier: Option<String>,
+    /// Last eligible trade time.
+    pub expiration: Option<String>,
+    /// `call` or `put`.
+    pub option_kind: Option<String>,
+    /// Option strike.
+    pub option_strike: Option<String>,
+    /// Publisher raw underlying symbol.
+    pub option_underlying: Option<String>,
+    /// `add`, `modify`, or `delete`.
+    pub update_action: String,
+}
+
+/// Load the unique active definition matching `symbol`.
+pub fn load_definition_for_symbol(
+    path: &Path,
+    symbol: &str,
+) -> Result<DatabentoInstrumentDefinition> {
+    let records: Vec<DatabentoInstrumentDefinition> = serde_json::from_reader(File::open(path)?)?;
+    let mut matching: Vec<_> = records
+        .into_iter()
+        .filter(|record| record.raw_symbol == symbol)
+        .collect();
+    matching.sort_by(|left, right| left.ts_recv.cmp(&right.ts_recv));
+    let mut active = None;
+    for record in matching {
+        if record.update_action == "delete" {
+            active = None;
+        } else {
+            active = Some(record);
+        }
+    }
+    active.ok_or_else(|| {
+        Error::Invalid(format!(
+            "no active point-in-time definition found for raw symbol '{symbol}'"
+        ))
+    })
+}
+
 /// Read-only request capability and cost inspection.
 #[derive(Clone, Debug, Serialize)]
 pub struct DatabentoInspection {
@@ -303,6 +366,8 @@ pub struct DatabentoInspection {
     pub schema_end: String,
     /// Whether point-in-time definition records are advertised.
     pub definitions_available: bool,
+    /// Definition request estimate when definition import was requested.
+    pub definition_estimated_cost_usd: Option<f64>,
     /// Exact request cost estimate in USD.
     pub estimated_cost_usd: f64,
     /// Cache path a paid fetch would use.
@@ -378,6 +443,10 @@ fn factors_path(cfg: &DatabentoFetchConfig) -> PathBuf {
     raw_cache_path(cfg).with_extension("factors.json")
 }
 
+fn definitions_path(cfg: &DatabentoFetchConfig) -> PathBuf {
+    raw_cache_path(cfg).with_extension("definitions.json")
+}
+
 /// Resolve or fetch the cached Databento CSV.
 pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheResult> {
     if cfg.end <= cfg.start {
@@ -394,7 +463,9 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
     let raw_path = raw_cache_path(cfg);
     let path = cache_path(cfg);
     let raw_valid = !cfg.refresh_data && cached_request_is_valid(cfg, &raw_path)?;
+    let definitions_ready = !cfg.import_definitions || definitions_path(cfg).is_file();
     if raw_valid
+        && definitions_ready
         && cfg.adjustment_mode != AdjustmentMode::Raw
         && !cfg.estimate_only
         && adjusted_request_is_valid(cfg, &raw_path, &path)?
@@ -403,6 +474,7 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
             cache_path: path,
             estimated_cost_usd: None,
             fetched: false,
+            definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
         });
     }
 
@@ -428,6 +500,7 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
                 cache_path: path,
                 estimated_cost_usd,
                 fetched: false,
+                definitions_path: None,
             });
         }
 
@@ -437,11 +510,19 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
         write_json_atomic(&raw_manifest_path(cfg), &manifest)?;
     }
 
+    if cfg.import_definitions && (!definitions_ready || cfg.refresh_data) {
+        dotenvy::dotenv().ok();
+        require_api_key()?;
+        let definitions = rt.block_on(fetch_definitions(cfg))?;
+        write_json_atomic(&definitions_path(cfg), &definitions)?;
+    }
+
     if cfg.adjustment_mode == AdjustmentMode::Raw {
         return Ok(DatabentoCacheResult {
             cache_path: raw_path,
             estimated_cost_usd,
             fetched: !raw_valid,
+            definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
         });
     }
 
@@ -463,6 +544,7 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
         cache_path: path,
         estimated_cost_usd,
         fetched: true,
+        definitions_path: cfg.import_definitions.then(|| definitions_path(cfg)),
     })
 }
 
@@ -487,11 +569,44 @@ async fn inspect_request(cfg: &DatabentoFetchConfig) -> Result<DatabentoInspecti
         .date_time_range(cfg.start..cfg.end)
         .stype_in(cfg.stype_in.as_dbn())
         .build();
-    let estimated_cost_usd = client
+    let market_data_cost_usd = client
         .metadata()
         .get_cost(&params)
         .await
         .map_err(map_api_error)?;
+    let definition_estimated_cost_usd = if cfg.import_definitions {
+        let definition_range = range
+            .range_by_schema
+            .get(&Schema::Definition)
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "databento dataset '{}' does not advertise point-in-time definitions",
+                    cfg.dataset
+                ))
+            })?;
+        if cfg.start < definition_range.start || cfg.end > definition_range.end {
+            return Err(Error::Invalid(format!(
+                "databento definition request {}..{} falls outside entitled range {}..{}",
+                cfg.start, cfg.end, definition_range.start, definition_range.end
+            )));
+        }
+        let definition_params = GetCostParams::builder()
+            .dataset(&cfg.dataset)
+            .symbols(cfg.symbol.as_str())
+            .schema(Schema::Definition)
+            .date_time_range(cfg.start..cfg.end)
+            .stype_in(cfg.stype_in.as_dbn())
+            .build();
+        Some(
+            client
+                .metadata()
+                .get_cost(&definition_params)
+                .await
+                .map_err(map_api_error)?,
+        )
+    } else {
+        None
+    };
     Ok(DatabentoInspection {
         dataset: cfg.dataset.clone(),
         requested_schema: cfg.schema.as_str().into(),
@@ -504,7 +619,9 @@ async fn inspect_request(cfg: &DatabentoFetchConfig) -> Result<DatabentoInspecti
         schema_start: format_utc(schema_range.start)?,
         schema_end: format_utc(schema_range.end)?,
         definitions_available: available_schemas.contains(&Schema::Definition),
-        estimated_cost_usd,
+        definition_estimated_cost_usd,
+        estimated_cost_usd: market_data_cost_usd
+            + definition_estimated_cost_usd.unwrap_or_default(),
         planned_cache_path: cache_path(cfg).display().to_string(),
     })
 }
@@ -745,6 +862,176 @@ async fn fetch_adjustment_factors(
             })
         })
         .collect()
+}
+
+async fn fetch_definitions(
+    cfg: &DatabentoFetchConfig,
+) -> Result<Vec<DatabentoInstrumentDefinition>> {
+    use databento::dbn::InstrumentDefMsg;
+
+    let mut client = client_from_env()?;
+    let params = GetRangeParams::builder()
+        .dataset(&cfg.dataset)
+        .symbols(cfg.symbol.as_str())
+        .schema(Schema::Definition)
+        .date_time_range(cfg.start..cfg.end)
+        .stype_in(cfg.stype_in.as_dbn())
+        .build();
+    let mut decoder = client
+        .timeseries()
+        .get_range(&params)
+        .await
+        .map_err(map_api_error)?;
+    let mut definitions = Vec::new();
+    while let Some(record) = decoder
+        .decode_record::<InstrumentDefMsg>()
+        .await
+        .map_err(|error| {
+            Error::Invalid(format!("malformed databento definition record: {error}"))
+        })?
+    {
+        definitions.push(map_definition(record)?);
+    }
+    if definitions.is_empty() {
+        return Err(Error::Invalid(format!(
+            "databento returned no point-in-time definitions for '{}'",
+            cfg.symbol
+        )));
+    }
+    Ok(definitions)
+}
+
+fn map_definition(
+    record: &databento::dbn::InstrumentDefMsg,
+) -> Result<DatabentoInstrumentDefinition> {
+    use databento::dbn::{InstrumentClass, SecurityUpdateAction};
+
+    let instrument_class = record.instrument_class().map_err(map_dbn_error)?;
+    let asset_class = match instrument_class {
+        InstrumentClass::Stock => "equity",
+        InstrumentClass::Future => "future",
+        InstrumentClass::Call | InstrumentClass::Put => "option",
+        InstrumentClass::Bond => "bond",
+        InstrumentClass::FxSpot => "forex",
+        other => {
+            return Err(Error::Invalid(format!(
+                "unsupported Databento instrument class {other:?}"
+            )))
+        }
+    };
+    let raw_symbol = nonempty_definition(record.raw_symbol(), "raw_symbol")?;
+    let currency = nonempty_definition(record.currency(), "currency")?;
+    let tick_size = positive_fixed(record.min_price_increment, "min_price_increment")?;
+    let round_lot = if record.min_lot_size_round_lot > 0 {
+        record.min_lot_size_round_lot
+    } else {
+        record.min_lot_size
+    };
+    if round_lot <= 0 {
+        return Err(Error::Invalid(format!(
+            "unsupported instrument '{raw_symbol}': missing positive round lot"
+        )));
+    }
+    let derivative = matches!(
+        instrument_class,
+        InstrumentClass::Future | InstrumentClass::Call | InstrumentClass::Put
+    );
+    let contract_multiplier = derivative
+        .then(|| {
+            if record.unit_of_measure_qty != databento::dbn::UNDEF_PRICE
+                && record.unit_of_measure_qty > 0
+            {
+                positive_fixed(record.unit_of_measure_qty, "unit_of_measure_qty")
+            } else if record.contract_multiplier > 0 {
+                Ok(record.contract_multiplier.to_string())
+            } else {
+                Err(Error::Invalid(format!(
+                    "unsupported derivative '{raw_symbol}': missing contract multiplier"
+                )))
+            }
+        })
+        .transpose()?;
+    let expiration = derivative
+        .then(|| {
+            record.expiration().ok_or_else(|| {
+                Error::Invalid(format!(
+                    "unsupported derivative '{raw_symbol}': missing expiration"
+                ))
+            })
+        })
+        .transpose()?
+        .map(format_utc)
+        .transpose()?;
+    let option_kind = match instrument_class {
+        InstrumentClass::Call => Some("call".into()),
+        InstrumentClass::Put => Some("put".into()),
+        _ => None,
+    };
+    let option_strike = option_kind
+        .as_ref()
+        .map(|_| positive_fixed(record.strike_price, "strike_price"))
+        .transpose()?;
+    let option_underlying = option_kind
+        .as_ref()
+        .map(|_| nonempty_definition(record.underlying(), "underlying"))
+        .transpose()?;
+    let update_action = match record.security_update_action().map_err(map_dbn_error)? {
+        SecurityUpdateAction::Add => "add",
+        SecurityUpdateAction::Modify => "modify",
+        SecurityUpdateAction::Delete => "delete",
+        #[allow(deprecated)]
+        SecurityUpdateAction::Invalid => {
+            return Err(Error::Invalid(format!(
+                "invalid definition update action for '{raw_symbol}'"
+            )))
+        }
+    };
+    Ok(DatabentoInstrumentDefinition {
+        ts_recv: format_utc(record.ts_recv().ok_or_else(|| {
+            Error::Invalid(format!("definition '{raw_symbol}' missing ts_recv"))
+        })?)?,
+        publisher_id: record.hd.publisher_id,
+        instrument_id: record.hd.instrument_id,
+        raw_symbol,
+        asset_class: asset_class.into(),
+        currency,
+        tick_size,
+        lot_size: round_lot.to_string(),
+        contract_multiplier,
+        expiration,
+        option_kind,
+        option_strike,
+        option_underlying,
+        update_action: update_action.into(),
+    })
+}
+
+fn nonempty_definition(
+    value: std::result::Result<&str, databento::dbn::Error>,
+    field: &str,
+) -> Result<String> {
+    let value = value.map_err(map_dbn_error)?.trim();
+    if value.is_empty() {
+        Err(Error::Invalid(format!(
+            "unsupported instrument definition: missing {field}"
+        )))
+    } else {
+        Ok(value.into())
+    }
+}
+
+fn positive_fixed(value: i64, field: &str) -> Result<String> {
+    if value == databento::dbn::UNDEF_PRICE || value <= 0 {
+        Err(Error::Invalid(format!(
+            "unsupported instrument definition: missing positive {field}"
+        )))
+    } else {
+        Ok(format_fixed_price(value))
+    }
+}
+
+fn map_dbn_error(error: databento::dbn::Error) -> Error {
+    Error::Invalid(format!("malformed Databento definition: {error}"))
 }
 
 fn adjusted_manifest(
@@ -1045,6 +1332,7 @@ mod tests {
             yes: false,
             estimate_only: false,
             adjustment_mode: AdjustmentMode::Raw,
+            import_definitions: false,
         }
     }
 
@@ -1209,5 +1497,53 @@ mod tests {
             .unwrap()
             .is_empty());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn futures_and_options_definitions_round_trip_without_symbol_inference() {
+        use databento::dbn::record::str_to_c_chars;
+        use databento::dbn::{InstrumentDefMsg, UNDEF_PRICE};
+        use time::macros::datetime;
+
+        let expiry = datetime!(2025-12-19 21:00 UTC);
+        let mut future = InstrumentDefMsg::default();
+        future.hd.publisher_id = 1;
+        future.hd.instrument_id = 101;
+        future.ts_recv = datetime!(2025-01-02 00:00 UTC).unix_timestamp_nanos() as u64;
+        future.min_price_increment = 250_000_000;
+        future.unit_of_measure_qty = 50_000_000_000;
+        future.min_lot_size_round_lot = 1;
+        future.expiration = expiry.unix_timestamp_nanos() as u64;
+        future.raw_symbol = str_to_c_chars("ESZ5").unwrap();
+        future.currency = str_to_c_chars("USD").unwrap();
+        future.instrument_class = b'F' as _;
+        future.security_update_action = b'A' as _;
+
+        let mapped_future = map_definition(&future).unwrap();
+        assert_eq!(mapped_future.asset_class, "future");
+        assert_eq!(mapped_future.tick_size, "0.25");
+        assert_eq!(mapped_future.contract_multiplier.as_deref(), Some("50"));
+
+        let mut option = future.clone();
+        option.hd.instrument_id = 202;
+        option.raw_symbol = str_to_c_chars("AAPL  251219C00200000").unwrap();
+        option.instrument_class = b'C' as _;
+        option.strike_price = 200_000_000_000;
+        option.unit_of_measure_qty = 100_000_000_000;
+        option.underlying = str_to_c_chars("AAPL").unwrap();
+        let mapped_option = map_definition(&option).unwrap();
+        assert_eq!(mapped_option.option_kind.as_deref(), Some("call"));
+        assert_eq!(mapped_option.option_strike.as_deref(), Some("200"));
+        assert_eq!(mapped_option.option_underlying.as_deref(), Some("AAPL"));
+
+        let json = serde_json::to_string(&[mapped_future, mapped_option]).unwrap();
+        let decoded: Vec<DatabentoInstrumentDefinition> = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.len(), 2);
+
+        option.strike_price = UNDEF_PRICE;
+        assert!(map_definition(&option)
+            .unwrap_err()
+            .to_string()
+            .contains("strike_price"));
     }
 }
