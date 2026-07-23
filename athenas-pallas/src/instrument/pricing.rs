@@ -44,7 +44,7 @@ pub fn margin_required(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> D
 
 /// Maintenance margin required to keep `qty` open at `price`.
 ///
-/// Returns [`MAINTENANCE_MARGIN_FRACTION`] of the initial requirement. A position whose
+/// Returns [`maintenance_margin_fraction`] of the initial requirement. A position whose
 /// mark-to-market equity falls below this is eligible for liquidation during replay.
 pub fn maintenance_margin_required(meta: &InstrumentMeta, price: Decimal, qty: Decimal) -> Decimal {
     margin_required(meta, price, qty) * maintenance_margin_fraction()

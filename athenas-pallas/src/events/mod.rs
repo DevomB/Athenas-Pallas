@@ -308,7 +308,7 @@ pub struct TimerEvent {
     /// Wall clock (UTC recommended).
     #[serde(with = "rfc3339_compat")]
     pub ts: OffsetDateTime,
-    /// Schedule identifier from [`crate::engine::TimerSchedule`].
+    /// Caller-defined schedule identifier.
     pub id: u32,
 }
 

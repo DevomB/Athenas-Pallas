@@ -248,7 +248,7 @@ impl BarSeriesSource {
         self.instrument.clone()
     }
 
-    /// Borrowed [`ReplayEvent`] for the zero-allocation fast path (no per-bar `InstrumentId` clone).
+    /// Borrowed [`crate::events::ReplayEvent`] for the zero-allocation fast path.
     pub fn bar_to_replay_event<'a>(
         &'a self,
         bar: &Bar,
