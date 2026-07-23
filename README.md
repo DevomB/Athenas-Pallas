@@ -90,6 +90,20 @@ Detection order:
 3. `.py` file: run with Python.
 4. Other file path: run as a binary.
 
+Python children receive a platform-correct `PYTHONPATH` containing the strategy directory plus any
+existing `_common/python` and `_sdk/python` directories beside the strategy tree. A catalog strategy
+can therefore run directly from its source checkout:
+
+```powershell
+cargo run --release -p athenas-pallas --bin pallas-backtest -- `
+  --data data\ES.csv --instrument cme:ES `
+  --strategy "..\trading-algos\opening_range_rth"
+```
+
+Running a source strategy directly avoids copying shared `_common` code. If a strategy is deployed
+by copying it into `trading/`, copy its matching `_common/python` directory too; the engine discovers
+both layouts automatically and preserves any user-supplied `PYTHONPATH` entries.
+
 ## Market Data
 
 Put local CSV exports into `data/` (gitignored local workspace), then point the backtest at the file:

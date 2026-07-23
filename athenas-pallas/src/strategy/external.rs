@@ -1,6 +1,8 @@
 //! Subprocess strategy adapter (Python, C++, etc.).
 
+use std::ffi::OsString;
 use std::io::{BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
@@ -33,9 +35,13 @@ pub struct ExternalStrategy {
 
 impl ExternalStrategy {
     /// Spawn a Python script.
-    pub fn spawn_python(script: &std::path::Path, python: &str) -> Result<Self> {
-        let child = Command::new(python)
-            .arg(script)
+    pub fn spawn_python(script: &Path, python: &str) -> Result<Self> {
+        let mut command = Command::new(python);
+        command.arg(script);
+        if let Some(python_path) = strategy_python_path(script)? {
+            command.env("PYTHONPATH", python_path);
+        }
+        let child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -291,6 +297,50 @@ impl ExternalStrategy {
     }
 }
 
+fn strategy_python_path(script: &Path) -> Result<Option<OsString>> {
+    let script = std::fs::canonicalize(script).map_err(Error::Io)?;
+    let mut paths: Vec<PathBuf> = std::env::var_os("PYTHONPATH")
+        .as_deref()
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect();
+    let mut roots = Vec::new();
+    if let Some(strategy_dir) = script.parent() {
+        paths.push(strategy_dir.to_path_buf());
+        if let Some(parent) = strategy_dir.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.extend(cwd.ancestors().map(Path::to_path_buf));
+    }
+    for root in roots {
+        for candidate in [
+            root.join("_common/python"),
+            root.join("_sdk/python"),
+            root.join("trading/_common/python"),
+            root.join("trading/_sdk/python"),
+            root.join("trading-algos/_common/python"),
+        ] {
+            if candidate.is_dir() {
+                paths.push(candidate);
+            }
+        }
+    }
+    paths.sort_by_key(|path| path.to_string_lossy().to_ascii_lowercase());
+    paths.dedup_by(|left, right| {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    });
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    std::env::join_paths(paths)
+        .map(Some)
+        .map_err(|error| Error::Invalid(format!("invalid Python search path: {error}")))
+}
+
 fn reader_loop(stdout: ChildStdout, tx: mpsc::Sender<String>) {
     let mut reader = BufReader::new(stdout);
     loop {
@@ -345,5 +395,32 @@ impl Drop for ExternalStrategy {
         );
         let _ = self.stdin.flush();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn python_path_includes_strategy_common_and_sdk() {
+        let root =
+            std::env::temp_dir().join(format!("pallas-python-path-{}", uuid::Uuid::new_v4()));
+        let strategy = root.join("trading/example");
+        let common = root.join("trading/_common/python");
+        let sdk = root.join("trading/_sdk/python");
+        std::fs::create_dir_all(&strategy).unwrap();
+        std::fs::create_dir_all(&common).unwrap();
+        std::fs::create_dir_all(&sdk).unwrap();
+        let script = strategy.join("strategy.py");
+        std::fs::write(&script, "").unwrap();
+
+        let joined = strategy_python_path(&script).unwrap().unwrap();
+        let paths: Vec<_> = std::env::split_paths(&joined).collect();
+        assert!(paths.contains(&std::fs::canonicalize(&strategy).unwrap()));
+        assert!(paths.contains(&std::fs::canonicalize(&common).unwrap()));
+        assert!(paths.contains(&std::fs::canonicalize(&sdk).unwrap()));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
