@@ -1,21 +1,22 @@
-# Copy to backtest.toml and set [backtest].data to a CSV you imported into data/
-
 [instrument]
-exchange = "csv"
-symbol = "BTCUSDT"
-asset_class = "crypto"
+exchange = "test"
+symbol = "EXAMPLE"
+asset_class = "equity"
+base_asset = "EXAMPLE"
+quote_asset = "USD"
 
 [backtest]
-data = "data/BTCUSDT_live.csv"
+data = "athenas-pallas/tests/fixtures/data/EXAMPLE_1d.csv"
 data_format = "ohlcv"
 fee_bps = 10
 slippage_bps = 5
 half_spread_bps = 5
-periods_per_year = 365.0
+buy_and_hold_qty = 1
+periods_per_year = 252.0
 strategy = "simple_sma"
 python = "python"
 output = "target/backtest_report.json"
 
 [[balances]]
-asset = "USDT"
+asset = "USD"
 amount = "10000"
