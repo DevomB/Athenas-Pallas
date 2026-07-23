@@ -21,7 +21,10 @@ cargo run --release -p athenas-pallas --features databento --bin pallas-backtest
   --yes
 ```
 
-Set `DATABENTO_API_KEY` before fetching uncached data. The provider path writes a CSV cache under `data/databento/`, then uses the same backtest replay path as local files.
+Set `DATABENTO_API_KEY` before fetching uncached data. Add `--estimate-only` to validate the
+entitled schema/date range and save a read-only `*.inspect.json` capability/cost result without
+downloading market data. The provider path writes a CSV cache under `data/databento/`, then uses
+the same backtest replay path as local files.
 
 ## 2. Backtest (built-in buy-and-hold)
 

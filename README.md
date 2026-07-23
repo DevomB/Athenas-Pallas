@@ -129,7 +129,11 @@ cargo run --release -p athenas-pallas --features databento --bin pallas-backtest
   --yes
 ```
 
-Set `DATABENTO_API_KEY` in the repo-root `.env` before fetching uncached data. Use `--estimate-only` to check vendor cost without downloading.
+Set `DATABENTO_API_KEY` in the repo-root `.env` before fetching uncached data. Use
+`--estimate-only` for read-only inspection: the engine queries the account-entitled dataset/schema
+range, rejects unavailable schemas or dates, checks whether point-in-time definitions are
+advertised, estimates the exact request cost, and writes `*.inspect.json` beside the planned cache
+without downloading market data.
 
 Databento cache export preserves the raw OHLCV values returned by the selected market-data schema;
 the engine only converts Databento fixed-point integers to decimal CSV text. It does not apply

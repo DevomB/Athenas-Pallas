@@ -6,9 +6,13 @@ use std::path::{Path, PathBuf};
 
 use databento::{
     dbn::{OhlcvMsg, SType, Schema},
-    historical::{metadata::GetCostParams, timeseries::GetRangeParams},
+    historical::{
+        metadata::{DatasetRange, GetCostParams},
+        timeseries::GetRangeParams,
+    },
     HistoricalClient,
 };
+use serde::Serialize;
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use time::{Date, OffsetDateTime, PrimitiveDateTime};
@@ -161,6 +165,31 @@ pub struct DatabentoCacheResult {
     pub fetched: bool,
 }
 
+/// Read-only request capability and cost inspection.
+#[derive(Clone, Debug, Serialize)]
+pub struct DatabentoInspection {
+    /// Requested dataset.
+    pub dataset: String,
+    /// Requested OHLCV schema.
+    pub requested_schema: String,
+    /// Schemas currently advertised for the dataset.
+    pub available_schemas: Vec<String>,
+    /// Entitled dataset start in UTC.
+    pub dataset_start: String,
+    /// Entitled dataset end in UTC.
+    pub dataset_end: String,
+    /// Requested schema start in UTC.
+    pub schema_start: String,
+    /// Requested schema end in UTC.
+    pub schema_end: String,
+    /// Whether point-in-time definition records are advertised.
+    pub definitions_available: bool,
+    /// Exact request cost estimate in USD.
+    pub estimated_cost_usd: f64,
+    /// Cache path a paid fetch would use.
+    pub planned_cache_path: String,
+}
+
 /// Parse a Databento CLI datetime.
 ///
 /// Date-only values must use American `MM-DD-YYYY` format and are interpreted as UTC midnight.
@@ -197,6 +226,11 @@ pub fn cache_path(cfg: &DatabentoFetchConfig) -> PathBuf {
     ))
 }
 
+/// JSON output path for a read-only request inspection.
+pub fn inspection_path(cfg: &DatabentoFetchConfig) -> PathBuf {
+    cache_path(cfg).with_extension("inspect.json")
+}
+
 /// Resolve or fetch the cached Databento CSV.
 pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheResult> {
     if cfg.end <= cfg.start {
@@ -226,13 +260,15 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
         .enable_all()
         .build()
         .map_err(|err| Error::Invalid(format!("databento async runtime failure: {err}")))?;
-    let estimated_cost_usd = rt.block_on(estimate_cost(cfg))?;
+    let inspection = rt.block_on(inspect_request(cfg))?;
+    let estimated_cost_usd = inspection.estimated_cost_usd;
     println!(
         "Databento estimated cost: ${estimated_cost_usd:.6}; cache: {}",
         path.display()
     );
 
     if cfg.estimate_only {
+        write_json_atomic(&inspection_path(cfg), &inspection)?;
         return Ok(DatabentoCacheResult {
             cache_path: path,
             estimated_cost_usd: Some(estimated_cost_usd),
@@ -250,8 +286,20 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
     })
 }
 
-async fn estimate_cost(cfg: &DatabentoFetchConfig) -> Result<f64> {
+async fn inspect_request(cfg: &DatabentoFetchConfig) -> Result<DatabentoInspection> {
     let mut client = client_from_env()?;
+    let mut available_schemas = client
+        .metadata()
+        .list_schemas(&cfg.dataset)
+        .await
+        .map_err(map_api_error)?;
+    available_schemas.sort_by_key(|schema| schema.as_str());
+    let range = client
+        .metadata()
+        .get_dataset_range(&cfg.dataset)
+        .await
+        .map_err(map_api_error)?;
+    let schema_range = validate_inspection(cfg, &available_schemas, &range)?;
     let params = GetCostParams::builder()
         .dataset(&cfg.dataset)
         .symbols(cfg.symbol.as_str())
@@ -259,11 +307,85 @@ async fn estimate_cost(cfg: &DatabentoFetchConfig) -> Result<f64> {
         .date_time_range(cfg.start..cfg.end)
         .stype_in(cfg.stype_in.as_dbn())
         .build();
-    client
+    let estimated_cost_usd = client
         .metadata()
         .get_cost(&params)
         .await
-        .map_err(map_api_error)
+        .map_err(map_api_error)?;
+    Ok(DatabentoInspection {
+        dataset: cfg.dataset.clone(),
+        requested_schema: cfg.schema.as_str().into(),
+        available_schemas: available_schemas
+            .iter()
+            .map(|schema| schema.as_str().to_string())
+            .collect(),
+        dataset_start: format_utc(range.start)?,
+        dataset_end: format_utc(range.end)?,
+        schema_start: format_utc(schema_range.start)?,
+        schema_end: format_utc(schema_range.end)?,
+        definitions_available: available_schemas.contains(&Schema::Definition),
+        estimated_cost_usd,
+        planned_cache_path: cache_path(cfg).display().to_string(),
+    })
+}
+
+fn validate_inspection<'a>(
+    cfg: &DatabentoFetchConfig,
+    schemas: &[Schema],
+    range: &'a DatasetRange,
+) -> Result<&'a databento::historical::DateTimeRange> {
+    let schema = cfg.schema.as_dbn();
+    if !schemas.contains(&schema) {
+        return Err(Error::Invalid(format!(
+            "databento dataset '{}' does not advertise schema '{}'",
+            cfg.dataset,
+            cfg.schema.as_str()
+        )));
+    }
+    let schema_range = range.range_by_schema.get(&schema).ok_or_else(|| {
+        Error::Invalid(format!(
+            "databento dataset '{}' did not return an entitled range for schema '{}'",
+            cfg.dataset,
+            cfg.schema.as_str()
+        ))
+    })?;
+    if cfg.start < schema_range.start || cfg.end > schema_range.end {
+        return Err(Error::Invalid(format!(
+            "databento request {}..{} falls outside entitled {} range {}..{}",
+            cfg.start,
+            cfg.end,
+            cfg.schema.as_str(),
+            schema_range.start,
+            schema_range.end
+        )));
+    }
+    Ok(schema_range)
+}
+
+fn format_utc(value: OffsetDateTime) -> Result<String> {
+    value
+        .format(&Rfc3339)
+        .map_err(|error| Error::Invalid(format!("invalid databento metadata timestamp: {error}")))
+}
+
+fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        Error::Invalid(format!(
+            "invalid databento metadata path '{}': missing parent directory",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent)?;
+    let tmp = path.with_extension("json.tmp");
+    let mut writer = BufWriter::new(File::create(&tmp)?);
+    serde_json::to_writer_pretty(&mut writer, value)?;
+    writer.flush()?;
+    drop(writer);
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    fs::rename(tmp, path)?;
+    Ok(())
 }
 
 async fn fetch_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<()> {
@@ -521,5 +643,36 @@ mod tests {
     fn rejects_iso_date_only_format() {
         let err = parse_datetime("2025-01-01").unwrap_err();
         assert!(err.to_string().contains("American MM-DD-YYYY format"));
+    }
+
+    #[test]
+    fn inspection_rejects_unavailable_schema_before_cost_or_download() {
+        let config = cfg();
+        let range = DatasetRange {
+            start: parse_datetime("01-01-2020").unwrap(),
+            end: parse_datetime("01-01-2026").unwrap(),
+            range_by_schema: std::collections::HashMap::new(),
+        };
+        let error = validate_inspection(&config, &[Schema::Trades], &range).unwrap_err();
+        assert!(error.to_string().contains("does not advertise schema"));
+    }
+
+    #[test]
+    fn inspection_rejects_out_of_range_request() {
+        let config = cfg();
+        let schema = config.schema.as_dbn();
+        let range = DatasetRange {
+            start: parse_datetime("01-01-2025").unwrap(),
+            end: parse_datetime("01-15-2025").unwrap(),
+            range_by_schema: std::collections::HashMap::from([(
+                schema,
+                databento::historical::DateTimeRange {
+                    start: parse_datetime("01-01-2025").unwrap(),
+                    end: parse_datetime("01-15-2025").unwrap(),
+                },
+            )]),
+        };
+        let error = validate_inspection(&config, &[schema], &range).unwrap_err();
+        assert!(error.to_string().contains("outside entitled"));
     }
 }
