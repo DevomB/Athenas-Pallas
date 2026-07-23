@@ -112,6 +112,10 @@ cargo run --release -p athenas-pallas-tools --bin pallas-sweep -- \
 # Resample bars offline
 cargo run --release -p athenas-pallas-tools --bin pallas-resample -- \
   --input data/BTCUSDT_1m.csv --to 30m -o data/BTCUSDT_30m.csv
+
+# Build UTC-aligned bars from a normalized single-instrument trade cache
+cargo run --release -p athenas-pallas-tools --bin pallas-resample -- \
+  --from trades-jsonl --input data/ESM6_trades.jsonl --to 1m -o data/ESM6_1m.csv
 ```
 
 Catalog paths are resolved relative to the catalog file. Each `parameters` table is merged over
@@ -122,6 +126,11 @@ Use `pallas-resample` to materialize a coarser immutable input before sweeping c
 heavy research estimators. A generic engine feature cache is intentionally not provided: external
 strategies do not yet share a stable feature ABI, so the engine cannot safely identify equivalent
 features from strategy name and parameters alone.
+
+Trade resampling leaves the event cache untouched and writes `<output>.policy.json` with the
+instrument, UTC bucket alignment, OHLC selection, volume rule, and empty-bucket policy. It rejects
+mixed-instrument, non-trade, and out-of-order inputs rather than silently constructing ambiguous
+bars.
 
 ## 6. JSONL event replay
 
