@@ -439,4 +439,43 @@ mod tests {
         assert!(Args::try_parse_from(["pallas-backtest", "--periods-per-year", "0"]).is_err());
         assert!(Args::try_parse_from(["pallas-backtest", "--periods-per-year", "NaN"]).is_err());
     }
+
+    #[cfg(feature = "databento")]
+    fn definition(
+        asset_class: &str,
+        option_kind: Option<&str>,
+    ) -> athenas_pallas::data::databento::DatabentoInstrumentDefinition {
+        athenas_pallas::data::databento::DatabentoInstrumentDefinition {
+            ts_recv: "2026-01-01T00:00:00Z".into(),
+            publisher_id: 1,
+            instrument_id: 2,
+            raw_symbol: "ESM6".into(),
+            asset_class: asset_class.into(),
+            currency: "USD".into(),
+            tick_size: "0.25".into(),
+            lot_size: "1".into(),
+            contract_multiplier: Some("50".into()),
+            expiration: Some("2026-06-19T00:00:00Z".into()),
+            option_kind: option_kind.map(str::to_owned),
+            option_strike: option_kind.map(|_| "6000".into()),
+            option_underlying: option_kind.map(|_| "ESM6".into()),
+            update_action: "add".into(),
+        }
+    }
+
+    #[cfg(feature = "databento")]
+    #[test]
+    fn databento_definition_application_fails_closed_for_options() {
+        let mut config = BacktestConfig::default();
+        apply_databento_definition(&mut config, definition("future", None)).unwrap();
+        assert_eq!(
+            config.asset_class,
+            athenas_pallas::instrument::AssetClass::Future
+        );
+        assert_eq!(config.contract_multiplier, Some(Decimal::from(50u64)));
+
+        let error = apply_databento_definition(&mut config, definition("option", Some("call")))
+            .unwrap_err();
+        assert!(error.to_string().contains("do not identify exercise style"));
+    }
 }
