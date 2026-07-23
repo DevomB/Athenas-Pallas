@@ -1,6 +1,7 @@
 use super::{GlobalState, InstrumentIndex};
 use crate::events::{AccountEvent, FillRecord, RejectionKind, RejectionRecord};
 use crate::types::{OpenOrder, Side};
+use rust_decimal::prelude::Signed;
 use rust_decimal::Decimal;
 
 impl GlobalState {
@@ -73,6 +74,16 @@ impl GlobalState {
             return;
         };
         let delta = if *side == Side::Buy { *qty } else { -*qty };
+        let current = self.positions[ix];
+        if matches!(
+            self.registry
+                .meta(InstrumentIndex(ix))
+                .map(|meta| meta.asset_class),
+            Some(crate::instrument::AssetClass::Future | crate::instrument::AssetClass::Perpetual)
+        ) {
+            self.average_entry_price[ix] =
+                next_average_entry(current, self.average_entry_price[ix], delta, *price);
+        }
         self.positions[ix] += delta;
         if let Some(strategy_id) = strategy_id {
             *self
@@ -110,6 +121,26 @@ impl GlobalState {
         }
         self.rejection_log.push(rejection.clone());
     }
+}
+
+fn next_average_entry(
+    current: Decimal,
+    average: Option<Decimal>,
+    delta: Decimal,
+    fill_price: Decimal,
+) -> Option<Decimal> {
+    let next = current + delta;
+    if next.is_zero() {
+        return None;
+    }
+    if current.is_zero() || current.signum() != next.signum() {
+        return Some(fill_price);
+    }
+    if current.signum() != delta.signum() {
+        return average;
+    }
+    let average = average.unwrap_or(fill_price);
+    Some((average * current.abs() + fill_price * delta.abs()) / next.abs())
 }
 
 #[cfg(test)]

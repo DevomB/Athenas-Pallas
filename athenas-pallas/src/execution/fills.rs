@@ -11,6 +11,7 @@ use crate::instrument::ticks::{notional_decimal, PriceTicks, QtyLots};
 use crate::instrument::AssetClass;
 use crate::state::{GlobalState, InstrumentMeta};
 use crate::types::{OpenOrder, OrderId, OrderStatus, OrderType, Side};
+use rust_decimal::prelude::Signed;
 use rust_decimal::Decimal;
 use smallvec::smallvec;
 
@@ -155,31 +156,41 @@ impl FillEngine {
     }
 
     fn uses_derivative_margin(meta: &InstrumentMeta) -> bool {
-        matches!(
-            meta.asset_class,
-            AssetClass::Future | AssetClass::Perpetual | AssetClass::Option
-        )
+        matches!(meta.asset_class, AssetClass::Future | AssetClass::Perpetual)
     }
 
-    /// Cash debited/credited in quote for a fill (before fees).
     fn quote_cash_flow(meta: &InstrumentMeta, side: Side, price: Decimal, qty: Decimal) -> Decimal {
-        if Self::uses_derivative_margin(meta) {
-            // Derivatives: equity is mark-to-market (cash + position * price * multiplier).
-            // Opening/closing adjusts contracts only; cash moves on margin when configured.
-            match meta.margin_initial_rate {
-                Some(rate) if rate < Decimal::ONE => margin_required(meta, price, qty),
-                _ => Decimal::ZERO,
-            }
-        } else {
-            match side {
-                Side::Buy => Self::notional(meta, price, qty),
-                Side::Sell => -Self::notional(meta, price, qty),
-            }
+        match side {
+            Side::Buy => Self::notional(meta, price, qty),
+            Side::Sell => -Self::notional(meta, price, qty),
         }
+    }
+
+    fn realized_derivative_pnl(
+        state: &GlobalState,
+        meta: &InstrumentMeta,
+        instrument: &crate::types::InstrumentId,
+        side: Side,
+        price: Decimal,
+        qty: Decimal,
+    ) -> Decimal {
+        let Some(ix) = state.registry.index_of(instrument).map(|index| index.0) else {
+            return Decimal::ZERO;
+        };
+        let current = state.positions[ix];
+        let delta = if side == Side::Buy { qty } else { -qty };
+        if current.is_zero() || current.signum() == delta.signum() {
+            return Decimal::ZERO;
+        }
+        let close_qty = current.abs().min(qty);
+        let entry = state.average_entry_price[ix].unwrap_or(price);
+        let multiplier = meta.contract_multiplier.unwrap_or(Decimal::ONE);
+        (price - entry) * current.signum() * close_qty * multiplier
     }
 
     fn check_balance_for_fill(
         state: &GlobalState,
+        instrument: &crate::types::InstrumentId,
         meta: &InstrumentMeta,
         side: Side,
         price: Decimal,
@@ -188,6 +199,32 @@ impl FillEngine {
     ) -> Result<()> {
         let base_free = *state.balances.get(&meta.base).unwrap_or(&Decimal::ZERO);
         let quote_free = *state.balances.get(&meta.quote).unwrap_or(&Decimal::ZERO);
+        if Self::uses_derivative_margin(meta) {
+            let current = state.position_qty(instrument);
+            let delta = if side == Side::Buy { qty } else { -qty };
+            let projected = current + delta;
+            let realized = Self::realized_derivative_pnl(state, meta, instrument, side, price, qty);
+            let available = quote_free + realized;
+            let opens_exposure = current.is_zero()
+                || current.signum() == delta.signum()
+                || (!projected.is_zero() && projected.signum() != current.signum());
+            if meta.margin_initial_rate.is_none() {
+                // Ponytail: definitions without a rate keep legacy no-margin behavior; import
+                // point-in-time contract metadata before relying on leverage constraints.
+                return (available >= fee).then_some(()).ok_or_else(|| {
+                    Error::ExecutionRejected("insufficient quote balance for fee".into())
+                });
+            }
+            if !opens_exposure {
+                return (available >= fee).then_some(()).ok_or_else(|| {
+                    Error::ExecutionRejected("insufficient quote balance for fee".into())
+                });
+            }
+            let required = margin_required(meta, price, projected);
+            return (available >= required + fee)
+                .then_some(())
+                .ok_or_else(|| Error::ExecutionRejected("insufficient derivative margin".into()));
+        }
         let cash = Self::quote_cash_flow(meta, side, price, qty);
         match side {
             Side::Buy if quote_free < cash + fee => Err(Error::ExecutionRejected(
@@ -256,10 +293,21 @@ impl FillEngine {
     ) {
         let base_free = *state.balances.get(&meta.base).unwrap_or(&Decimal::ZERO);
         let quote_free = *state.balances.get(&meta.quote).unwrap_or(&Decimal::ZERO);
-        let cash = Self::quote_cash_flow(meta, order.side, price, qty);
-        let (new_base, new_quote) = match order.side {
-            Side::Buy => (base_free + qty, quote_free - cash - fee),
-            Side::Sell => (base_free - qty, quote_free - cash - fee),
+        let delta = if order.side == Side::Buy { qty } else { -qty };
+        let new_base = base_free + delta;
+        let new_quote = if Self::uses_derivative_margin(meta) {
+            quote_free
+                + Self::realized_derivative_pnl(
+                    state,
+                    meta,
+                    &order.instrument,
+                    order.side,
+                    price,
+                    qty,
+                )
+                - fee
+        } else {
+            quote_free - Self::quote_cash_flow(meta, order.side, price, qty) - fee
         };
         evs.push(AccountEvent::Balance {
             asset: meta.base.clone(),
@@ -297,7 +345,7 @@ impl FillEngine {
         qty: Decimal,
     ) -> Result<AccountEvents> {
         let fee = Self::fee_notional(Self::notional(meta, px, qty), self.cfg.fee_bps);
-        Self::check_balance_for_fill(state, meta, order.side, px, qty, fee)?;
+        Self::check_balance_for_fill(state, &order.instrument, meta, order.side, px, qty, fee)?;
         let mut filled = order.clone();
         filled.remaining_qty = Decimal::ZERO;
         filled.status = OrderStatus::Filled;
@@ -449,7 +497,7 @@ impl FillEngine {
     /// Sync cancel all.
     pub(crate) fn cancel_all_sync(&self, state: &GlobalState) -> Result<AccountEvents> {
         let mut out = AccountEvents::new();
-        for (_, o) in state.open_orders.iter() {
+        for o in state.open_orders.values() {
             let mut c = o.clone();
             c.status = OrderStatus::Canceled;
             c.remaining_qty = Decimal::ZERO;

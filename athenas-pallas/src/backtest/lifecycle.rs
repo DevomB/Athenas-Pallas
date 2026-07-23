@@ -139,20 +139,18 @@ fn settle_option(
 /// quote balance and zeroing the base/position rows. Mirrors the bookkeeping used for option
 /// exercise so equity is conserved at the instant of liquidation.
 fn liquidate_position(state: &mut GlobalState, ix: usize, meta: &InstrumentMeta, mid: Decimal) {
-    let base = state
-        .balances
-        .get(&meta.base)
-        .copied()
-        .unwrap_or(Decimal::ZERO);
+    let position = state.positions[ix];
+    let entry = state.average_entry_price[ix].unwrap_or(mid);
     let mult = meta.contract_multiplier.unwrap_or(Decimal::ONE);
-    let exposure = base * mid * mult;
-    if !exposure.is_zero() {
-        state.apply_balance_delta(&meta.quote, exposure);
+    let realized = (mid - entry) * position * mult;
+    if !realized.is_zero() {
+        state.apply_balance_delta(&meta.quote, realized);
     }
     state.balances.insert(meta.base.clone(), Decimal::ZERO);
     if let Some(p) = state.positions.get_mut(ix) {
         *p = Decimal::ZERO;
     }
+    state.average_entry_price[ix] = None;
 }
 
 fn is_coupon_date(ts: OffsetDateTime, payments_per_year: u32) -> bool {
@@ -236,6 +234,9 @@ mod tests {
         let reg = InstrumentRegistry::from_instruments(map);
         let mut state = GlobalState::new(reg, bal);
         state.positions[0] = qty;
+        if !qty.is_zero() {
+            state.average_entry_price[0] = Some(Decimal::from(100u64));
+        }
         state.l1[0] = Some((
             time::macros::datetime!(2024-06-03 08:00:00 UTC),
             mid - Decimal::ONE,
@@ -277,11 +278,11 @@ mod tests {
 
     #[test]
     fn underwater_short_is_liquidated() {
-        // Short 1 contract, only $50 cash, mid 100 -> equity -50 < maintenance 5 -> flatten.
+        // Short from 100, only $50 cash, mid 200 -> equity -50 < maintenance 10 -> flatten.
         let (mut state, ix) = perp_state(
             Decimal::NEGATIVE_ONE,
             Decimal::from(50u64),
-            Decimal::from(100u64),
+            Decimal::from(200u64),
         );
         apply_bar_lifecycle(&mut state, time::macros::datetime!(2024-06-03 09:30:00 UTC));
         assert_eq!(state.positions[ix], Decimal::ZERO);

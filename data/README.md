@@ -85,9 +85,17 @@ Required TOML instrument fields:
 
 - `contract_multiplier` (e.g. `50` for ES)
 - `tick_size` (e.g. `0.25`)
+- `margin_initial_rate` when margin enforcement is required (e.g. `0.10`)
 - optional `lot_size`, `expiry`
 
 Set `asset_class = "future"`, `data_format = "ohlcv"`.
+
+Futures and perpetual positions are signed: `Sell` can open a short and `Buy` covers it. The
+engine tracks average entry, realizes PnL only on the closing quantity, and marks open exposure
+from unrealized PnL times the contract multiplier. Margin is a constraint rather than a cash debit;
+closing a position does not charge margin a second time. If `margin_initial_rate` is omitted, the
+legacy no-margin-check behavior is retained, so vendor definitions should supply the rate before a
+run is treated as leverage-realistic.
 
 ## Backtest config hints
 

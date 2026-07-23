@@ -82,6 +82,8 @@ fn mark_equity_uses_multiplier() {
     bal.insert(Asset("ES".into()), Decimal::ONE);
     let reg = athenas_pallas::instrument::InstrumentRegistry::from_instruments(map);
     let mut state = GlobalState::new(reg, bal);
+    state.positions[0] = Decimal::ONE;
+    state.average_entry_price[0] = Some(Decimal::from(4_900u64));
     state.bar_close[0] = Some(Decimal::from(5000u64));
     state.l1[0] = Some((
         time::OffsetDateTime::now_utc(),
@@ -89,5 +91,5 @@ fn mark_equity_uses_multiplier() {
         Decimal::from(5001u64),
     ));
     let eq = state.mark_to_market_equity_ix(0).unwrap();
-    assert!(eq > Decimal::from(300_000u64));
+    assert_eq!(eq, Decimal::from(105_000u64));
 }

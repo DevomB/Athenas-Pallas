@@ -28,6 +28,8 @@ pub struct GlobalState {
     pub balances: HashMap<Asset, Decimal>,
     /// Net base position per instrument row (signed) - venue / account **aggregate**.
     pub positions: Vec<Decimal>,
+    /// Average entry price for open futures/perpetual positions.
+    pub average_entry_price: Vec<Option<Decimal>>,
     /// Attributed net base per `(instrument_row, strategy_id)` when fills carry a [`StrategyId`].
     ///
     /// Sums over strategies may differ from [`Self::positions`] if some fills are untagged or cross-strategy hedges.
@@ -75,6 +77,7 @@ impl GlobalState {
             open_orders: OrderStore::new(),
             balances: initial_balances,
             positions: vec![Decimal::ZERO; n],
+            average_entry_price: vec![None; n],
             strategy_positions: FxHashMap::default(),
             l2: vec![None; n],
             risk_day_anchor: None,
@@ -140,12 +143,7 @@ impl GlobalState {
                 quote_cash_added = true;
             }
             let mid = self.mid_or_last_ix(ix.0).unwrap_or(Decimal::ZERO);
-            let base = self
-                .balances
-                .get(&meta.base)
-                .copied()
-                .unwrap_or(Decimal::ZERO);
-            total += Self::position_exposure(meta, base, mid);
+            total += self.position_value(ix.0, meta, mid);
         }
         if !quote_cash_added {
             total += self.balances.get(quote).copied().unwrap_or(Decimal::ZERO);
@@ -174,6 +172,23 @@ impl GlobalState {
             }
             _ => base * mid,
         }
+    }
+
+    fn position_value(&self, ix: usize, meta: &InstrumentMeta, mid: Decimal) -> Decimal {
+        if matches!(
+            meta.asset_class,
+            crate::instrument::AssetClass::Future | crate::instrument::AssetClass::Perpetual
+        ) {
+            let entry = self.average_entry_price[ix].unwrap_or(mid);
+            let multiplier = meta.contract_multiplier.unwrap_or(Decimal::ONE);
+            return (mid - entry) * self.positions[ix] * multiplier;
+        }
+        let base = self
+            .balances
+            .get(&meta.base)
+            .copied()
+            .unwrap_or(Decimal::ZERO);
+        Self::position_exposure(meta, base, mid)
     }
 
     /// Mid price or last trade fallback.
@@ -222,18 +237,12 @@ impl GlobalState {
     pub fn mark_to_market_equity_ix(&self, ix: usize) -> Option<Decimal> {
         let mid = self.mid_or_last_ix(ix)?;
         let meta = self.registry.meta(InstrumentIndex(ix))?;
-        let base = self
-            .balances
-            .get(&meta.base)
-            .copied()
-            .unwrap_or(Decimal::ZERO);
         let quote = self
             .balances
             .get(&meta.quote)
             .copied()
             .unwrap_or(Decimal::ZERO);
-        let notional = Self::position_exposure(meta, base, mid);
-        Some(quote + notional)
+        Some(quote + self.position_value(ix, meta, mid))
     }
 
     /// Mark-to-market equity in quote using mid or last trade.
