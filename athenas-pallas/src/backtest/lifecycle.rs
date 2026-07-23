@@ -6,8 +6,7 @@ use time::{Date, Month, OffsetDateTime};
 use crate::instrument::pricing::{
     apply_perp_funding, bond_coupon_cash, maintenance_margin_required, should_exercise_european,
 };
-use crate::instrument::AssetClass;
-use crate::instrument::InstrumentMeta;
+use crate::instrument::{AssetClass, InstrumentMeta, OptionExerciseStyle};
 use crate::state::GlobalState;
 
 /// Default 8h perpetual funding rate when not configured on meta (0.01%).
@@ -80,7 +79,9 @@ fn apply_cash_flow(
             settle_coupon(state, meta);
         }
         AssetClass::Option
-            if option_expired_on(ts, meta.expiry.as_deref()) && !position.is_zero() =>
+            if meta.option_exercise_style == Some(OptionExerciseStyle::European)
+                && option_expired_on(ts, meta.expiry.as_deref())
+                && !position.is_zero() =>
         {
             if let Some(underlying_mid) = meta
                 .option_underlying
@@ -191,7 +192,7 @@ fn option_expired_on(ts: OffsetDateTime, expiry: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::instrument::{InstrumentMeta, InstrumentRegistry, OptionContractMeta, OptionKind};
+    use crate::instrument::{InstrumentRegistry, OptionContractMeta, OptionKind};
     use crate::types::Asset;
     use std::collections::HashMap;
 
@@ -243,6 +244,7 @@ mod tests {
                         tick_size: Decimal::new(1, 2),
                         margin_initial_rate: None,
                         expiry: "2024-06-03".into(),
+                        exercise_style: OptionExerciseStyle::European,
                         kind: *kind,
                         strike: Decimal::from(*strike),
                         underlying: underlying.clone(),

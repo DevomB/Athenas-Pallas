@@ -38,6 +38,9 @@ When an MBP-10 snapshot is current, each market order uses displayed-level VWAP 
 beyond that snapshot; this is a per-order depth bound, not persistent queue/depletion simulation.
 `--schema statistics` stores official venue statistics separately. Continuous and parent symbols
 are rejected until the engine has a configured roll rule and auditable close/open ledger.
+Local option replay is limited to explicit European cash settlement and sends that exercise style
+in the v2 strategy handshake. Databento option definitions are rejected because their normalized
+definition record does not establish exercise style.
 
 ## 2. Backtest (built-in buy-and-hold)
 

@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::instrument::{AssetClass, InstrumentMeta, OptionContractMeta, OptionKind};
+use crate::instrument::{
+    AssetClass, InstrumentMeta, OptionContractMeta, OptionExerciseStyle, OptionKind,
+};
 use crate::types::{Asset, InstrumentId};
 
 /// Extra instrument registered alongside the primary backtest symbol.
@@ -330,6 +332,7 @@ fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
                 tick_size: tick_size.unwrap_or(Decimal::new(1, 2)),
                 margin_initial_rate,
                 expiry: expiry.unwrap_or_default(),
+                exercise_style: OptionExerciseStyle::European,
                 kind: option_kind.unwrap_or(OptionKind::Call),
                 strike: option_strike.unwrap_or(Decimal::ZERO),
                 underlying: option_underlying.unwrap_or_else(|| InstrumentId::new("", "")),
@@ -359,6 +362,7 @@ fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
                 coupon_payments_per_year: None,
                 maturity: expiry,
                 option_kind: None,
+                option_exercise_style: None,
                 option_strike: None,
                 option_underlying: None,
             }
@@ -377,6 +381,7 @@ fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
             coupon_payments_per_year: None,
             maturity: expiry,
             option_kind: None,
+            option_exercise_style: None,
             option_strike: None,
             option_underlying: None,
         },
@@ -401,6 +406,7 @@ pub fn validate_instruments(
             continue;
         }
         if meta.option_kind.is_none()
+            || meta.option_exercise_style != Some(OptionExerciseStyle::European)
             || meta
                 .option_strike
                 .is_none_or(|strike| strike <= Decimal::ZERO)
@@ -410,7 +416,7 @@ pub fn validate_instruments(
             || meta.expiry.as_deref().is_none_or(str::is_empty)
         {
             return Err(crate::Error::Invalid(format!(
-                "option {instrument} requires option_kind, positive option_strike, contract_multiplier, and expiry"
+                "option {instrument} requires European exercise style, option_kind, positive option_strike, contract_multiplier, and expiry"
             )));
         }
         let underlying = meta.option_underlying.as_ref().ok_or_else(|| {
@@ -459,7 +465,7 @@ mod tests {
             ..BacktestConfig::default()
         };
         let option_meta = instrument_meta_from_config(&config);
-        let mut instruments = HashMap::from([(option, option_meta)]);
+        let mut instruments = HashMap::from([(option.clone(), option_meta)]);
         assert!(validate_instruments(&config, &instruments).is_err());
 
         instruments.insert(underlying, InstrumentMeta::spot("SPY", "USD"));
@@ -479,5 +485,10 @@ mod tests {
             data_format: Some(DataFormat::Ohlcv),
         });
         validate_instruments(&config, &instruments).unwrap();
+
+        instruments.get_mut(&option).unwrap().option_exercise_style =
+            Some(OptionExerciseStyle::American);
+        let error = validate_instruments(&config, &instruments).unwrap_err();
+        assert!(error.to_string().contains("European exercise style"));
     }
 }

@@ -53,6 +53,8 @@ pub struct InstrumentInfo {
 
     pub option_kind: Option<String>,
 
+    pub option_exercise_style: Option<String>,
+
     pub option_strike: Option<String>,
 
     pub option_underlying: Option<InstrumentId>,

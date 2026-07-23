@@ -337,6 +337,12 @@ fn apply_databento_definition(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use athenas_pallas::backtest::config::parse_option_kind;
 
+    if definition.option_kind.is_some() {
+        return Err(athenas_pallas::Error::Invalid(
+            "Databento option definitions do not identify exercise style; replay requires explicit verified European-option metadata".into(),
+        )
+        .into());
+    }
     cfg.asset_class = parse_asset_class(&definition.asset_class)?;
     cfg.instrument =
         athenas_pallas::types::InstrumentId::new("databento", definition.raw_symbol.clone());

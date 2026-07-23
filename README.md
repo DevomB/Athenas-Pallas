@@ -189,6 +189,10 @@ records separately from trade-built bars. The engine rejects `continuous` and `p
 symbology for replay because it does not yet have an explicit roll rule/ledger; request the dated
 contract by raw symbol so no hidden roll is presented as an ordinary price series.
 
+The local listed-option lifecycle is cash-settled European exercise against a separately replayed
+underlying. Databento option definitions are rejected because the definition schema does not
+identify exercise style; OPRA/American-option replay is not advertised as supported.
+
 ## Project Layout
 
 | Path | Purpose |

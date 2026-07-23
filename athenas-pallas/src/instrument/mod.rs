@@ -14,5 +14,6 @@ pub use pricing::{
 };
 pub use registry::{
     AssetClass, InstrumentId, InstrumentMeta, InstrumentRegistry, OptionContractMeta,
+    OptionExerciseStyle,
 };
 pub use ticks::{notional_decimal, notional_steps, PriceTicks, QtyLots};

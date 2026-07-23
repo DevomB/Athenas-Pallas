@@ -28,7 +28,16 @@ pub enum AssetClass {
     Hybrid,
 }
 
-/// Typed economics required for one listed European option.
+/// Supported option exercise conventions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptionExerciseStyle {
+    /// Exercise only at expiration.
+    European,
+    /// Exercise before expiration is allowed.
+    American,
+}
+
+/// Typed economics required for one listed option.
 #[derive(Clone, Debug)]
 pub struct OptionContractMeta {
     /// Quote value of one price point.
@@ -39,6 +48,8 @@ pub struct OptionContractMeta {
     pub margin_initial_rate: Option<rust_decimal::Decimal>,
     /// Expiration date.
     pub expiry: String,
+    /// Exercise convention.
+    pub exercise_style: OptionExerciseStyle,
     /// Call or put.
     pub kind: OptionKind,
     /// Strike in quote units.
@@ -76,6 +87,8 @@ pub struct InstrumentMeta {
     pub maturity: Option<String>,
     /// Explicit option right.
     pub option_kind: Option<OptionKind>,
+    /// Explicit option exercise convention.
+    pub option_exercise_style: Option<OptionExerciseStyle>,
     /// Option strike in quote units.
     pub option_strike: Option<rust_decimal::Decimal>,
     /// Linked underlying instrument for option settlement.
@@ -99,6 +112,7 @@ impl InstrumentMeta {
             coupon_payments_per_year: None,
             maturity: None,
             option_kind: None,
+            option_exercise_style: None,
             option_strike: None,
             option_underlying: None,
         }
@@ -127,6 +141,7 @@ impl InstrumentMeta {
             coupon_payments_per_year: None,
             maturity: None,
             option_kind: None,
+            option_exercise_style: None,
             option_strike: None,
             option_underlying: None,
         }
@@ -153,6 +168,7 @@ impl InstrumentMeta {
             coupon_payments_per_year: None,
             maturity: None,
             option_kind: None,
+            option_exercise_style: None,
             option_strike: None,
             option_underlying: None,
         }
@@ -181,12 +197,13 @@ impl InstrumentMeta {
             coupon_payments_per_year: Some(coupon_payments_per_year),
             maturity,
             option_kind: None,
+            option_exercise_style: None,
             option_strike: None,
             option_underlying: None,
         }
     }
 
-    /// Listed European option contract metadata.
+    /// Listed option contract metadata.
     pub fn option_meta(
         base: impl Into<Asset>,
         quote: impl Into<Asset>,
@@ -206,6 +223,7 @@ impl InstrumentMeta {
             coupon_payments_per_year: None,
             maturity: None,
             option_kind: Some(contract.kind),
+            option_exercise_style: Some(contract.exercise_style),
             option_strike: Some(contract.strike),
             option_underlying: Some(contract.underlying),
         }

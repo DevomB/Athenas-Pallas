@@ -137,6 +137,9 @@ impl ExternalStrategy {
                 option_kind: meta
                     .option_kind
                     .map(|kind| format!("{kind:?}").to_ascii_lowercase()),
+                option_exercise_style: meta
+                    .option_exercise_style
+                    .map(|style| format!("{style:?}").to_ascii_lowercase()),
                 option_strike: meta.option_strike.map(|value| value.to_string()),
                 option_underlying: meta.option_underlying.clone(),
             })
