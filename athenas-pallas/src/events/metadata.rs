@@ -101,7 +101,10 @@ mod tests {
 
         assert_eq!(market.instrument(), Some(&instrument));
         assert_eq!(market.timestamp(), Some(ts));
-        assert_eq!(market.timestamp_unix_nanos(), Some(ts.unix_timestamp_nanos()));
+        assert_eq!(
+            market.timestamp_unix_nanos(),
+            Some(ts.unix_timestamp_nanos())
+        );
         assert_eq!(rejection.instrument(), Some(&instrument));
         assert_eq!(rejection.timestamp(), None);
         assert_eq!(balance.instrument(), None);

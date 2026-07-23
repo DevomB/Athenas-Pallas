@@ -229,7 +229,10 @@ mod tests {
             qty: Decimal::ONE,
         });
 
-        assert_eq!(state.last_trade[0].map(|(_, price)| price), Some(Decimal::from(101)));
+        assert_eq!(
+            state.last_trade[0].map(|(_, price)| price),
+            Some(Decimal::from(101))
+        );
         assert_eq!(state.bar_high[0], None);
         assert_eq!(state.bar_low[0], None);
     }

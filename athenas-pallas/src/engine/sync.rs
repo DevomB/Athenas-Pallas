@@ -71,12 +71,7 @@ fn process_live_market_sync(
     if let Some(instrument) = event.instrument() {
         let mut ready = Vec::new();
         process_pending_intents_for_instrument_sync(
-            state,
-            risk,
-            exec,
-            instrument,
-            pending,
-            &mut ready,
+            state, risk, exec, instrument, pending, &mut ready,
         );
     }
     poll_market_sync(state, exec, event.instrument())
