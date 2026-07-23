@@ -8,9 +8,16 @@ use crate::error::{Error, Result};
 pub fn build_cpp_strategy(dir: &Path) -> Result<PathBuf> {
     let toolchain = CppToolchain::detect();
     let build_dir = dir.join(toolchain.build_dir_name());
+    let sdk_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../trading/_sdk/cpp");
     std::fs::create_dir_all(&build_dir).map_err(Error::Io)?;
     let mut configure = std::process::Command::new("cmake");
-    configure.arg("-S").arg(dir).arg("-B").arg(&build_dir);
+    configure
+        .arg("-S")
+        .arg(dir)
+        .arg("-B")
+        .arg(&build_dir)
+        .arg(format!("-DPALLAS_CPP_SDK={}", sdk_dir.display()))
+        .env("PALLAS_CPP_SDK", &sdk_dir);
     toolchain.apply_configure_args(&mut configure);
     let status = configure.status().map_err(Error::Io)?;
     if !status.success() {

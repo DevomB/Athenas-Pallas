@@ -104,6 +104,18 @@ Running a source strategy directly avoids copying shared `_common` code. If a st
 by copying it into `trading/`, copy its matching `_common/python` directory too; the engine discovers
 both layouts automatically and preserves any user-supplied `PYTHONPATH` entries.
 
+For CMake strategies, use the SDK path supplied by the engine instead of assuming a particular
+checkout layout:
+
+```cmake
+set(PALLAS_CPP_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../_sdk/cpp" CACHE PATH "Pallas C++ SDK")
+target_include_directories(my_strategy PRIVATE "${PALLAS_CPP_SDK}")
+```
+
+`pallas-backtest` passes `PALLAS_CPP_SDK` both as a CMake cache variable and an environment
+variable, so the same strategy directory builds inside this repo or directly from a sibling
+research catalog.
+
 ## Market Data
 
 Put local CSV exports into `data/` (gitignored local workspace), then point the backtest at the file:
