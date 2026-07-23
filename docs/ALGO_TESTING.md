@@ -31,6 +31,9 @@ and the backtest report records that manifest path. `--adjustment split-adjusted
 manifest binds the raw data, complete factor response, selected policy, and derived checksum.
 For a dated derivative, add `--import-definitions`; inspection includes its cost and the run uses
 the persisted point-in-time definition rather than inferring contract economics from the symbol.
+Use `--schema trades`, `mbp-1`, `mbp-10`, `status`, or `imbalance` to cache normalized JSONL instead
+of OHLCV. Trade and top-of-book files are executable replay inputs; depth/status/auction events are
+delivered to strategies with source provenance. No queue-position or market-impact claim is made.
 
 ## 2. Backtest (built-in buy-and-hold)
 

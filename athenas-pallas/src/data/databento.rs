@@ -69,7 +69,7 @@ impl AdjustmentMode {
     }
 }
 
-/// Historical Databento OHLCV schemas accepted by the engine CSV cache.
+/// Historical Databento schemas accepted by the engine cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabentoOhlcvSchema {
     /// One-second bars.
@@ -80,6 +80,16 @@ pub enum DatabentoOhlcvSchema {
     Ohlcv1H,
     /// One-day bars.
     Ohlcv1D,
+    /// Tick-by-tick trades.
+    Trades,
+    /// Top-of-book updates.
+    Mbp1,
+    /// Ten-level depth snapshots.
+    Mbp10,
+    /// Venue trading status.
+    Status,
+    /// Auction imbalance updates.
+    Imbalance,
 }
 
 impl DatabentoOhlcvSchema {
@@ -90,8 +100,13 @@ impl DatabentoOhlcvSchema {
             "ohlcv-1m" => Ok(Self::Ohlcv1M),
             "ohlcv-1h" => Ok(Self::Ohlcv1H),
             "ohlcv-1d" => Ok(Self::Ohlcv1D),
+            "trades" => Ok(Self::Trades),
+            "mbp-1" => Ok(Self::Mbp1),
+            "mbp-10" => Ok(Self::Mbp10),
+            "status" => Ok(Self::Status),
+            "imbalance" => Ok(Self::Imbalance),
             other => Err(Error::Invalid(format!(
-                "unsupported databento schema '{other}'; supported OHLCV schemas are ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d"
+                "unsupported databento schema '{other}'; use ohlcv-1s/1m/1h/1d, trades, mbp-1, mbp-10, status, or imbalance"
             ))),
         }
     }
@@ -103,6 +118,11 @@ impl DatabentoOhlcvSchema {
             Self::Ohlcv1M => Schema::Ohlcv1M,
             Self::Ohlcv1H => Schema::Ohlcv1H,
             Self::Ohlcv1D => Schema::Ohlcv1D,
+            Self::Trades => Schema::Trades,
+            Self::Mbp1 => Schema::Mbp1,
+            Self::Mbp10 => Schema::Mbp10,
+            Self::Status => Schema::Status,
+            Self::Imbalance => Schema::Imbalance,
         }
     }
 
@@ -113,7 +133,20 @@ impl DatabentoOhlcvSchema {
             Self::Ohlcv1M => "ohlcv-1m",
             Self::Ohlcv1H => "ohlcv-1h",
             Self::Ohlcv1D => "ohlcv-1d",
+            Self::Trades => "trades",
+            Self::Mbp1 => "mbp-1",
+            Self::Mbp10 => "mbp-10",
+            Self::Status => "status",
+            Self::Imbalance => "imbalance",
         }
+    }
+
+    /// Whether this schema materializes the engine OHLCV CSV contract.
+    pub fn is_ohlcv(self) -> bool {
+        matches!(
+            self,
+            Self::Ohlcv1S | Self::Ohlcv1M | Self::Ohlcv1H | Self::Ohlcv1D
+        )
     }
 }
 
@@ -416,12 +449,17 @@ pub fn cache_path(cfg: &DatabentoFetchConfig) -> PathBuf {
 
 fn raw_cache_path(cfg: &DatabentoFetchConfig) -> PathBuf {
     cfg.cache_dir.join(format!(
-        "{}_{}_{}_{}_{}.csv",
+        "{}_{}_{}_{}_{}.{}",
         sanitize_segment(&cfg.dataset),
         sanitize_segment(&cfg.symbol),
         cfg.schema.as_str(),
         cache_datetime(cfg.start),
-        cache_datetime(cfg.end)
+        cache_datetime(cfg.end),
+        if cfg.schema.is_ohlcv() {
+            "csv"
+        } else {
+            "jsonl"
+        }
     ))
 }
 
@@ -457,6 +495,11 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
     if cfg.cost_warning_usd < 0.0 {
         return Err(Error::Invalid(
             "invalid databento cost warning: --cost-warning-usd must be >= 0".to_string(),
+        ));
+    }
+    if !cfg.schema.is_ohlcv() && cfg.adjustment_mode != AdjustmentMode::Raw {
+        return Err(Error::Invalid(
+            "adjustment policies apply only to OHLCV schemas".into(),
         ));
     }
 
@@ -686,6 +729,14 @@ fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
 }
 
 async fn fetch_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<usize> {
+    if cfg.schema.is_ohlcv() {
+        fetch_ohlcv_to_cache(cfg, path).await
+    } else {
+        fetch_events_to_cache(cfg, path).await
+    }
+}
+
+async fn fetch_ohlcv_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<usize> {
     let parent = path.parent().ok_or_else(|| {
         Error::Invalid(format!(
             "invalid databento cache path '{}': missing parent directory",
@@ -751,6 +802,247 @@ async fn fetch_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<usize
         ))
     })?;
     Ok(rows)
+}
+
+async fn fetch_events_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<usize> {
+    use databento::dbn::{ImbalanceMsg, Mbp10Msg, Mbp1Msg, StatusMsg, TradeMsg};
+
+    let parent = path.parent().ok_or_else(|| {
+        Error::Invalid(format!(
+            "invalid databento cache path '{}': missing parent directory",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent)?;
+    let tmp_path = path.with_extension("jsonl.tmp");
+    let mut client = client_from_env()?;
+    let params = GetRangeParams::builder()
+        .dataset(&cfg.dataset)
+        .symbols(cfg.symbol.as_str())
+        .schema(cfg.schema.as_dbn())
+        .date_time_range(cfg.start..cfg.end)
+        .stype_in(cfg.stype_in.as_dbn())
+        .build();
+    let mut decoder = client
+        .timeseries()
+        .get_range(&params)
+        .await
+        .map_err(map_api_error)?;
+    let mut writer = BufWriter::new(File::create(&tmp_path)?);
+    let instrument = crate::types::InstrumentId::new("databento", cfg.symbol.clone());
+    let mut rows = 0usize;
+    macro_rules! decode {
+        ($record:ty, $convert:expr) => {
+            while let Some(record) = decoder.decode_record::<$record>().await.map_err(|error| {
+                Error::Invalid(format!(
+                    "malformed Databento {} record: {error}",
+                    cfg.schema.as_str()
+                ))
+            })? {
+                if let Some(event) = $convert(record, cfg, &instrument)? {
+                    serde_json::to_writer(&mut writer, &event)?;
+                    writer.write_all(b"\n")?;
+                    rows += 1;
+                }
+            }
+        };
+    }
+    match cfg.schema {
+        DatabentoOhlcvSchema::Trades => decode!(TradeMsg, trade_event),
+        DatabentoOhlcvSchema::Mbp1 => decode!(Mbp1Msg, mbp1_event),
+        DatabentoOhlcvSchema::Mbp10 => decode!(Mbp10Msg, mbp10_event),
+        DatabentoOhlcvSchema::Status => decode!(StatusMsg, status_event),
+        DatabentoOhlcvSchema::Imbalance => decode!(ImbalanceMsg, imbalance_event),
+        _ => unreachable!("OHLCV handled by fetch_ohlcv_to_cache"),
+    }
+    if rows == 0 {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(Error::Invalid(format!(
+            "malformed databento data: decoded zero {} events",
+            cfg.schema.as_str()
+        )));
+    }
+    writer.flush()?;
+    drop(writer);
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    fs::rename(tmp_path, path)?;
+    Ok(rows)
+}
+
+fn trade_event(
+    record: &databento::dbn::TradeMsg,
+    cfg: &DatabentoFetchConfig,
+    instrument: &crate::types::InstrumentId,
+) -> Result<Option<crate::events::Event>> {
+    Ok(Some(crate::events::Event::Market(
+        crate::events::MarketEvent::Trade {
+            instrument: instrument.clone(),
+            ts: event_timestamp(&record.hd)?,
+            price: required_dbn_price(record.price, "trade price")?,
+            qty: Decimal::from(record.size),
+            provenance: Some(feed_provenance(
+                cfg,
+                &record.hd,
+                record.ts_recv,
+                Some(u64::from(record.sequence)),
+            )?),
+        },
+    )))
+}
+
+fn mbp1_event(
+    record: &databento::dbn::Mbp1Msg,
+    cfg: &DatabentoFetchConfig,
+    instrument: &crate::types::InstrumentId,
+) -> Result<Option<crate::events::Event>> {
+    let level = &record.levels[0];
+    let (Some(bid), Some(ask)) = (
+        optional_dbn_price(level.bid_px),
+        optional_dbn_price(level.ask_px),
+    ) else {
+        return Ok(None);
+    };
+    Ok(Some(crate::events::Event::Market(
+        crate::events::MarketEvent::BookL1 {
+            instrument: instrument.clone(),
+            ts: event_timestamp(&record.hd)?,
+            bid,
+            ask,
+            provenance: Some(feed_provenance(
+                cfg,
+                &record.hd,
+                record.ts_recv,
+                Some(u64::from(record.sequence)),
+            )?),
+        },
+    )))
+}
+
+fn mbp10_event(
+    record: &databento::dbn::Mbp10Msg,
+    cfg: &DatabentoFetchConfig,
+    instrument: &crate::types::InstrumentId,
+) -> Result<Option<crate::events::Event>> {
+    let bids = record
+        .levels
+        .iter()
+        .filter_map(|level| {
+            optional_dbn_price(level.bid_px).map(|price| (price, Decimal::from(level.bid_sz)))
+        })
+        .collect();
+    let asks = record
+        .levels
+        .iter()
+        .filter_map(|level| {
+            optional_dbn_price(level.ask_px).map(|price| (price, Decimal::from(level.ask_sz)))
+        })
+        .collect();
+    Ok(Some(crate::events::Event::Market(
+        crate::events::MarketEvent::BookL2Snapshot(crate::events::BookL2Snapshot {
+            instrument: instrument.clone(),
+            ts: event_timestamp(&record.hd)?,
+            bids,
+            asks,
+            provenance: Some(feed_provenance(
+                cfg,
+                &record.hd,
+                record.ts_recv,
+                Some(u64::from(record.sequence)),
+            )?),
+        }),
+    )))
+}
+
+fn status_event(
+    record: &databento::dbn::StatusMsg,
+    cfg: &DatabentoFetchConfig,
+    instrument: &crate::types::InstrumentId,
+) -> Result<Option<crate::events::Event>> {
+    Ok(Some(crate::events::Event::Market(
+        crate::events::MarketEvent::Status(crate::events::MarketStatusEvent {
+            instrument: instrument.clone(),
+            ts: event_timestamp(&record.hd)?,
+            action: record.action,
+            reason: record.reason,
+            trading_event: record.trading_event,
+            is_trading: record.is_trading(),
+            is_quoting: record.is_quoting(),
+            is_short_sell_restricted: record.is_short_sell_restricted(),
+            provenance: feed_provenance(cfg, &record.hd, record.ts_recv, None)?,
+        }),
+    )))
+}
+
+fn imbalance_event(
+    record: &databento::dbn::ImbalanceMsg,
+    cfg: &DatabentoFetchConfig,
+    instrument: &crate::types::InstrumentId,
+) -> Result<Option<crate::events::Event>> {
+    Ok(Some(crate::events::Event::Market(
+        crate::events::MarketEvent::AuctionImbalance(crate::events::AuctionImbalanceEvent {
+            instrument: instrument.clone(),
+            ts: event_timestamp(&record.hd)?,
+            reference_price: optional_dbn_price(record.ref_price),
+            indicative_match_price: optional_dbn_price(record.ind_match_price),
+            paired_qty: optional_dbn_qty(record.paired_qty),
+            total_imbalance_qty: optional_dbn_qty(record.total_imbalance_qty),
+            side: dbn_char(record.side),
+            auction_type: dbn_char(record.auction_type),
+            auction_status: record.auction_status,
+            provenance: feed_provenance(cfg, &record.hd, record.ts_recv, None)?,
+        }),
+    )))
+}
+
+fn feed_provenance(
+    cfg: &DatabentoFetchConfig,
+    header: &databento::dbn::RecordHeader,
+    ts_recv: u64,
+    sequence: Option<u64>,
+) -> Result<crate::events::MarketDataProvenance> {
+    Ok(crate::events::MarketDataProvenance {
+        dataset: cfg.dataset.clone(),
+        publisher_id: header.publisher_id,
+        instrument_id: header.instrument_id,
+        ts_recv: optional_dbn_timestamp(ts_recv)?,
+        sequence,
+    })
+}
+
+fn event_timestamp(header: &databento::dbn::RecordHeader) -> Result<OffsetDateTime> {
+    header
+        .ts_event()
+        .ok_or_else(|| Error::Invalid("malformed Databento event: missing ts_event".into()))
+}
+
+fn optional_dbn_timestamp(value: u64) -> Result<Option<OffsetDateTime>> {
+    if value == databento::dbn::UNDEF_TIMESTAMP {
+        return Ok(None);
+    }
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(value))
+        .map(Some)
+        .map_err(|error| Error::Invalid(format!("malformed Databento timestamp: {error}")))
+}
+
+fn required_dbn_price(value: i64, field: &str) -> Result<Decimal> {
+    optional_dbn_price(value)
+        .ok_or_else(|| Error::Invalid(format!("malformed Databento event: missing {field}")))
+}
+
+fn optional_dbn_price(value: i64) -> Option<Decimal> {
+    (value != databento::dbn::UNDEF_PRICE)
+        .then(|| Decimal::from_i128_with_scale(i128::from(value), 9))
+}
+
+fn optional_dbn_qty(value: u32) -> Option<u32> {
+    (value != databento::dbn::UNDEF_ORDER_SIZE).then_some(value)
+}
+
+fn dbn_char(value: std::os::raw::c_char) -> Option<String> {
+    let value = value as u8 as char;
+    (!matches!(value, '\0' | '~')).then(|| value.to_string())
 }
 
 fn cache_manifest(
@@ -1342,7 +1634,10 @@ mod tests {
             DatabentoOhlcvSchema::parse("ohlcv-1d").unwrap(),
             DatabentoOhlcvSchema::Ohlcv1D
         );
-        assert!(DatabentoOhlcvSchema::parse("trades").is_err());
+        assert_eq!(
+            DatabentoOhlcvSchema::parse("trades").unwrap(),
+            DatabentoOhlcvSchema::Trades
+        );
     }
 
     #[test]
@@ -1545,5 +1840,38 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("strike_price"));
+    }
+
+    #[test]
+    fn trade_records_map_to_replay_events_with_feed_identity() {
+        use databento::dbn::TradeMsg;
+        use time::macros::datetime;
+
+        let mut record = TradeMsg::default();
+        record.hd.publisher_id = 7;
+        record.hd.instrument_id = 99;
+        record.hd.ts_event = datetime!(2025-01-02 14:30 UTC).unix_timestamp_nanos() as u64;
+        record.ts_recv = datetime!(2025-01-02 14:30:00.000001 UTC).unix_timestamp_nanos() as u64;
+        record.price = 6_000_250_000_000;
+        record.size = 3;
+        record.sequence = 42;
+        let mut config = cfg();
+        config.dataset = "GLBX.MDP3".into();
+        config.schema = DatabentoOhlcvSchema::Trades;
+        let instrument = crate::types::InstrumentId::new("databento", "ESZ5");
+
+        let crate::events::Event::Market(crate::events::MarketEvent::Trade {
+            price,
+            qty,
+            provenance: Some(provenance),
+            ..
+        }) = trade_event(&record, &config, &instrument).unwrap().unwrap()
+        else {
+            panic!("expected normalized trade");
+        };
+        assert_eq!(price.to_string(), "6000.250000000");
+        assert_eq!(qty, Decimal::from(3));
+        assert_eq!(provenance.dataset, "GLBX.MDP3");
+        assert_eq!(provenance.sequence, Some(42));
     }
 }

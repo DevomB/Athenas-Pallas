@@ -65,7 +65,7 @@ struct Args {
     #[arg(
         long,
         default_value = "auto",
-        help = "Input layout: auto, ohlcv, or fx"
+        help = "Input layout: auto, ohlcv, fx, or jsonl"
     )]
     data_format: String,
     #[arg(long, default_value = "equity")]
@@ -257,17 +257,31 @@ fn configure_databento(
     if args.data.is_some() {
         return Err("databento manages its cache path; omit --data or --provider".into());
     }
-    if !matches!(data_format, DataFormat::Auto | DataFormat::Ohlcv) {
-        return Err("databento writes OHLCV; use --data-format auto or ohlcv".into());
-    }
     let fetch = databento_config(args)?;
+    let provider_format = if fetch.schema.is_ohlcv() {
+        DataFormat::Ohlcv
+    } else {
+        DataFormat::Jsonl
+    };
+    if !matches!(data_format, DataFormat::Auto) && data_format != provider_format {
+        return Err(format!(
+            "Databento schema '{}' requires --data-format {} or auto",
+            fetch.schema.as_str(),
+            match provider_format {
+                DataFormat::Ohlcv => "ohlcv",
+                DataFormat::Jsonl => "jsonl",
+                _ => unreachable!(),
+            }
+        )
+        .into());
+    }
     let planned_path = cache_path(&fetch);
     let result = ensure_cached_csv(&fetch)?;
     if args.estimate_only {
         return Ok(true);
     }
     cfg.data_path = result.cache_path;
-    cfg.data_format = DataFormat::Ohlcv;
+    cfg.data_format = provider_format;
     if let Some(path) = result.definitions_path {
         apply_databento_definition(
             cfg,

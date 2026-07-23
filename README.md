@@ -16,7 +16,9 @@ Current installed surface:
 - Workspace crates: `athenas-pallas` and `athenas-pallas-tools`
 - Rust binaries: `pallas-backtest`, `pallas-resample`, and `pallas-sweep`
 - Cargo features on `athenas-pallas`: `default`, `databento`, and `tracing-full`
-- Market data ingestion: local CSV/pbar files by default, plus an optional Databento OHLCV cache/export path behind `--features databento`. There is no installed Alpha Vantage, Binance-live, or generic fetch package in this checkout.
+- Market data ingestion: local CSV/pbar/JSONL files by default, plus optional Databento OHLCV,
+  trades, MBP-1, MBP-10, status, and imbalance caches behind `--features databento`. There is no
+  installed Alpha Vantage, Binance-live, or generic fetch package in this checkout.
 
 ## Install
 
@@ -172,6 +174,13 @@ definition request, the typed point-in-time records are saved beside the raw cac
 raw symbol supplies tick size, round lot, multiplier, currency, expiration, and explicit
 call/put/strike/underlying metadata. Missing economic fields and ambiguous parent symbols fail
 instead of receiving guessed defaults.
+
+Non-bar Databento schemas are persisted as replayable JSONL. Trade and MBP-1 events drive the
+existing trade/quote execution state; every event retains dataset, publisher id, instrument id,
+receive time, and sequence where the schema supplies it. MBP-10 is exposed as a ten-level snapshot,
+and status/imbalance records are first-class strategy events. MBP-10 ingestion does not claim queue
+position or depth-aware fills, and MBO remains unsupported until snapshot/reset reconstruction and
+a queue model are implemented.
 
 ## Project Layout
 
