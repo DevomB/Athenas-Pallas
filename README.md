@@ -178,9 +178,11 @@ instead of receiving guessed defaults.
 Non-bar Databento schemas are persisted as replayable JSONL. Trade and MBP-1 events drive the
 existing trade/quote execution state; every event retains dataset, publisher id, instrument id,
 receive time, and sequence where the schema supplies it. MBP-10 is exposed as a ten-level snapshot,
-and status/imbalance records are first-class strategy events. MBP-10 ingestion does not claim queue
-position or depth-aware fills, and MBO remains unsupported until snapshot/reset reconstruction and
-a queue model are implemented.
+and status/imbalance records are first-class strategy events. Market orders against an MBP-10
+snapshot use displayed-level VWAP and reject quantities larger than the displayed side; fills label
+their `simulation_model`. Snapshot liquidity is not depleted across multiple orders and no queue
+position is claimed. MBO remains unsupported until reset-aware reconstruction and a queue model are
+implemented.
 
 ## Project Layout
 

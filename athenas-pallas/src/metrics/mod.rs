@@ -42,6 +42,7 @@ mod tests {
             client_order_id: None,
             oco_group: None,
             strategy_id: Some(StrategyId::new("z")),
+            simulation_model: None,
         });
 
         let rows = strategy_position_report(&state);

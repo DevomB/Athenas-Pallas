@@ -344,6 +344,18 @@ impl FillEngine {
         px: Decimal,
         qty: Decimal,
     ) -> Result<AccountEvents> {
+        self.emit_fill_events_with_model(state, order, meta, px, qty, None)
+    }
+
+    fn emit_fill_events_with_model(
+        &self,
+        state: &GlobalState,
+        order: &OpenOrder,
+        meta: &InstrumentMeta,
+        px: Decimal,
+        qty: Decimal,
+        simulation_model: Option<&str>,
+    ) -> Result<AccountEvents> {
         let fee = Self::fee_notional(Self::notional(meta, px, qty), self.cfg.fee_bps);
         Self::check_balance_for_fill(state, &order.instrument, meta, order.side, px, qty, fee)?;
         let mut filled = order.clone();
@@ -361,6 +373,7 @@ impl FillEngine {
             client_order_id: filled.client_order_id.clone(),
             oco_group: filled.oco_group.clone(),
             strategy_id: filled.strategy_id.clone(),
+            simulation_model: simulation_model.map(str::to_owned),
         });
         self.push_oco_cancellations(state, &filled, &mut evs);
         Self::push_balance_updates_after_fill(state, &filled, meta, px, qty, fee, &mut evs);
@@ -434,6 +447,38 @@ impl FillEngine {
             .or_else(|| state.mid_or_last(inst))
     }
 
+    fn l2_market_reference(
+        state: &GlobalState,
+        inst: &crate::types::InstrumentId,
+        side: Side,
+        qty: Decimal,
+    ) -> Result<Option<Decimal>> {
+        let Some(ix) = state.registry.index_of(inst).map(|index| index.0) else {
+            return Ok(None);
+        };
+        let Some(snapshot) = state.l2.get(ix).and_then(Option::as_ref) else {
+            return Ok(None);
+        };
+        let levels = match side {
+            Side::Buy => &snapshot.asks,
+            Side::Sell => &snapshot.bids,
+        };
+        let mut remaining = qty;
+        let mut notional = Decimal::ZERO;
+        for (price, available) in levels {
+            let filled = remaining.min(*available);
+            notional += *price * filled;
+            remaining -= filled;
+            if remaining.is_zero() {
+                return Ok(Some(notional / qty));
+            }
+        }
+        Err(Error::ExecutionRejected(format!(
+            "insufficient displayed L2 liquidity: requested {qty}, available {}",
+            qty - remaining
+        )))
+    }
+
     /// Sync limit placement (backtest hot path).
     pub(crate) fn place_limit_sync(
         &self,
@@ -469,12 +514,25 @@ impl FillEngine {
     ) -> Result<AccountEvents> {
         let meta = Self::meta(state, &intent.instrument)?;
         let (qty, _, _) = Self::normalize_order(meta, intent.qty, intent.price, intent.stop_price)?;
-        let reference = Self::market_reference(state, &intent.instrument, intent.side)
-            .ok_or_else(|| Error::Invalid("no mid/last for market order".into()))?;
+        let (reference, simulation_model) = if let Some(reference) =
+            Self::l2_market_reference(state, &intent.instrument, intent.side, qty)?
+        {
+            (reference, "l2")
+        } else {
+            (
+                Self::market_reference(state, &intent.instrument, intent.side)
+                    .ok_or_else(|| Error::Invalid("no mid/last for market order".into()))?,
+                if Self::l1_bid_ask(state, &intent.instrument).is_some() {
+                    "bbo"
+                } else {
+                    "last"
+                },
+            )
+        };
         let px = apply_slippage(intent.side, reference, self.cfg.market_slippage_bps);
         let id = OrderId::new_v4();
         let o = Self::build_open(id, intent, qty, None, None, OrderType::Market);
-        self.emit_fill_events(state, &o, meta, px, qty)
+        self.emit_fill_events_with_model(state, &o, meta, px, qty, Some(simulation_model))
     }
 
     /// Sync cancel.
@@ -867,6 +925,60 @@ mod tests {
             })
             .unwrap();
         assert!(high_fill > low_fill);
+    }
+
+    #[test]
+    fn l2_market_order_uses_vwap_and_rejects_excess_size() {
+        let (mut state, inst) = setup_l1(Decimal::from(100), Decimal::from(101));
+        state.apply_market(&MarketEvent::BookL2Snapshot(
+            crate::events::BookL2Snapshot {
+                instrument: inst.clone(),
+                ts: OffsetDateTime::now_utc(),
+                bids: vec![(Decimal::from(100), Decimal::from(3))],
+                asks: vec![
+                    (Decimal::from(101), Decimal::ONE),
+                    (Decimal::from(102), Decimal::from(2)),
+                ],
+                provenance: None,
+            },
+        ));
+        let gateway = FillEngine::new(PaperConfig {
+            market_slippage_bps: Decimal::ZERO,
+            ..PaperConfig::default()
+        });
+        let intent = |qty| OrderIntent {
+            instrument: inst.clone(),
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            price: None,
+            stop_price: None,
+            qty,
+            client_order_id: None,
+            oco_group: None,
+            source: crate::events::OrderIntentSource::User,
+            strategy_id: None,
+        };
+
+        let fill = gateway
+            .place_market_sync(&state, &intent(Decimal::from(2)))
+            .unwrap()
+            .into_iter()
+            .find_map(|event| match event {
+                AccountEvent::Fill {
+                    price,
+                    simulation_model,
+                    ..
+                } => Some((price, simulation_model)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(fill.0, Decimal::new(10_150, 2));
+        assert_eq!(fill.1.as_deref(), Some("l2"));
+
+        let error = gateway
+            .place_market_sync(&state, &intent(Decimal::from(4)))
+            .unwrap_err();
+        assert!(error.to_string().contains("displayed L2 liquidity"));
     }
 
     #[test]

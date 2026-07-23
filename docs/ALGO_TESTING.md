@@ -34,6 +34,8 @@ the persisted point-in-time definition rather than inferring contract economics 
 Use `--schema trades`, `mbp-1`, `mbp-10`, `status`, or `imbalance` to cache normalized JSONL instead
 of OHLCV. Trade and top-of-book files are executable replay inputs; depth/status/auction events are
 delivered to strategies with source provenance. No queue-position or market-impact claim is made.
+When an MBP-10 snapshot is current, each market order uses displayed-level VWAP and rejects size
+beyond that snapshot; this is a per-order depth bound, not persistent queue/depletion simulation.
 
 ## 2. Backtest (built-in buy-and-hold)
 

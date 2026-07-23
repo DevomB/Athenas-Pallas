@@ -65,6 +65,7 @@ impl GlobalState {
             client_order_id,
             oco_group,
             strategy_id,
+            simulation_model,
             ..
         } = event
         else {
@@ -107,6 +108,7 @@ impl GlobalState {
                 price: price.to_string(),
                 fee: fee.to_string(),
                 contract_multiplier,
+                simulation_model: simulation_model.clone(),
                 client_order_id: client_order_id.clone(),
                 oco_group: oco_group.clone(),
                 strategy_id: strategy_id.clone(),
@@ -173,6 +175,7 @@ mod tests {
             client_order_id: None,
             oco_group: None,
             strategy_id: Some(strategy_a.clone()),
+            simulation_model: None,
         });
         state.apply_account(&AccountEvent::Fill {
             order_id: OrderId::new_v4(),
@@ -185,6 +188,7 @@ mod tests {
             client_order_id: None,
             oco_group: None,
             strategy_id: Some(strategy_b.clone()),
+            simulation_model: None,
         });
 
         assert_eq!(state.position_qty(&instrument), Decimal::new(5, 2));

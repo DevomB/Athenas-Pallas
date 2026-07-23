@@ -334,6 +334,7 @@ mod tests {
             client_order_id: None,
             oco_group: None,
             strategy_id: Some(sid_a.clone()),
+            simulation_model: None,
         });
         st.apply_account(&AccountEvent::Fill {
             order_id: OrderId::new_v4(),
@@ -346,6 +347,7 @@ mod tests {
             client_order_id: None,
             oco_group: None,
             strategy_id: Some(sid_b.clone()),
+            simulation_model: None,
         });
         assert_eq!(st.position_qty(&i), Decimal::new(5, 2));
         assert_eq!(st.strategy_position_qty(&i, &sid_a), Decimal::new(1, 1));

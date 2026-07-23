@@ -143,6 +143,11 @@ impl GlobalState {
                     .index_of(&snapshot.instrument)
                     .map(|index| index.0)
                 {
+                    if let (Some((bid, _)), Some((ask, _))) =
+                        (snapshot.bids.first(), snapshot.asks.first())
+                    {
+                        self.apply_quote(ix, snapshot.ts, *bid, *ask);
+                    }
                     self.l2[ix] = Some(snapshot.clone());
                 }
             }

@@ -207,6 +207,7 @@ mod tests {
             price: price.into(),
             fee: fee.into(),
             contract_multiplier: None,
+            simulation_model: None,
             client_order_id: None,
             oco_group: None,
             strategy_id: None,

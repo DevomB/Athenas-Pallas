@@ -225,6 +225,9 @@ pub enum AccountEvent {
         /// Sub-strategy attribution when known (paper/sim propagate from working order).
         #[serde(default)]
         strategy_id: Option<StrategyId>,
+        /// Execution simulation surface (`bar`, `bbo`, `l2`, or `last`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        simulation_model: Option<String>,
     },
     /// Risk or execution rejection retained for strategy feedback and reporting.
     Rejection(RejectionRecord),
@@ -305,6 +308,9 @@ pub struct FillRecord {
     /// Quote-currency value of one price point per unit, when contract metadata defines one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contract_multiplier: Option<String>,
+    /// Execution simulation surface used for this fill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulation_model: Option<String>,
     /// Client correlation id, if supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_order_id: Option<ClientOrderId>,
