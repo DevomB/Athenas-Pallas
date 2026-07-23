@@ -104,6 +104,11 @@ Running a source strategy directly avoids copying shared `_common` code. If a st
 by copying it into `trading/`, copy its matching `_common/python` directory too; the engine discovers
 both layouts automatically and preserves any user-supplied `PYTHONPATH` entries.
 
+The dependency-free Python SDK also exposes validated `Bar`/`bar_from_event`, `log_return`,
+`RollingSma`, `Ema`, `Garch11`, `PageCusum`, `ann_vol_from_returns`, and
+`vol_target_weight` primitives. More specialized catalog estimators remain catalog code rather
+than becoming an engine API accidentally.
+
 For CMake strategies, use the SDK path supplied by the engine instead of assuming a particular
 checkout layout:
 

@@ -58,6 +58,81 @@ run(on_event, on_init=on_init)
         self.assertEqual(position_size_pct_equity(10_000.0, 0.0, 0.1), 0.0)
         self.assertEqual(position_size_pct_equity(10_000.0, 100.0, 0.0), 0.0)
 
+    def test_stable_research_primitives(self) -> None:
+        sys.path.insert(0, str(SDK))
+        from pallas_strategy import (
+            Ema,
+            Garch11,
+            PageCusum,
+            ann_vol_from_returns,
+            bar_from_event,
+            vol_target_weight,
+        )
+
+        bar = bar_from_event(
+            {
+                "Market": {
+                    "Bar": {
+                        "open": "100",
+                        "high": "102",
+                        "low": "99",
+                        "close": "101",
+                        "volume": "12",
+                        "ts": "2026-07-23T12:00:00Z",
+                    }
+                }
+            }
+        )
+        self.assertIsNotNone(bar)
+        self.assertEqual(bar.close, 101.0)
+        self.assertEqual(bar.ts, "2026-07-23T12:00:00Z")
+        self.assertIsNone(
+            bar_from_event(
+                {
+                    "Market": {
+                        "Bar": {
+                            "open": "nan",
+                            "high": 1,
+                            "low": 1,
+                            "close": 1,
+                        }
+                    }
+                }
+            )
+        )
+
+        ema = Ema(3)
+        self.assertEqual(ema.update(10.0), 10.0)
+        self.assertEqual(ema.update(12.0), 11.0)
+
+        garch = Garch11()
+        self.assertAlmostEqual(garch.update(0.1), 0.01)
+        self.assertAlmostEqual(garch.update(0.2), 0.011001)
+        self.assertIsNotNone(garch.zscore(0.2))
+
+        cusum = PageCusum(drift=0.0, threshold=1.0)
+        self.assertEqual(cusum.update(0.6), 0)
+        self.assertEqual(cusum.update(0.6), 1)
+
+        volatility = ann_vol_from_returns([-0.01, 0.01], bars_per_year=1.0)
+        self.assertAlmostEqual(volatility, 2**0.5 * 0.01)
+        self.assertEqual(
+            vol_target_weight(
+                [-0.01, 0.01],
+                target_vol=0.20,
+                leverage_cap=1.5,
+                bars_per_year=1.0,
+            ),
+            1.5,
+        )
+
+    def test_rolling_sma_rejects_zero_window(self) -> None:
+        sys.path.insert(0, str(SDK))
+        from pallas_strategy import RollingSma
+
+        with self.assertRaises(ValueError):
+            RollingSma(0)
+
 
 if __name__ == "__main__":
     unittest.main()
