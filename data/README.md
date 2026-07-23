@@ -97,6 +97,18 @@ closing a position does not charge margin a second time. If `margin_initial_rate
 legacy no-margin-check behavior is retained, so vendor definitions should supply the rate before a
 run is treated as leverage-realistic.
 
+### Listed options (`AssetClass::Option`)
+
+Option replay requires price history for the option and its linked underlying. In TOML, set
+`option_kind = "call"` or `"put"`, a positive `option_strike`, `option_underlying =
+"exchange:symbol"`, `contract_multiplier`, and `expiry`; the underlying must also be registered
+under `[[instruments]]`. Missing or self-referential metadata is rejected before replay.
+
+Expiry is deterministic European cash settlement against the linked underlying mark. Long and
+short payouts are signed, so covered calls and vertical spreads can be represented by separate
+registered option legs. The engine does not infer the right or strike from a symbol and does not
+claim early exercise, physical assignment, Greeks, IV, or OPRA acquisition support.
+
 ## Backtest config hints
 
 ```toml

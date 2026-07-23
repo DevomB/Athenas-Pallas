@@ -19,7 +19,10 @@ Newline-delimited JSON on stdin/stdout between `pallas-backtest` and a strategy 
     "tick_size": "0.01",
     "contract_multiplier": null,
     "expiry": null,
-    "margin_initial_rate": null
+    "margin_initial_rate": null,
+    "option_kind": null,
+    "option_strike": null,
+    "option_underlying": null
   }],
   "balances": {"USDT": "10000"},
   "config": {"fee_bps": "10"},
@@ -30,6 +33,9 @@ Newline-delimited JSON on stdin/stdout between `pallas-backtest` and a strategy 
 `instruments` contains the primary instrument and every configured extra instrument. `parameters`
 is the arbitrary JSON-compatible `[strategy_parameters]` TOML table (or repeated CLI
 `--param KEY=JSON` values).
+Listed options include explicit `option_kind` (`call` or `put`), `option_strike`, and a registered
+`option_underlying`; the engine rejects an option handshake when any required economic field is
+missing.
 
 **event** (one per market event)
 ```json

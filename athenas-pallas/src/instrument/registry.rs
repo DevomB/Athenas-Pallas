@@ -2,6 +2,7 @@
 
 use crate::instrument::asset::Asset;
 use crate::instrument::index::InstrumentIndex;
+use crate::instrument::pricing::OptionKind;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
@@ -25,6 +26,25 @@ pub enum AssetClass {
     Bond,
     /// Multi-leg or mixed structure.
     Hybrid,
+}
+
+/// Typed economics required for one listed European option.
+#[derive(Clone, Debug)]
+pub struct OptionContractMeta {
+    /// Quote value of one price point.
+    pub contract_multiplier: rust_decimal::Decimal,
+    /// Minimum premium increment.
+    pub tick_size: rust_decimal::Decimal,
+    /// Optional short-option margin rate.
+    pub margin_initial_rate: Option<rust_decimal::Decimal>,
+    /// Expiration date.
+    pub expiry: String,
+    /// Call or put.
+    pub kind: OptionKind,
+    /// Strike in quote units.
+    pub strike: rust_decimal::Decimal,
+    /// Linked underlying instrument.
+    pub underlying: InstrumentId,
 }
 
 /// Static metadata for an instrument.
@@ -54,6 +74,12 @@ pub struct InstrumentMeta {
     pub coupon_payments_per_year: Option<u32>,
     /// Bond maturity date string.
     pub maturity: Option<String>,
+    /// Explicit option right.
+    pub option_kind: Option<OptionKind>,
+    /// Option strike in quote units.
+    pub option_strike: Option<rust_decimal::Decimal>,
+    /// Linked underlying instrument for option settlement.
+    pub option_underlying: Option<InstrumentId>,
 }
 
 impl InstrumentMeta {
@@ -72,6 +98,9 @@ impl InstrumentMeta {
             coupon_rate: None,
             coupon_payments_per_year: None,
             maturity: None,
+            option_kind: None,
+            option_strike: None,
+            option_underlying: None,
         }
     }
 
@@ -97,6 +126,9 @@ impl InstrumentMeta {
             coupon_rate: None,
             coupon_payments_per_year: None,
             maturity: None,
+            option_kind: None,
+            option_strike: None,
+            option_underlying: None,
         }
     }
 
@@ -120,6 +152,9 @@ impl InstrumentMeta {
             coupon_rate: None,
             coupon_payments_per_year: None,
             maturity: None,
+            option_kind: None,
+            option_strike: None,
+            option_underlying: None,
         }
     }
 
@@ -145,32 +180,34 @@ impl InstrumentMeta {
             coupon_rate: Some(coupon_rate),
             coupon_payments_per_year: Some(coupon_payments_per_year),
             maturity,
+            option_kind: None,
+            option_strike: None,
+            option_underlying: None,
         }
     }
 
-    /// Listed option contract metadata. `strike` is stored in `face_value` for exercise math.
+    /// Listed European option contract metadata.
     pub fn option_meta(
         base: impl Into<Asset>,
         quote: impl Into<Asset>,
-        contract_multiplier: rust_decimal::Decimal,
-        tick_size: rust_decimal::Decimal,
-        margin_initial_rate: Option<rust_decimal::Decimal>,
-        expiry: Option<String>,
-        strike: rust_decimal::Decimal,
+        contract: OptionContractMeta,
     ) -> Self {
         Self {
             base: base.into(),
             quote: quote.into(),
             asset_class: AssetClass::Option,
             lot_size: None,
-            contract_multiplier: Some(contract_multiplier),
-            tick_size: Some(tick_size),
-            expiry,
-            margin_initial_rate,
-            face_value: Some(strike),
+            contract_multiplier: Some(contract.contract_multiplier),
+            tick_size: Some(contract.tick_size),
+            expiry: Some(contract.expiry),
+            margin_initial_rate: contract.margin_initial_rate,
+            face_value: None,
             coupon_rate: None,
             coupon_payments_per_year: None,
             maturity: None,
+            option_kind: Some(contract.kind),
+            option_strike: Some(contract.strike),
+            option_underlying: Some(contract.underlying),
         }
     }
 }

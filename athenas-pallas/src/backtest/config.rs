@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::instrument::{AssetClass, InstrumentMeta};
+use crate::instrument::{AssetClass, InstrumentMeta, OptionContractMeta, OptionKind};
 use crate::types::{Asset, InstrumentId};
 
 /// Extra instrument registered alongside the primary backtest symbol.
@@ -26,6 +26,12 @@ pub struct ExtraInstrument {
     pub expiry: Option<String>,
     /// Optional initial margin rate.
     pub margin_initial_rate: Option<Decimal>,
+    /// Explicit option right.
+    pub option_kind: Option<OptionKind>,
+    /// Explicit option strike.
+    pub option_strike: Option<Decimal>,
+    /// Linked option underlying.
+    pub option_underlying: Option<InstrumentId>,
     /// Historical CSV for this symbol (multi-instrument replay).
     pub data_path: Option<PathBuf>,
     /// CSV layout for `data_path`.
@@ -68,6 +74,15 @@ pub fn parse_asset_class(s: &str) -> Result<AssetClass, String> {
     }
 }
 
+/// Parse an option right.
+pub fn parse_option_kind(s: &str) -> Result<OptionKind, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "call" => Ok(OptionKind::Call),
+        "put" => Ok(OptionKind::Put),
+        _ => Err(format!("unsupported option kind `{s}`; use call or put")),
+    }
+}
+
 /// Parse user-facing data-format aliases.
 pub fn parse_data_format(s: &str) -> Result<DataFormat, String> {
     DataFormat::parse(s)
@@ -100,6 +115,9 @@ pub struct BacktestConfig {
     pub tick_size: Option<Decimal>,
     pub contract_multiplier: Option<Decimal>,
     pub expiry: Option<String>,
+    pub option_kind: Option<OptionKind>,
+    pub option_strike: Option<Decimal>,
+    pub option_underlying: Option<InstrumentId>,
     pub record_equity_curve: bool,
     pub strategy_path: Option<PathBuf>,
     /// Arbitrary JSON-compatible parameters forwarded to external strategy initialization.
@@ -156,6 +174,9 @@ impl Default for BacktestConfig {
             tick_size: None,
             contract_multiplier: None,
             expiry: None,
+            option_kind: None,
+            option_strike: None,
+            option_underlying: None,
             record_equity_curve: true,
             strategy_path: None,
             strategy_parameters: HashMap::new(),
@@ -228,6 +249,9 @@ pub fn instrument_meta_from_config(cfg: &BacktestConfig) -> InstrumentMeta {
         contract_multiplier: cfg.contract_multiplier,
         expiry: cfg.expiry.clone(),
         margin_initial_rate: cfg.margin_initial_rate,
+        option_kind: cfg.option_kind,
+        option_strike: cfg.option_strike,
+        option_underlying: cfg.option_underlying.clone(),
     })
 }
 
@@ -243,6 +267,9 @@ pub fn instrument_meta_from_extra(extra: &ExtraInstrument) -> InstrumentMeta {
         contract_multiplier: extra.contract_multiplier,
         expiry: extra.expiry.clone(),
         margin_initial_rate: extra.margin_initial_rate,
+        option_kind: extra.option_kind,
+        option_strike: extra.option_strike,
+        option_underlying: extra.option_underlying.clone(),
     })
 }
 
@@ -255,6 +282,9 @@ struct MetaFields {
     contract_multiplier: Option<Decimal>,
     expiry: Option<String>,
     margin_initial_rate: Option<Decimal>,
+    option_kind: Option<OptionKind>,
+    option_strike: Option<Decimal>,
+    option_underlying: Option<InstrumentId>,
 }
 
 fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
@@ -267,6 +297,9 @@ fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
         contract_multiplier,
         expiry,
         margin_initial_rate,
+        option_kind,
+        option_strike,
+        option_underlying,
     } = fields;
     match asset_class {
         AssetClass::Future => {
@@ -290,11 +323,15 @@ fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
         AssetClass::Option => InstrumentMeta::option_meta(
             base,
             quote,
-            contract_multiplier.unwrap_or(Decimal::ONE),
-            Decimal::new(1, 2),
-            margin_initial_rate,
-            expiry.clone(),
-            tick_size.unwrap_or(Decimal::from(100u64)),
+            OptionContractMeta {
+                contract_multiplier: contract_multiplier.unwrap_or(Decimal::ONE),
+                tick_size: tick_size.unwrap_or(Decimal::new(1, 2)),
+                margin_initial_rate,
+                expiry: expiry.unwrap_or_default(),
+                kind: option_kind.unwrap_or(OptionKind::Call),
+                strike: option_strike.unwrap_or(Decimal::ZERO),
+                underlying: option_underlying.unwrap_or_else(|| InstrumentId::new("", "")),
+            },
         ),
         AssetClass::Bond => InstrumentMeta::bond(
             base,
@@ -319,6 +356,9 @@ fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
                 coupon_rate: None,
                 coupon_payments_per_year: None,
                 maturity: expiry,
+                option_kind: None,
+                option_strike: None,
+                option_underlying: None,
             }
         }
         _ => InstrumentMeta {
@@ -334,8 +374,58 @@ fn build_instrument_meta(fields: MetaFields) -> InstrumentMeta {
             coupon_rate: None,
             coupon_payments_per_year: None,
             maturity: expiry,
+            option_kind: None,
+            option_strike: None,
+            option_underlying: None,
         },
     }
+}
+
+/// Reject incomplete option economics before replay or strategy initialization.
+pub fn validate_instruments(
+    config: &BacktestConfig,
+    instruments: &HashMap<InstrumentId, InstrumentMeta>,
+) -> crate::Result<()> {
+    let mut sources = std::collections::HashSet::from([config.instrument.clone()]);
+    sources.extend(
+        config
+            .extra_instruments
+            .iter()
+            .filter(|extra| extra.data_path.is_some())
+            .map(|extra| extra.instrument.clone()),
+    );
+    for (instrument, meta) in instruments {
+        if meta.asset_class != AssetClass::Option {
+            continue;
+        }
+        if meta.option_kind.is_none()
+            || meta
+                .option_strike
+                .is_none_or(|strike| strike <= Decimal::ZERO)
+            || meta
+                .contract_multiplier
+                .is_none_or(|multiplier| multiplier <= Decimal::ZERO)
+            || meta.expiry.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(crate::Error::Invalid(format!(
+                "option {instrument} requires option_kind, positive option_strike, contract_multiplier, and expiry"
+            )));
+        }
+        let underlying = meta.option_underlying.as_ref().ok_or_else(|| {
+            crate::Error::Invalid(format!("option {instrument} requires option_underlying"))
+        })?;
+        if underlying == instrument || !instruments.contains_key(underlying) {
+            return Err(crate::Error::Invalid(format!(
+                "option {instrument} underlying {underlying} is not a distinct registered instrument"
+            )));
+        }
+        if !sources.contains(instrument) || !sources.contains(underlying) {
+            return Err(crate::Error::Invalid(format!(
+                "option {instrument} and underlying {underlying} both require replay data"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -349,5 +439,43 @@ mod tests {
         assert_eq!(parse_asset_class("futures"), Ok(AssetClass::Future));
         assert!(parse_data_format("future").is_err());
         assert!(parse_data_format("unknown").is_err());
+        assert_eq!(parse_option_kind("put"), Ok(OptionKind::Put));
+    }
+
+    #[test]
+    fn option_metadata_requires_registered_underlying() {
+        let option = InstrumentId::new("test", "SPY_CALL");
+        let underlying = InstrumentId::new("test", "SPY");
+        let config = BacktestConfig {
+            instrument: option.clone(),
+            asset_class: AssetClass::Option,
+            option_kind: Some(OptionKind::Call),
+            option_strike: Some(Decimal::from(100u64)),
+            option_underlying: Some(underlying.clone()),
+            contract_multiplier: Some(Decimal::from(100u64)),
+            expiry: Some("2025-01-17".into()),
+            ..BacktestConfig::default()
+        };
+        let option_meta = instrument_meta_from_config(&config);
+        let mut instruments = HashMap::from([(option, option_meta)]);
+        assert!(validate_instruments(&config, &instruments).is_err());
+
+        instruments.insert(underlying, InstrumentMeta::spot("SPY", "USD"));
+        let mut config = config;
+        config.extra_instruments.push(ExtraInstrument {
+            instrument: InstrumentId::new("test", "SPY"),
+            asset_class: AssetClass::Equity,
+            lot_size: None,
+            tick_size: None,
+            contract_multiplier: None,
+            expiry: None,
+            margin_initial_rate: None,
+            option_kind: None,
+            option_strike: None,
+            option_underlying: None,
+            data_path: Some(PathBuf::from("spy.csv")),
+            data_format: Some(DataFormat::Ohlcv),
+        });
+        validate_instruments(&config, &instruments).unwrap();
     }
 }

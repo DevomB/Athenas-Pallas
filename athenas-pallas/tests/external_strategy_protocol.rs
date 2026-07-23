@@ -176,6 +176,9 @@ while True:
         contract_multiplier: None,
         expiry: None,
         margin_initial_rate: None,
+        option_kind: None,
+        option_strike: None,
+        option_underlying: None,
         data_path: None,
         data_format: None,
     });

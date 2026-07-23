@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
-use super::config::{parse_asset_class, parse_data_format, BacktestConfig, ExtraInstrument};
+use super::config::{
+    parse_asset_class, parse_data_format, parse_option_kind, BacktestConfig, ExtraInstrument,
+};
 use crate::types::{Asset, InstrumentId};
 
 #[derive(Default, Deserialize)]
@@ -30,6 +32,9 @@ struct InstrumentConfig {
     tick_size: Option<DecimalValue>,
     contract_multiplier: Option<DecimalValue>,
     expiry: Option<String>,
+    option_kind: Option<String>,
+    option_strike: Option<DecimalValue>,
+    option_underlying: Option<String>,
     base_asset: Option<String>,
     quote_asset: Option<String>,
 }
@@ -76,6 +81,9 @@ struct ExtraInstrumentConfig {
     contract_multiplier: Option<DecimalValue>,
     expiry: Option<String>,
     margin_initial_rate: Option<DecimalValue>,
+    option_kind: Option<String>,
+    option_strike: Option<DecimalValue>,
+    option_underlying: Option<String>,
     data: Option<String>,
     data_format: Option<String>,
 }
@@ -202,6 +210,16 @@ impl InstrumentConfig {
         if self.expiry.is_some() {
             config.expiry = self.expiry;
         }
+        if let Some(value) = self.option_kind {
+            config.option_kind = Some(parse_option_kind(&value).map_err(crate::Error::Invalid)?);
+        }
+        if let Some(value) = self.option_strike {
+            config.option_strike = Some(value.positive("instrument.option_strike")?);
+        }
+        if let Some(value) = self.option_underlying {
+            config.option_underlying =
+                Some(super::config::parse_instrument(&value).map_err(crate::Error::Invalid)?);
+        }
         if self.base_asset.is_some() {
             config.base_asset = self.base_asset;
         }
@@ -268,6 +286,15 @@ impl ExtraInstrumentConfig {
             margin_initial_rate: self
                 .margin_initial_rate
                 .map(|value| value.rate("instruments.margin_initial_rate"))
+                .transpose()?,
+            option_kind: self
+                .option_kind
+                .map(|value| parse_option_kind(&value).map_err(crate::Error::Invalid))
+                .transpose()?,
+            option_strike: parse_positive(self.option_strike, "instruments.option_strike")?,
+            option_underlying: self
+                .option_underlying
+                .map(|value| super::config::parse_instrument(&value).map_err(crate::Error::Invalid))
                 .transpose()?,
             data_path: self.data.map(|path| resolve_path(base_dir, &path)),
             data_format: self

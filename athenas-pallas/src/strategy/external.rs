@@ -134,6 +134,11 @@ impl ExternalStrategy {
                 contract_multiplier: meta.contract_multiplier.map(|value| value.to_string()),
                 expiry: meta.expiry.clone(),
                 margin_initial_rate: meta.margin_initial_rate.map(|value| value.to_string()),
+                option_kind: meta
+                    .option_kind
+                    .map(|kind| format!("{kind:?}").to_ascii_lowercase()),
+                option_strike: meta.option_strike.map(|value| value.to_string()),
+                option_underlying: meta.option_underlying.clone(),
             })
             .collect();
         instrument_info.sort_by(|left, right| {

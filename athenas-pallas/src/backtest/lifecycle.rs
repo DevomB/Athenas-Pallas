@@ -8,7 +8,6 @@ use crate::instrument::pricing::{
 };
 use crate::instrument::AssetClass;
 use crate::instrument::InstrumentMeta;
-use crate::instrument::OptionKind;
 use crate::state::GlobalState;
 
 /// Default 8h perpetual funding rate when not configured on meta (0.01%).
@@ -83,7 +82,13 @@ fn apply_cash_flow(
         AssetClass::Option
             if option_expired_on(ts, meta.expiry.as_deref()) && !position.is_zero() =>
         {
-            settle_option(state, ix, meta, mid, position);
+            if let Some(underlying_mid) = meta
+                .option_underlying
+                .as_ref()
+                .and_then(|underlying| state.mid_or_last(underlying))
+            {
+                settle_option(state, ix, meta, underlying_mid, position);
+            }
         }
         _ => {}
     }
@@ -116,23 +121,23 @@ fn settle_option(
     state: &mut GlobalState,
     ix: usize,
     meta: &InstrumentMeta,
-    mid: Decimal,
+    underlying_mid: Decimal,
     position: Decimal,
 ) {
-    let strike = meta.face_value.unwrap_or(Decimal::ONE);
-    let intrinsic = if should_exercise_european(OptionKind::Call, mid, strike) {
-        (mid - strike).max(Decimal::ZERO)
-    } else if should_exercise_european(OptionKind::Put, mid, strike) {
-        (strike - mid).max(Decimal::ZERO)
+    let (Some(kind), Some(strike)) = (meta.option_kind, meta.option_strike) else {
+        return;
+    };
+    let intrinsic = if should_exercise_european(kind, underlying_mid, strike) {
+        crate::instrument::option_intrinsic_value(kind, underlying_mid, strike)
     } else {
         Decimal::ZERO
     };
     if !intrinsic.is_zero() {
         let multiplier = meta.contract_multiplier.unwrap_or(Decimal::ONE);
-        state.apply_balance_delta(&meta.quote, intrinsic * position.abs() * multiplier);
-        state.positions[ix] = Decimal::ZERO;
-        state.balances.insert(meta.base.clone(), Decimal::ZERO);
+        state.apply_balance_delta(&meta.quote, intrinsic * position * multiplier);
     }
+    state.positions[ix] = Decimal::ZERO;
+    state.balances.insert(meta.base.clone(), Decimal::ZERO);
 }
 
 /// Close a leveraged derivative position at `mid`, realizing its mark-to-market exposure into the
@@ -186,7 +191,7 @@ fn option_expired_on(ts: OffsetDateTime, expiry: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::instrument::{InstrumentMeta, InstrumentRegistry};
+    use crate::instrument::{InstrumentMeta, InstrumentRegistry, OptionContractMeta, OptionKind};
     use crate::types::Asset;
     use std::collections::HashMap;
 
@@ -219,6 +224,94 @@ mod tests {
         apply_bar_lifecycle(&mut state, time::macros::datetime!(2024-06-01 00:00:00 UTC));
         let usd = state.balances.get(&Asset("USD".into())).copied().unwrap();
         assert!(usd > Decimal::from(10_000u64));
+    }
+
+    fn option_state(
+        underlying_mid: Decimal,
+        legs: &[(&str, OptionKind, u64, Decimal)],
+    ) -> GlobalState {
+        let underlying = crate::types::InstrumentId::new("test", "SPY");
+        let mut map = HashMap::from([(underlying.clone(), InstrumentMeta::spot("SPY", "USD"))]);
+        for (symbol, kind, strike, _) in legs {
+            map.insert(
+                crate::types::InstrumentId::new("test", *symbol),
+                InstrumentMeta::option_meta(
+                    *symbol,
+                    "USD",
+                    OptionContractMeta {
+                        contract_multiplier: Decimal::from(100u64),
+                        tick_size: Decimal::new(1, 2),
+                        margin_initial_rate: None,
+                        expiry: "2024-06-03".into(),
+                        kind: *kind,
+                        strike: Decimal::from(*strike),
+                        underlying: underlying.clone(),
+                    },
+                ),
+            );
+        }
+        let mut balances = HashMap::from([(Asset::new("USD"), Decimal::from(10_000u64))]);
+        let registry = InstrumentRegistry::from_instruments(map);
+        let mut state = GlobalState::new(registry, balances.clone());
+        let underlying_ix = state.registry.index_of(&underlying).unwrap().0;
+        state.l1[underlying_ix] = Some((
+            time::macros::datetime!(2024-06-03 20:00:00 UTC),
+            underlying_mid,
+            underlying_mid,
+        ));
+        for (symbol, _, _, qty) in legs {
+            let instrument = crate::types::InstrumentId::new("test", *symbol);
+            let ix = state.registry.index_of(&instrument).unwrap().0;
+            state.positions[ix] = *qty;
+            state.l1[ix] = Some((
+                time::macros::datetime!(2024-06-03 20:00:00 UTC),
+                Decimal::ONE,
+                Decimal::ONE,
+            ));
+            balances.insert(Asset::new(*symbol), *qty);
+        }
+        state.balances = balances;
+        state
+    }
+
+    #[test]
+    fn call_and_put_settle_against_linked_underlying() {
+        let mut state = option_state(
+            Decimal::from(120u64),
+            &[
+                ("CALL100", OptionKind::Call, 100, Decimal::ONE),
+                ("PUT130", OptionKind::Put, 130, Decimal::ONE),
+            ],
+        );
+        apply_bar_lifecycle(&mut state, time::macros::datetime!(2024-06-03 20:00:00 UTC));
+        assert_eq!(
+            state.balances.get(&Asset::new("USD")),
+            Some(&Decimal::from(13_000u64))
+        );
+        assert!(state.positions.iter().all(Decimal::is_zero));
+    }
+
+    #[test]
+    fn covered_call_and_vertical_spread_have_signed_cashflows() {
+        let mut state = option_state(
+            Decimal::from(120u64),
+            &[
+                ("CALL100", OptionKind::Call, 100, Decimal::ONE),
+                ("CALL110", OptionKind::Call, 110, Decimal::NEGATIVE_ONE),
+            ],
+        );
+        state
+            .balances
+            .insert(Asset::new("SPY"), Decimal::from(100u64));
+        apply_bar_lifecycle(&mut state, time::macros::datetime!(2024-06-03 20:00:00 UTC));
+        assert_eq!(
+            state.balances.get(&Asset::new("USD")),
+            Some(&Decimal::from(11_000u64))
+        );
+        assert_eq!(
+            state.balances.get(&Asset::new("SPY")),
+            Some(&Decimal::from(100u64))
+        );
     }
 
     fn perp_state(qty: Decimal, usd: Decimal, mid: Decimal) -> (GlobalState, usize) {

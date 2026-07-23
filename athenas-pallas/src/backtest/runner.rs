@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::config::{
-    instrument_meta_from_config, instrument_meta_from_extra, BacktestConfig, DataFormat,
+    instrument_meta_from_config, instrument_meta_from_extra, validate_instruments, BacktestConfig,
+    DataFormat,
 };
 use super::lifecycle::apply_bar_lifecycle;
 use super::merge::merge_sources_iter;
@@ -204,6 +205,7 @@ impl<'a> ReplayRun<'a> {
                 .iter()
                 .map(|extra| (extra.instrument.clone(), instrument_meta_from_extra(extra))),
         );
+        validate_instruments(cfg, &instruments)?;
         let balances = if cfg.balances.is_empty() {
             cfg.default_balances()
         } else {

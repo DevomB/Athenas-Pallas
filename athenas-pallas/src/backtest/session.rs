@@ -5,7 +5,9 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use super::config::{instrument_meta_from_config, instrument_meta_from_extra, BacktestConfig};
+use super::config::{
+    instrument_meta_from_config, instrument_meta_from_extra, validate_instruments, BacktestConfig,
+};
 use super::cpp_build::build_cpp_strategy;
 use super::report::BacktestReport;
 use super::runner::BacktestRunner;
@@ -47,6 +49,7 @@ pub fn run_external_backtest_with_cancel(
             .iter()
             .map(|extra| (extra.instrument.clone(), instrument_meta_from_extra(extra))),
     );
+    validate_instruments(cfg, &instruments)?;
     let balances = if cfg.balances.is_empty() {
         cfg.default_balances()
     } else {

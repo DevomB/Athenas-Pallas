@@ -50,6 +50,12 @@ pub struct InstrumentInfo {
     pub expiry: Option<String>,
 
     pub margin_initial_rate: Option<String>,
+
+    pub option_kind: Option<String>,
+
+    pub option_strike: Option<String>,
+
+    pub option_underlying: Option<InstrumentId>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
