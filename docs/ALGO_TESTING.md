@@ -26,7 +26,9 @@ entitled schema/date range and save a read-only `*.inspect.json` capability/cost
 downloading market data. The provider path writes a CSV cache under `data/databento/`, then uses
 the same backtest replay path as local files. A paid fetch also writes a versioned
 `*.manifest.json`; the engine reuses the CSV only when the request fields and SHA-256 still match,
-and the backtest report records that manifest path.
+and the backtest report records that manifest path. `--adjustment split-adjusted` and
+`--adjustment total-return-adjusted` preserve the raw CSV and write a separate adjusted cache whose
+manifest binds the raw data, complete factor response, selected policy, and derived checksum.
 
 ## 2. Backtest (built-in buy-and-hold)
 

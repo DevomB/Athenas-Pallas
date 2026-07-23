@@ -42,6 +42,12 @@ struct Args {
     estimate_only: bool,
     #[arg(long)]
     refresh_data: bool,
+    #[arg(
+        long,
+        default_value = "raw",
+        help = "OHLCV adjustment policy: raw, split-adjusted, or total-return-adjusted"
+    )]
+    adjustment: String,
     #[arg(long, default_value = "data/databento")]
     cache_dir: PathBuf,
     #[arg(long)]
@@ -282,7 +288,7 @@ fn databento_config(
     args: &Args,
 ) -> Result<athenas_pallas::data::databento::DatabentoFetchConfig, Box<dyn std::error::Error>> {
     use athenas_pallas::data::databento::{
-        parse_datetime, DatabentoFetchConfig, DatabentoOhlcvSchema, DatabentoSType,
+        parse_datetime, AdjustmentMode, DatabentoFetchConfig, DatabentoOhlcvSchema, DatabentoSType,
     };
 
     Ok(DatabentoFetchConfig {
@@ -297,6 +303,7 @@ fn databento_config(
         cost_warning_usd: args.cost_warning_usd,
         yes: args.yes,
         estimate_only: args.estimate_only,
+        adjustment_mode: AdjustmentMode::parse(&args.adjustment)?,
     })
 }
 

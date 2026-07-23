@@ -39,6 +39,8 @@ pub struct DataSourceMetadata {
     pub instrument: InstrumentId,
     pub path: Option<String>,
     pub manifest_path: Option<String>,
+    /// Raw or adjusted materialization policy read from the adjacent manifest.
+    pub adjustment_mode: Option<String>,
     pub format: String,
 }
 

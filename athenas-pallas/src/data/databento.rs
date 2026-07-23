@@ -1,8 +1,10 @@
 //! Databento historical OHLCV fetch and CSV cache support.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, BufWriter, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use databento::{
     dbn::{OhlcvMsg, SType, Schema},
@@ -10,8 +12,10 @@ use databento::{
         metadata::{DatasetRange, GetCostParams},
         timeseries::GetRangeParams,
     },
-    HistoricalClient,
+    HistoricalClient, ReferenceClient,
 };
+use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -21,6 +25,49 @@ use time::{Date, OffsetDateTime, PrimitiveDateTime};
 use crate::error::{Error, Result};
 
 const PRICE_SCALE: i128 = 1_000_000_000;
+
+/// Explicit Databento OHLCV adjustment policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AdjustmentMode {
+    /// Preserve vendor OHLCV without modification.
+    #[default]
+    Raw,
+    /// Back-adjust prices and volume for subdivisions and consolidations only.
+    SplitAdjusted,
+    /// Back-adjust prices for all active factors and volume for splits only.
+    TotalReturnAdjusted,
+}
+
+impl AdjustmentMode {
+    /// Parse a CLI adjustment policy.
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "raw" => Ok(Self::Raw),
+            "split-adjusted" => Ok(Self::SplitAdjusted),
+            "total-return-adjusted" => Ok(Self::TotalReturnAdjusted),
+            other => Err(Error::Invalid(format!(
+                "unsupported adjustment mode '{other}'; use raw, split-adjusted, or total-return-adjusted"
+            ))),
+        }
+    }
+
+    /// Stable manifest/CLI name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Raw => "raw",
+            Self::SplitAdjusted => "split-adjusted",
+            Self::TotalReturnAdjusted => "total-return-adjusted",
+        }
+    }
+
+    fn accepts_reason(self, reason: u32) -> bool {
+        match self {
+            Self::Raw => false,
+            Self::SplitAdjusted => matches!(reason, 5 | 6),
+            Self::TotalReturnAdjusted => true,
+        }
+    }
+}
 
 /// Historical Databento OHLCV schemas accepted by the engine CSV cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,6 +200,8 @@ pub struct DatabentoFetchConfig {
     pub yes: bool,
     /// Estimate cost and exit without fetching.
     pub estimate_only: bool,
+    /// Raw, split-adjusted, or total-return-adjusted materialization.
+    pub adjustment_mode: AdjustmentMode,
 }
 
 /// Result of resolving a Databento cache request.
@@ -193,6 +242,46 @@ pub struct DatabentoCacheManifest {
     pub adjustment_mode: String,
     /// Databento Rust client compatibility line.
     pub databento_client: String,
+}
+
+/// One persisted adjustment-factor record, including non-applied statuses.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AdjustmentFactorRecord {
+    /// Corporate-action event identifier.
+    pub event_id: String,
+    /// Effective date.
+    pub ex_date: String,
+    /// `apply`, `pending`, or `rescind`.
+    pub status: String,
+    /// Vendor factor.
+    pub factor: f64,
+    /// Vendor reason code.
+    pub reason: u32,
+    /// Shareholder option number.
+    pub option: u32,
+    /// Record publication time.
+    pub ts_created: String,
+}
+
+/// Provenance for a separately materialized adjusted OHLCV cache.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DatabentoAdjustedManifest {
+    /// Manifest schema version.
+    pub version: u32,
+    /// Immutable raw CSV input.
+    pub raw_cache_path: String,
+    /// SHA-256 of the raw CSV.
+    pub raw_sha256: String,
+    /// SHA-256 of the persisted factor response.
+    pub adjustment_factors_sha256: String,
+    /// SHA-256 of the adjusted CSV.
+    pub adjusted_sha256: String,
+    /// Materialized row count.
+    pub source_row_count: usize,
+    /// Explicit adjustment policy.
+    pub adjustment_mode: String,
+    /// All returned factor statuses, including pending/rescinded records.
+    pub factors: Vec<AdjustmentFactorRecord>,
 }
 
 /// Read-only request capability and cost inspection.
@@ -246,6 +335,21 @@ pub fn parse_datetime(value: &str) -> Result<OffsetDateTime> {
 
 /// Compute the engine CSV cache path for a Databento request.
 pub fn cache_path(cfg: &DatabentoFetchConfig) -> PathBuf {
+    let raw = raw_cache_path(cfg);
+    if cfg.adjustment_mode == AdjustmentMode::Raw {
+        raw
+    } else {
+        raw.with_file_name(format!(
+            "{}_{}.csv",
+            raw.file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("databento"),
+            cfg.adjustment_mode.as_str()
+        ))
+    }
+}
+
+fn raw_cache_path(cfg: &DatabentoFetchConfig) -> PathBuf {
     cfg.cache_dir.join(format!(
         "{}_{}_{}_{}_{}.csv",
         sanitize_segment(&cfg.dataset),
@@ -266,6 +370,14 @@ pub fn manifest_path(cfg: &DatabentoFetchConfig) -> PathBuf {
     cache_path(cfg).with_extension("manifest.json")
 }
 
+fn raw_manifest_path(cfg: &DatabentoFetchConfig) -> PathBuf {
+    raw_cache_path(cfg).with_extension("manifest.json")
+}
+
+fn factors_path(cfg: &DatabentoFetchConfig) -> PathBuf {
+    raw_cache_path(cfg).with_extension("factors.json")
+}
+
 /// Resolve or fetch the cached Databento CSV.
 pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheResult> {
     if cfg.end <= cfg.start {
@@ -279,8 +391,14 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
         ));
     }
 
+    let raw_path = raw_cache_path(cfg);
     let path = cache_path(cfg);
-    if !cfg.refresh_data && !cfg.estimate_only && cached_request_is_valid(cfg, &path)? {
+    let raw_valid = !cfg.refresh_data && cached_request_is_valid(cfg, &raw_path)?;
+    if raw_valid
+        && cfg.adjustment_mode != AdjustmentMode::Raw
+        && !cfg.estimate_only
+        && adjusted_request_is_valid(cfg, &raw_path, &path)?
+    {
         return Ok(DatabentoCacheResult {
             cache_path: path,
             estimated_cost_usd: None,
@@ -288,37 +406,62 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
         });
     }
 
-    dotenvy::dotenv().ok();
-    require_api_key()?;
-
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|err| Error::Invalid(format!("databento async runtime failure: {err}")))?;
-    let inspection = rt.block_on(inspect_request(cfg))?;
-    let estimated_cost_usd = inspection.estimated_cost_usd;
-    println!(
-        "Databento estimated cost: ${estimated_cost_usd:.6}; cache: {}",
-        path.display()
-    );
+    let mut estimated_cost_usd = None;
+    if !raw_valid || cfg.estimate_only {
+        dotenvy::dotenv().ok();
+        require_api_key()?;
+        let inspection = rt.block_on(inspect_request(cfg))?;
+        estimated_cost_usd = Some(inspection.estimated_cost_usd);
+        println!(
+            "Databento estimated cost: ${:.6}; cache: {}",
+            inspection.estimated_cost_usd,
+            path.display()
+        );
 
-    if cfg.estimate_only {
-        write_json_atomic(&inspection_path(cfg), &inspection)?;
+        if cfg.estimate_only {
+            write_json_atomic(&inspection_path(cfg), &inspection)?;
+            return Ok(DatabentoCacheResult {
+                cache_path: path,
+                estimated_cost_usd,
+                fetched: false,
+            });
+        }
+
+        confirm_cost(cfg, inspection.estimated_cost_usd)?;
+        let source_row_count = rt.block_on(fetch_to_cache(cfg, &raw_path))?;
+        let manifest = cache_manifest(cfg, &raw_path, source_row_count)?;
+        write_json_atomic(&raw_manifest_path(cfg), &manifest)?;
+    }
+
+    if cfg.adjustment_mode == AdjustmentMode::Raw {
         return Ok(DatabentoCacheResult {
-            cache_path: path,
-            estimated_cost_usd: Some(estimated_cost_usd),
-            fetched: false,
+            cache_path: raw_path,
+            estimated_cost_usd,
+            fetched: !raw_valid,
         });
     }
 
-    confirm_cost(cfg, estimated_cost_usd)?;
-    let source_row_count = rt.block_on(fetch_to_cache(cfg, &path))?;
-    let manifest = cache_manifest(cfg, &path, source_row_count)?;
+    dotenvy::dotenv().ok();
+    require_api_key()?;
+    let factors = if !cfg.refresh_data && factors_path(cfg).is_file() {
+        serde_json::from_reader(File::open(factors_path(cfg))?)?
+    } else {
+        let factors = rt.block_on(fetch_adjustment_factors(cfg))?;
+        write_json_atomic(&factors_path(cfg), &factors)?;
+        factors
+    };
+    let source_row_count =
+        materialize_adjusted_csv(&raw_path, &path, &factors, cfg.adjustment_mode)?;
+    let manifest = adjusted_manifest(cfg, &raw_path, &path, source_row_count, factors)?;
     write_json_atomic(&manifest_path(cfg), &manifest)?;
 
     Ok(DatabentoCacheResult {
         cache_path: path,
-        estimated_cost_usd: Some(estimated_cost_usd),
+        estimated_cost_usd,
         fetched: true,
     })
 }
@@ -518,7 +661,7 @@ fn cached_request_is_valid(cfg: &DatabentoFetchConfig, path: &Path) -> Result<bo
     if !path.is_file() {
         return Ok(false);
     }
-    let manifest_path = manifest_path(cfg);
+    let manifest_path = raw_manifest_path(cfg);
     if !manifest_path.is_file() {
         return Ok(false);
     }
@@ -539,6 +682,220 @@ fn cached_request_is_valid(cfg: &DatabentoFetchConfig, path: &Path) -> Result<bo
         return Ok(false);
     }
     Ok(manifest.raw_sha256 == sha256_file(path)?)
+}
+
+fn adjusted_request_is_valid(
+    cfg: &DatabentoFetchConfig,
+    raw_path: &Path,
+    adjusted_path: &Path,
+) -> Result<bool> {
+    let factor_path = factors_path(cfg);
+    let manifest_path = manifest_path(cfg);
+    if !adjusted_path.is_file() || !factor_path.is_file() || !manifest_path.is_file() {
+        return Ok(false);
+    }
+    let manifest: DatabentoAdjustedManifest =
+        match serde_json::from_reader(File::open(manifest_path)?) {
+            Ok(manifest) => manifest,
+            Err(_) => return Ok(false),
+        };
+    Ok(manifest.version == 1
+        && manifest.adjustment_mode == cfg.adjustment_mode.as_str()
+        && manifest.raw_sha256 == sha256_file(raw_path)?
+        && manifest.adjustment_factors_sha256 == sha256_file(&factor_path)?
+        && manifest.adjusted_sha256 == sha256_file(adjusted_path)?)
+}
+
+async fn fetch_adjustment_factors(
+    cfg: &DatabentoFetchConfig,
+) -> Result<Vec<AdjustmentFactorRecord>> {
+    use databento::reference::{adjustment, AdjustmentStatus};
+
+    let mut client = ReferenceClient::builder()
+        .key_from_env()
+        .map_err(|err| Error::Invalid(format!("databento missing API key: {err}")))?
+        .build()
+        .map_err(map_api_error)?;
+    let params = adjustment::GetRangeParams::builder()
+        .symbols(cfg.symbol.as_str())
+        .stype_in(cfg.stype_in.as_dbn())
+        .start(cfg.start)
+        .end(cfg.end)
+        .build();
+    client
+        .adjustment_factors()
+        .get_range(&params)
+        .await
+        .map_err(map_api_error)?
+        .into_iter()
+        .map(|factor| {
+            Ok(AdjustmentFactorRecord {
+                event_id: factor.event_id,
+                ex_date: factor.ex_date.to_string(),
+                status: match factor.status {
+                    AdjustmentStatus::Apply => "apply",
+                    AdjustmentStatus::Pending => "pending",
+                    AdjustmentStatus::Rescind => "rescind",
+                }
+                .into(),
+                factor: factor.factor,
+                reason: factor.reason,
+                option: factor.option,
+                ts_created: format_utc(factor.ts_created)?,
+            })
+        })
+        .collect()
+}
+
+fn adjusted_manifest(
+    cfg: &DatabentoFetchConfig,
+    raw_path: &Path,
+    adjusted_path: &Path,
+    source_row_count: usize,
+    factors: Vec<AdjustmentFactorRecord>,
+) -> Result<DatabentoAdjustedManifest> {
+    Ok(DatabentoAdjustedManifest {
+        version: 1,
+        raw_cache_path: raw_path.display().to_string(),
+        raw_sha256: sha256_file(raw_path)?,
+        adjustment_factors_sha256: sha256_file(&factors_path(cfg))?,
+        adjusted_sha256: sha256_file(adjusted_path)?,
+        source_row_count,
+        adjustment_mode: cfg.adjustment_mode.as_str().into(),
+        factors,
+    })
+}
+
+#[derive(Deserialize, Serialize)]
+struct CsvBar {
+    ts: String,
+    open: String,
+    high: String,
+    low: String,
+    close: String,
+    volume: String,
+}
+
+fn materialize_adjusted_csv(
+    raw_path: &Path,
+    adjusted_path: &Path,
+    factors: &[AdjustmentFactorRecord],
+    mode: AdjustmentMode,
+) -> Result<usize> {
+    let active = active_factors(factors, mode)?;
+    let tmp_path = adjusted_path.with_extension("csv.tmp");
+    let mut reader = csv::Reader::from_path(raw_path).map_err(csv_io)?;
+    let mut writer = csv::Writer::from_path(&tmp_path).map_err(csv_io)?;
+    let mut rows = 0usize;
+    for row in reader.deserialize::<CsvBar>() {
+        let mut row = row.map_err(csv_io)?;
+        let ts = OffsetDateTime::parse(&row.ts, &Rfc3339)
+            .map_err(|error| Error::Invalid(format!("invalid raw OHLCV timestamp: {error}")))?;
+        let mut price_factor = Decimal::ONE;
+        let mut volume_factor = Decimal::ONE;
+        // Adjustment lists are small. If this becomes a hotspot, replace the scan with a
+        // reverse-date cumulative-factor cursor.
+        for factor in active.iter().filter(|factor| ts.date() < factor.ex_date) {
+            price_factor *= factor.factor;
+            if matches!(factor.reason, 5 | 6) {
+                volume_factor *= factor.factor;
+            }
+        }
+        row.open = adjusted_decimal(&row.open, price_factor, "open")?;
+        row.high = adjusted_decimal(&row.high, price_factor, "high")?;
+        row.low = adjusted_decimal(&row.low, price_factor, "low")?;
+        row.close = adjusted_decimal(&row.close, price_factor, "close")?;
+        let volume = parse_decimal(&row.volume, "volume")?;
+        row.volume = (volume / volume_factor).normalize().to_string();
+        writer.serialize(row).map_err(csv_io)?;
+        rows += 1;
+    }
+    writer.flush().map_err(Error::Io)?;
+    drop(writer);
+    if adjusted_path.exists() {
+        fs::remove_file(adjusted_path)?;
+    }
+    fs::rename(tmp_path, adjusted_path)?;
+    Ok(rows)
+}
+
+struct ActiveFactor {
+    ex_date: Date,
+    factor: Decimal,
+    reason: u32,
+}
+
+fn active_factors(
+    factors: &[AdjustmentFactorRecord],
+    mode: AdjustmentMode,
+) -> Result<Vec<ActiveFactor>> {
+    let mut ordered = factors.to_vec();
+    ordered.sort_by(|left, right| left.ts_created.cmp(&right.ts_created));
+    let mut active = BTreeMap::new();
+    for factor in ordered {
+        if factor.option != 1 || !mode.accepts_reason(factor.reason) {
+            continue;
+        }
+        let key = (
+            factor.event_id.clone(),
+            factor.ex_date.clone(),
+            factor.option,
+            factor.reason,
+        );
+        match factor.status.as_str() {
+            "apply" => {
+                if !factor.factor.is_finite() || factor.factor <= 0.0 {
+                    return Err(Error::Invalid(format!(
+                        "unsupported nonpositive adjustment factor {} for event {}",
+                        factor.factor, factor.event_id
+                    )));
+                }
+                active.insert(key, factor);
+            }
+            "rescind" => {
+                active.remove(&key);
+            }
+            "pending" => {}
+            status => {
+                return Err(Error::Invalid(format!(
+                    "unknown adjustment factor status '{status}'"
+                )))
+            }
+        }
+    }
+    let date_format = format_description!("[year]-[month]-[day]");
+    active
+        .into_values()
+        .map(|factor| {
+            Ok(ActiveFactor {
+                ex_date: Date::parse(&factor.ex_date, &date_format).map_err(|error| {
+                    Error::Invalid(format!(
+                        "invalid adjustment ex-date '{}': {error}",
+                        factor.ex_date
+                    ))
+                })?,
+                factor: Decimal::from_f64(factor.factor).ok_or_else(|| {
+                    Error::Invalid(format!("invalid adjustment factor {}", factor.factor))
+                })?,
+                reason: factor.reason,
+            })
+        })
+        .collect()
+}
+
+fn adjusted_decimal(value: &str, factor: Decimal, field: &str) -> Result<String> {
+    Ok((parse_decimal(value, field)? * factor)
+        .normalize()
+        .to_string())
+}
+
+fn parse_decimal(value: &str, field: &str) -> Result<Decimal> {
+    Decimal::from_str(value)
+        .map_err(|error| Error::Invalid(format!("invalid raw OHLCV {field} '{value}': {error}")))
+}
+
+fn csv_io(error: csv::Error) -> Error {
+    Error::Io(io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
@@ -687,6 +1044,7 @@ mod tests {
             cost_warning_usd: 1.0,
             yes: false,
             estimate_only: false,
+            adjustment_mode: AdjustmentMode::Raw,
         }
     }
 
@@ -791,6 +1149,65 @@ mod tests {
 
         std::fs::write(&csv, "tampered").unwrap();
         assert!(!cached_request_is_valid(&config, &csv).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn split_adjustment_is_separate_and_factor_changes_invalidate_it() {
+        let mut config = cfg();
+        config.adjustment_mode = AdjustmentMode::SplitAdjusted;
+        let root = std::env::temp_dir().join(format!("pallas-adjusted-{}", uuid::Uuid::new_v4()));
+        config.cache_dir = root.clone();
+        std::fs::create_dir_all(&root).unwrap();
+        let raw = raw_cache_path(&config);
+        std::fs::write(
+            &raw,
+            concat!(
+                "ts,open,high,low,close,volume\n",
+                "2025-01-01T00:00:00Z,100,110,90,105,10\n",
+                "2025-01-03T00:00:00Z,50,55,45,52.5,20\n"
+            ),
+        )
+        .unwrap();
+        let factors = vec![AdjustmentFactorRecord {
+            event_id: "split-1".into(),
+            ex_date: "2025-01-02".into(),
+            status: "apply".into(),
+            factor: 0.5,
+            reason: 5,
+            option: 1,
+            ts_created: "2025-01-01T20:00:00Z".into(),
+        }];
+        write_json_atomic(&factors_path(&config), &factors).unwrap();
+        let adjusted = cache_path(&config);
+        let rows =
+            materialize_adjusted_csv(&raw, &adjusted, &factors, AdjustmentMode::SplitAdjusted)
+                .unwrap();
+        let manifest = adjusted_manifest(&config, &raw, &adjusted, rows, factors.clone()).unwrap();
+        write_json_atomic(&manifest_path(&config), &manifest).unwrap();
+
+        let mut reader = csv::Reader::from_path(&adjusted).unwrap();
+        let bars: Vec<CsvBar> = reader.deserialize().map(|row| row.unwrap()).collect();
+        assert_eq!(bars[0].close, "52.5");
+        assert_eq!(bars[0].volume, "20");
+        assert_eq!(bars[1].close, "52.5");
+        assert!(adjusted_request_is_valid(&config, &raw, &adjusted).unwrap());
+
+        let mut rescinded = factors;
+        rescinded.push(AdjustmentFactorRecord {
+            event_id: "split-1".into(),
+            ex_date: "2025-01-02".into(),
+            status: "rescind".into(),
+            factor: 0.5,
+            reason: 5,
+            option: 1,
+            ts_created: "2025-01-04T00:00:00Z".into(),
+        });
+        write_json_atomic(&factors_path(&config), &rescinded).unwrap();
+        assert!(!adjusted_request_is_valid(&config, &raw, &adjusted).unwrap());
+        assert!(active_factors(&rescinded, AdjustmentMode::SplitAdjusted)
+            .unwrap()
+            .is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

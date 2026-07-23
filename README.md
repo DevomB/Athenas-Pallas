@@ -153,15 +153,19 @@ advertised, estimates the exact request cost, and writes `*.inspect.json` beside
 without downloading market data.
 
 Databento cache export preserves the raw OHLCV values returned by the selected market-data schema;
-the engine only converts Databento fixed-point integers to decimal CSV text. It does not apply
-split or dividend adjustment factors. Adjustment-factor support is a separate future feature, and
-`raw_symbol` refers to input symbology rather than adjusted prices.
+the engine only converts Databento fixed-point integers to decimal CSV text. Add
+`--adjustment split-adjusted` or `--adjustment total-return-adjusted` to keep that raw cache and
+separately materialize a factor-bound adjusted CSV. Pending factors are retained but not applied,
+rescinded factors remove the matching active factor, and shareholder option 1 is selected
+explicitly. `raw_symbol` refers to input symbology rather than adjusted prices.
 
 Every paid fetch writes a versioned `*.manifest.json` beside the CSV with the exact dataset,
 symbol, symbology, schema, UTC range, retrieval time, row count, raw SHA-256, client compatibility
 line, and explicit `raw` adjustment mode. Cache reuse requires both a matching manifest and a
 matching checksum; legacy, partial, or modified cache files are fetched again instead of being
 treated as complete. Backtest reports link the manifest from `data.sources[].manifest_path`.
+Adjusted manifests additionally bind the raw checksum, complete factor response, selected policy,
+and derived checksum; reports expose the policy at `data.sources[].adjustment_mode`.
 
 ## Project Layout
 
