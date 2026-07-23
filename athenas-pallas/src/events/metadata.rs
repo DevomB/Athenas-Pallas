@@ -9,6 +9,8 @@ impl MarketEvent {
             | Self::BookL1 { instrument, .. }
             | Self::Bar { instrument, .. } => instrument,
             Self::BookL2Snapshot(snapshot) => &snapshot.instrument,
+            Self::Status(status) => &status.instrument,
+            Self::AuctionImbalance(imbalance) => &imbalance.instrument,
         }
     }
 
@@ -16,6 +18,8 @@ impl MarketEvent {
         match self {
             Self::Trade { ts, .. } | Self::BookL1 { ts, .. } | Self::Bar { ts, .. } => *ts,
             Self::BookL2Snapshot(snapshot) => snapshot.ts,
+            Self::Status(status) => status.ts,
+            Self::AuctionImbalance(imbalance) => imbalance.ts,
         }
     }
 }
@@ -84,6 +88,7 @@ mod tests {
             ts,
             bids: vec![(Decimal::ONE, Decimal::ONE)],
             asks: vec![],
+            provenance: None,
         }));
         let rejection = Event::Account(AccountEvent::Rejection(RejectionRecord {
             ts,

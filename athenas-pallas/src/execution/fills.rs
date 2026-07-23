@@ -752,6 +752,7 @@ mod tests {
             ts: OffsetDateTime::now_utc(),
             bid,
             ask,
+            provenance: None,
         });
         (state, inst)
     }
@@ -792,6 +793,7 @@ mod tests {
             ts: OffsetDateTime::now_utc(),
             bid: Decimal::new(100, 0),
             ask: Decimal::new(101, 0),
+            provenance: None,
         });
         let gw = FillEngine::new(PaperConfig {
             fee_bps: Decimal::from(100u64),
@@ -904,6 +906,7 @@ mod tests {
             ts: OffsetDateTime::now_utc(),
             bid: Decimal::new(40_000, 0),
             ask: Decimal::new(40_010, 0),
+            provenance: None,
         });
         let gw = FillEngine::new(PaperConfig::default());
         let intent = OrderIntent {
@@ -952,6 +955,7 @@ mod tests {
             ts: OffsetDateTime::now_utc(),
             bid: Decimal::from(98u64),
             ask: Decimal::from(99u64),
+            provenance: None,
         });
 
         let events = gateway

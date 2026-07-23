@@ -67,6 +67,7 @@ fn paper_market_updates_balances() {
         ts,
         bid: Decimal::new(100_000, 0),
         ask: Decimal::new(100_010, 0),
+        provenance: None,
     });
     dispatch_event_sync(&mut state, &mut strat, &risk, &exec, ev, &mut intents).unwrap();
 

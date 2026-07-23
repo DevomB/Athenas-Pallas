@@ -23,6 +23,9 @@ pub enum MarketEvent {
         price: Decimal,
         /// Base quantity.
         qty: Decimal,
+        /// Vendor/source identity and ordering fields when available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<MarketDataProvenance>,
     },
     /// Best bid/ask.
     BookL1 {
@@ -35,9 +38,16 @@ pub enum MarketEvent {
         bid: Decimal,
         /// Best ask.
         ask: Decimal,
+        /// Vendor/source identity and ordering fields when available.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<MarketDataProvenance>,
     },
     /// Shallow L2 snapshot (bounded depth; venue-specific limit).
     BookL2Snapshot(BookL2Snapshot),
+    /// Venue trading/quoting state.
+    Status(MarketStatusEvent),
+    /// Venue auction imbalance state.
+    AuctionImbalance(AuctionImbalanceEvent),
     /// OHLCV bar.
     Bar {
         /// Instrument.
@@ -70,6 +80,76 @@ pub struct BookL2Snapshot {
     pub bids: Vec<(Decimal, Decimal)>,
     /// Ask levels, best first.
     pub asks: Vec<(Decimal, Decimal)>,
+    /// Vendor/source identity and ordering fields when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<MarketDataProvenance>,
+}
+
+/// Optional source timestamps and sequence identity retained from a market-data feed.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarketDataProvenance {
+    /// Vendor dataset code.
+    pub dataset: String,
+    /// Vendor publisher/venue id.
+    pub publisher_id: u16,
+    /// Vendor numeric instrument id.
+    pub instrument_id: u32,
+    /// Capture/receive timestamp.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub ts_recv: Option<OffsetDateTime>,
+    /// Feed sequence number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
+}
+
+/// Venue trading status retained as a first-class replay event.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarketStatusEvent {
+    /// Instrument whose status changed.
+    pub instrument: InstrumentId,
+    /// Event time.
+    #[serde(with = "rfc3339_compat")]
+    pub ts: OffsetDateTime,
+    /// Vendor-normalized status action code.
+    pub action: u16,
+    /// Vendor-normalized reason code.
+    pub reason: u16,
+    /// Vendor-normalized trading-event code.
+    pub trading_event: u16,
+    /// Whether trading is active, when supplied.
+    pub is_trading: Option<bool>,
+    /// Whether quoting is active, when supplied.
+    pub is_quoting: Option<bool>,
+    /// Whether short sales are restricted, when supplied.
+    pub is_short_sell_restricted: Option<bool>,
+    /// Feed identity and receive time.
+    pub provenance: MarketDataProvenance,
+}
+
+/// Auction imbalance fields required by session/auction strategies.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuctionImbalanceEvent {
+    /// Instrument in the auction.
+    pub instrument: InstrumentId,
+    /// Event time.
+    #[serde(with = "rfc3339_compat")]
+    pub ts: OffsetDateTime,
+    /// Venue reference price.
+    pub reference_price: Option<Decimal>,
+    /// Indicative clearing/match price.
+    pub indicative_match_price: Option<Decimal>,
+    /// Quantity paired at the reference price.
+    pub paired_qty: Option<u32>,
+    /// Unpaired imbalance quantity.
+    pub total_imbalance_qty: Option<u32>,
+    /// Imbalance side code.
+    pub side: Option<String>,
+    /// Venue auction type code.
+    pub auction_type: Option<String>,
+    /// Venue auction status code.
+    pub auction_status: u8,
+    /// Feed identity and receive time.
+    pub provenance: MarketDataProvenance,
 }
 
 /// Private / account-side update.

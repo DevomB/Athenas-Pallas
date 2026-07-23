@@ -66,6 +66,7 @@ fn flatten_closes_position_when_paused() {
             ts,
             bid: Decimal::new(40_000, 0),
             ask: Decimal::new(40_010, 0),
+            provenance: None,
         }),
         &mut intents,
     )

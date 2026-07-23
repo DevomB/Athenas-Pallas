@@ -131,6 +131,7 @@ impl GlobalState {
                 ts,
                 bid,
                 ask,
+                ..
             } => {
                 if let Some(ix) = self.registry.index_of(instrument).map(|index| index.0) {
                     self.apply_quote(ix, *ts, *bid, *ask);
@@ -145,6 +146,7 @@ impl GlobalState {
                     self.l2[ix] = Some(snapshot.clone());
                 }
             }
+            MarketEvent::Status(_) | MarketEvent::AuctionImbalance(_) => {}
             MarketEvent::Bar {
                 instrument,
                 ts,
@@ -227,6 +229,7 @@ mod tests {
             ts: ts + time::Duration::seconds(1),
             price: Decimal::from(101),
             qty: Decimal::ONE,
+            provenance: None,
         });
 
         assert_eq!(

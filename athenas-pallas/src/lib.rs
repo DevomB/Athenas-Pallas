@@ -36,7 +36,10 @@ pub use engine::{
     dispatch_event_sync, dispatch_replay_sync, dispatch_strategy_sync, replay_events_sync,
 };
 pub use error::{Error, Result};
-pub use events::{BookL2Snapshot, Event, OrderIntentSource};
+pub use events::{
+    AuctionImbalanceEvent, BookL2Snapshot, Event, MarketDataProvenance, MarketStatusEvent,
+    OrderIntentSource,
+};
 pub use risk::RiskEngine;
 pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, StrategyId, Symbol, TradingState};
 

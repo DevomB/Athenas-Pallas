@@ -45,6 +45,7 @@ pub enum DataFormat {
     Auto,
     Ohlcv,
     Fx,
+    Jsonl,
 }
 
 impl DataFormat {
@@ -54,6 +55,7 @@ impl DataFormat {
             "auto" => Ok(Self::Auto),
             "ohlcv" => Ok(Self::Ohlcv),
             "fx" => Ok(Self::Fx),
+            "jsonl" | "events" => Ok(Self::Jsonl),
             _ => Err(format!("unsupported data format `{s}`")),
         }
     }

@@ -63,6 +63,7 @@ impl HistoricalSource for FxCsvSource {
             ts,
             bid: row.bid,
             ask: row.ask,
+            provenance: None,
         }))
     }
 }

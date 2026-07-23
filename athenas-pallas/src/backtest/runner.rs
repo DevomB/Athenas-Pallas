@@ -727,6 +727,7 @@ fn data_format_name(format: DataFormat) -> &'static str {
         DataFormat::Auto => "auto",
         DataFormat::Ohlcv => "ohlcv",
         DataFormat::Fx => "fx",
+        DataFormat::Jsonl => "jsonl",
     }
 }
 
