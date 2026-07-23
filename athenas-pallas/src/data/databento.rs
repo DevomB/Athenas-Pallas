@@ -1,7 +1,7 @@
 //! Databento historical OHLCV fetch and CSV cache support.
 
 use std::fs::{self, File};
-use std::io::{self, BufWriter, IsTerminal, Write};
+use std::io::{self, BufWriter, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use databento::{
@@ -12,7 +12,8 @@ use databento::{
     },
     HistoricalClient,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use time::{Date, OffsetDateTime, PrimitiveDateTime};
@@ -165,6 +166,35 @@ pub struct DatabentoCacheResult {
     pub fetched: bool,
 }
 
+/// Versioned provenance for a materialized raw Databento CSV.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DatabentoCacheManifest {
+    /// Manifest schema version.
+    pub version: u32,
+    /// Databento dataset code.
+    pub dataset: String,
+    /// Requested publisher/raw input symbols.
+    pub input_symbols: Vec<String>,
+    /// Input symbology.
+    pub stype_in: String,
+    /// Databento schema.
+    pub schema: String,
+    /// Inclusive request start.
+    pub start: String,
+    /// Exclusive request end.
+    pub end: String,
+    /// Retrieval timestamp.
+    pub retrieved_at: String,
+    /// Materialized row count.
+    pub source_row_count: usize,
+    /// SHA-256 of the final raw CSV.
+    pub raw_sha256: String,
+    /// Explicit adjustment policy.
+    pub adjustment_mode: String,
+    /// Databento Rust client compatibility line.
+    pub databento_client: String,
+}
+
 /// Read-only request capability and cost inspection.
 #[derive(Clone, Debug, Serialize)]
 pub struct DatabentoInspection {
@@ -231,6 +261,11 @@ pub fn inspection_path(cfg: &DatabentoFetchConfig) -> PathBuf {
     cache_path(cfg).with_extension("inspect.json")
 }
 
+/// JSON provenance path paired with the raw CSV cache.
+pub fn manifest_path(cfg: &DatabentoFetchConfig) -> PathBuf {
+    cache_path(cfg).with_extension("manifest.json")
+}
+
 /// Resolve or fetch the cached Databento CSV.
 pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheResult> {
     if cfg.end <= cfg.start {
@@ -245,7 +280,7 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
     }
 
     let path = cache_path(cfg);
-    if !cfg.refresh_data && !cfg.estimate_only && path.is_file() {
+    if !cfg.refresh_data && !cfg.estimate_only && cached_request_is_valid(cfg, &path)? {
         return Ok(DatabentoCacheResult {
             cache_path: path,
             estimated_cost_usd: None,
@@ -277,7 +312,9 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
     }
 
     confirm_cost(cfg, estimated_cost_usd)?;
-    rt.block_on(fetch_to_cache(cfg, &path))?;
+    let source_row_count = rt.block_on(fetch_to_cache(cfg, &path))?;
+    let manifest = cache_manifest(cfg, &path, source_row_count)?;
+    write_json_atomic(&manifest_path(cfg), &manifest)?;
 
     Ok(DatabentoCacheResult {
         cache_path: path,
@@ -388,7 +425,7 @@ fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
     Ok(())
 }
 
-async fn fetch_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<()> {
+async fn fetch_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<usize> {
     let parent = path.parent().ok_or_else(|| {
         Error::Invalid(format!(
             "invalid databento cache path '{}': missing parent directory",
@@ -453,7 +490,69 @@ async fn fetch_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<()> {
             path.display()
         ))
     })?;
-    Ok(())
+    Ok(rows)
+}
+
+fn cache_manifest(
+    cfg: &DatabentoFetchConfig,
+    path: &Path,
+    source_row_count: usize,
+) -> Result<DatabentoCacheManifest> {
+    Ok(DatabentoCacheManifest {
+        version: 1,
+        dataset: cfg.dataset.clone(),
+        input_symbols: vec![cfg.symbol.clone()],
+        stype_in: cfg.stype_in.as_str().into(),
+        schema: cfg.schema.as_str().into(),
+        start: format_utc(cfg.start)?,
+        end: format_utc(cfg.end)?,
+        retrieved_at: format_utc(OffsetDateTime::now_utc())?,
+        source_row_count,
+        raw_sha256: sha256_file(path)?,
+        adjustment_mode: "raw".into(),
+        databento_client: "databento-rs 0.53.x".into(),
+    })
+}
+
+fn cached_request_is_valid(cfg: &DatabentoFetchConfig, path: &Path) -> Result<bool> {
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let manifest_path = manifest_path(cfg);
+    if !manifest_path.is_file() {
+        return Ok(false);
+    }
+    let manifest: DatabentoCacheManifest =
+        match serde_json::from_reader(File::open(&manifest_path)?) {
+            Ok(manifest) => manifest,
+            Err(_) => return Ok(false),
+        };
+    if manifest.version != 1
+        || manifest.dataset != cfg.dataset
+        || manifest.input_symbols != [cfg.symbol.as_str()]
+        || manifest.stype_in != cfg.stype_in.as_str()
+        || manifest.schema != cfg.schema.as_str()
+        || manifest.start != format_utc(cfg.start)?
+        || manifest.end != format_utc(cfg.end)?
+        || manifest.adjustment_mode != "raw"
+    {
+        return Ok(false);
+    }
+    Ok(manifest.raw_sha256 == sha256_file(path)?)
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn write_bar(writer: &mut BufWriter<File>, bar: &OhlcvMsg) -> Result<()> {
@@ -674,5 +773,24 @@ mod tests {
         };
         let error = validate_inspection(&config, &[schema], &range).unwrap_err();
         assert!(error.to_string().contains("outside entitled"));
+    }
+
+    #[test]
+    fn cache_reuse_requires_matching_manifest_and_checksum() {
+        let mut config = cfg();
+        let root = std::env::temp_dir().join(format!("pallas-databento-{}", uuid::Uuid::new_v4()));
+        config.cache_dir = root.clone();
+        let csv = cache_path(&config);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&csv, "ts,open,high,low,close,volume\n").unwrap();
+        assert!(!cached_request_is_valid(&config, &csv).unwrap());
+
+        let manifest = cache_manifest(&config, &csv, 0).unwrap();
+        write_json_atomic(&manifest_path(&config), &manifest).unwrap();
+        assert!(cached_request_is_valid(&config, &csv).unwrap());
+
+        std::fs::write(&csv, "tampered").unwrap();
+        assert!(!cached_request_is_valid(&config, &csv).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

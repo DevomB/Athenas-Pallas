@@ -140,6 +140,12 @@ the engine only converts Databento fixed-point integers to decimal CSV text. It 
 split or dividend adjustment factors. Adjustment-factor support is a separate future feature, and
 `raw_symbol` refers to input symbology rather than adjusted prices.
 
+Every paid fetch writes a versioned `*.manifest.json` beside the CSV with the exact dataset,
+symbol, symbology, schema, UTC range, retrieval time, row count, raw SHA-256, client compatibility
+line, and explicit `raw` adjustment mode. Cache reuse requires both a matching manifest and a
+matching checksum; legacy, partial, or modified cache files are fetched again instead of being
+treated as complete. Backtest reports link the manifest from `data.sources[].manifest_path`.
+
 ## Project Layout
 
 | Path | Purpose |

@@ -606,6 +606,7 @@ fn report_data(
     let mut sources = vec![DataSourceMetadata {
         instrument: cfg.instrument.clone(),
         path: Some(cfg.data_path.display().to_string()),
+        manifest_path: adjacent_manifest(&cfg.data_path),
         format: data_format_name(format).into(),
     }];
     sources.extend(cfg.extra_instruments.iter().map(|extra| {
@@ -621,6 +622,7 @@ fn report_data(
                 .data_path
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            manifest_path: extra.data_path.as_deref().and_then(adjacent_manifest),
             format: data_format_name(format).into(),
         }
     }));
@@ -630,6 +632,11 @@ fn report_data(
         start,
         end,
     }
+}
+
+fn adjacent_manifest(path: &std::path::Path) -> Option<String> {
+    let manifest = path.with_extension("manifest.json");
+    manifest.is_file().then(|| manifest.display().to_string())
 }
 
 fn report_costs(fills: &[FillRecord], state: &GlobalState) -> (Decimal, Decimal) {

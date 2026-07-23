@@ -14,7 +14,7 @@ categories = ["algorithms", "simulation"]
 
 [features]
 default = []
-databento = ["dep:databento", "dep:dotenvy", "dep:reqwest", "dep:tokio"]
+databento = ["dep:databento", "dep:dotenvy", "dep:reqwest", "dep:sha2", "dep:tokio"]
 tracing-full = ["dep:tracing-subscriber"]
 
 [dependencies]
@@ -34,6 +34,7 @@ toml = "0.8"
 databento = { version = "0.53", default-features = false, features = ["historical"], optional = true }
 dotenvy = { version = "0.15", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["default-tls"], optional = true }
+sha2 = { version = "0.10", optional = true }
 tokio = { version = "1", features = ["rt", "net", "time", "fs", "io-util"], optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
 
