@@ -11,6 +11,7 @@ impl MarketEvent {
             Self::BookL2Snapshot(snapshot) => &snapshot.instrument,
             Self::Status(status) => &status.instrument,
             Self::AuctionImbalance(imbalance) => &imbalance.instrument,
+            Self::Statistic(statistic) => &statistic.instrument,
         }
     }
 
@@ -20,6 +21,7 @@ impl MarketEvent {
             Self::BookL2Snapshot(snapshot) => snapshot.ts,
             Self::Status(status) => status.ts,
             Self::AuctionImbalance(imbalance) => imbalance.ts,
+            Self::Statistic(statistic) => statistic.ts,
         }
     }
 }

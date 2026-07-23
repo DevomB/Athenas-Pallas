@@ -151,7 +151,9 @@ impl GlobalState {
                     self.l2[ix] = Some(snapshot.clone());
                 }
             }
-            MarketEvent::Status(_) | MarketEvent::AuctionImbalance(_) => {}
+            MarketEvent::Status(_)
+            | MarketEvent::AuctionImbalance(_)
+            | MarketEvent::Statistic(_) => {}
             MarketEvent::Bar {
                 instrument,
                 ts,

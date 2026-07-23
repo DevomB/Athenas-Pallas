@@ -48,6 +48,8 @@ pub enum MarketEvent {
     Status(MarketStatusEvent),
     /// Venue auction imbalance state.
     AuctionImbalance(AuctionImbalanceEvent),
+    /// Official exchange statistic such as settlement or open interest.
+    Statistic(MarketStatisticEvent),
     /// OHLCV bar.
     Bar {
         /// Instrument.
@@ -149,6 +151,29 @@ pub struct AuctionImbalanceEvent {
     /// Venue auction status code.
     pub auction_status: u8,
     /// Feed identity and receive time.
+    pub provenance: MarketDataProvenance,
+}
+
+/// Official venue statistic kept separate from trade-built bars.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MarketStatisticEvent {
+    /// Instrument the statistic describes.
+    pub instrument: InstrumentId,
+    /// Feed event time.
+    #[serde(with = "rfc3339_compat")]
+    pub ts: OffsetDateTime,
+    /// Reference time of the statistic.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub ts_ref: Option<OffsetDateTime>,
+    /// Vendor-normalized statistic type code.
+    pub stat_type: u16,
+    /// Price value for price statistics.
+    pub price: Option<Decimal>,
+    /// Quantity value for non-price statistics.
+    pub quantity: Option<i64>,
+    /// Add/delete update action.
+    pub update_action: u8,
+    /// Feed identity and sequence.
     pub provenance: MarketDataProvenance,
 }
 

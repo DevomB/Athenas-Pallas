@@ -37,8 +37,8 @@ pub use engine::{
 };
 pub use error::{Error, Result};
 pub use events::{
-    AuctionImbalanceEvent, BookL2Snapshot, Event, MarketDataProvenance, MarketStatusEvent,
-    OrderIntentSource,
+    AuctionImbalanceEvent, BookL2Snapshot, Event, MarketDataProvenance, MarketStatisticEvent,
+    MarketStatusEvent, OrderIntentSource,
 };
 pub use risk::RiskEngine;
 pub use types::{EquityPoint, ExchangeId, InstrumentId, Side, StrategyId, Symbol, TradingState};

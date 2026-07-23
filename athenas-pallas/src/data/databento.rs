@@ -90,6 +90,8 @@ pub enum DatabentoOhlcvSchema {
     Status,
     /// Auction imbalance updates.
     Imbalance,
+    /// Official exchange statistics.
+    Statistics,
 }
 
 impl DatabentoOhlcvSchema {
@@ -105,8 +107,9 @@ impl DatabentoOhlcvSchema {
             "mbp-10" => Ok(Self::Mbp10),
             "status" => Ok(Self::Status),
             "imbalance" => Ok(Self::Imbalance),
+            "statistics" => Ok(Self::Statistics),
             other => Err(Error::Invalid(format!(
-                "unsupported databento schema '{other}'; use ohlcv-1s/1m/1h/1d, trades, mbp-1, mbp-10, status, or imbalance"
+                "unsupported databento schema '{other}'; use ohlcv-1s/1m/1h/1d, trades, mbp-1, mbp-10, status, imbalance, or statistics"
             ))),
         }
     }
@@ -123,6 +126,7 @@ impl DatabentoOhlcvSchema {
             Self::Mbp10 => Schema::Mbp10,
             Self::Status => Schema::Status,
             Self::Imbalance => Schema::Imbalance,
+            Self::Statistics => Schema::Statistics,
         }
     }
 
@@ -138,6 +142,7 @@ impl DatabentoOhlcvSchema {
             Self::Mbp10 => "mbp-10",
             Self::Status => "status",
             Self::Imbalance => "imbalance",
+            Self::Statistics => "statistics",
         }
     }
 
@@ -502,6 +507,14 @@ pub fn ensure_cached_csv(cfg: &DatabentoFetchConfig) -> Result<DatabentoCacheRes
             "adjustment policies apply only to OHLCV schemas".into(),
         ));
     }
+    if matches!(
+        cfg.stype_in,
+        DatabentoSType::Continuous | DatabentoSType::Parent
+    ) {
+        return Err(Error::Invalid(
+            "continuous/parent symbols require an explicit engine roll policy and ledger; request a dated raw symbol instead".into(),
+        ));
+    }
 
     let raw_path = raw_cache_path(cfg);
     let path = cache_path(cfg);
@@ -805,7 +818,7 @@ async fn fetch_ohlcv_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result
 }
 
 async fn fetch_events_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Result<usize> {
-    use databento::dbn::{ImbalanceMsg, Mbp10Msg, Mbp1Msg, StatusMsg, TradeMsg};
+    use databento::dbn::{ImbalanceMsg, Mbp10Msg, Mbp1Msg, StatMsg, StatusMsg, TradeMsg};
 
     let parent = path.parent().ok_or_else(|| {
         Error::Invalid(format!(
@@ -853,6 +866,7 @@ async fn fetch_events_to_cache(cfg: &DatabentoFetchConfig, path: &Path) -> Resul
         DatabentoOhlcvSchema::Mbp10 => decode!(Mbp10Msg, mbp10_event),
         DatabentoOhlcvSchema::Status => decode!(StatusMsg, status_event),
         DatabentoOhlcvSchema::Imbalance => decode!(ImbalanceMsg, imbalance_event),
+        DatabentoOhlcvSchema::Statistics => decode!(StatMsg, statistic_event),
         _ => unreachable!("OHLCV handled by fetch_ohlcv_to_cache"),
     }
     if rows == 0 {
@@ -992,6 +1006,31 @@ fn imbalance_event(
             auction_type: dbn_char(record.auction_type),
             auction_status: record.auction_status,
             provenance: feed_provenance(cfg, &record.hd, record.ts_recv, None)?,
+        }),
+    )))
+}
+
+fn statistic_event(
+    record: &databento::dbn::StatMsg,
+    cfg: &DatabentoFetchConfig,
+    instrument: &crate::types::InstrumentId,
+) -> Result<Option<crate::events::Event>> {
+    Ok(Some(crate::events::Event::Market(
+        crate::events::MarketEvent::Statistic(crate::events::MarketStatisticEvent {
+            instrument: instrument.clone(),
+            ts: event_timestamp(&record.hd)?,
+            ts_ref: optional_dbn_timestamp(record.ts_ref)?,
+            stat_type: record.stat_type,
+            price: optional_dbn_price(record.price),
+            quantity: (record.quantity != databento::dbn::UNDEF_STAT_QUANTITY)
+                .then_some(record.quantity),
+            update_action: record.update_action,
+            provenance: feed_provenance(
+                cfg,
+                &record.hd,
+                record.ts_recv,
+                Some(u64::from(record.sequence)),
+            )?,
         }),
     )))
 }
@@ -1873,5 +1912,13 @@ mod tests {
         assert_eq!(qty, Decimal::from(3));
         assert_eq!(provenance.dataset, "GLBX.MDP3");
         assert_eq!(provenance.sequence, Some(42));
+    }
+
+    #[test]
+    fn replay_rejects_implicit_vendor_roll_symbols() {
+        let mut config = cfg();
+        config.stype_in = DatabentoSType::Continuous;
+        let error = ensure_cached_csv(&config).unwrap_err();
+        assert!(error.to_string().contains("explicit engine roll policy"));
     }
 }

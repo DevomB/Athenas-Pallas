@@ -36,6 +36,8 @@ of OHLCV. Trade and top-of-book files are executable replay inputs; depth/status
 delivered to strategies with source provenance. No queue-position or market-impact claim is made.
 When an MBP-10 snapshot is current, each market order uses displayed-level VWAP and rejects size
 beyond that snapshot; this is a per-order depth bound, not persistent queue/depletion simulation.
+`--schema statistics` stores official venue statistics separately. Continuous and parent symbols
+are rejected until the engine has a configured roll rule and auditable close/open ledger.
 
 ## 2. Backtest (built-in buy-and-hold)
 

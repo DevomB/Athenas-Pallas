@@ -17,8 +17,8 @@ Current installed surface:
 - Rust binaries: `pallas-backtest`, `pallas-resample`, and `pallas-sweep`
 - Cargo features on `athenas-pallas`: `default`, `databento`, and `tracing-full`
 - Market data ingestion: local CSV/pbar/JSONL files by default, plus optional Databento OHLCV,
-  trades, MBP-1, MBP-10, status, and imbalance caches behind `--features databento`. There is no
-  installed Alpha Vantage, Binance-live, or generic fetch package in this checkout.
+  trades, MBP-1, MBP-10, status, imbalance, and statistics caches behind `--features databento`.
+  There is no installed Alpha Vantage, Binance-live, or generic fetch package in this checkout.
 
 ## Install
 
@@ -183,6 +183,11 @@ snapshot use displayed-level VWAP and reject quantities larger than the displaye
 their `simulation_model`. Snapshot liquidity is not depleted across multiple orders and no queue
 position is claimed. MBO remains unsupported until reset-aware reconstruction and a queue model are
 implemented.
+
+`--schema statistics` retains official settlement, open-interest, volume, and other statistic
+records separately from trade-built bars. The engine rejects `continuous` and `parent` input
+symbology for replay because it does not yet have an explicit roll rule/ledger; request the dated
+contract by raw symbol so no hidden roll is presented as an ordinary price series.
 
 ## Project Layout
 
